@@ -1,0 +1,55 @@
+# EAS Build ignore file
+# Learn more: https://docs.expo.dev/build-reference/build-configuration/
+
+# Dependencies
+node_modules/
+
+# Build outputs
+.expo/
+.expo/**
+dist/
+web-build/
+
+# Generated native folders
+/ios
+/android
+
+# Debug and logs
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+*.log
+
+# macOS
+.DS_Store
+
+# Local env files
+.env*.local
+.env
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# TypeScript
+*.tsbuildinfo
+
+# Temp files
+tmp/
+temp/
+
+# System files
+Thumbs.db
+desktop.ini
+
+# Original/backup files
+original_app.tsx
+*.orig
+*.bak

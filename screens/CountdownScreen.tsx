@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, StatusBar, ImageBackground, Modal, Dimensions, Animated, Pressable, Linking, Share, Alert, TextInput, ScrollView, Image as RNImage } from 'react-native';
 import Svg, { Path, SvgXml, SvgUri } from 'react-native-svg';
+import QRCode from 'react-native-qrcode-svg';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Image } from 'expo-image';
 import { BlurView } from 'expo-blur';
@@ -230,6 +231,7 @@ function CountdownMain({ navigation }: any) {
         startTime: info.startTime,
         endTime: info.endTime,
         imageUrl: primaryImage,
+        imageUrls: info.imageUrls || [],
         memo: info.memo || '',
         detail: info.detail || '',
         qrCode: info.qrCode || '',
@@ -249,6 +251,7 @@ function CountdownMain({ navigation }: any) {
         startTime: info.startTime,
         endTime: info.endTime,
         imageUrl: primaryImage || nextRecord.imageUrl,
+        imageUrls: info.imageUrls || nextRecord.imageUrls || [],
         memo: info.memo || nextRecord.memo,
         detail: info.detail || nextRecord.detail,
         qrCode: info.qrCode || nextRecord.qrCode,
@@ -330,18 +333,26 @@ function CountdownMain({ navigation }: any) {
           <View style={styles.headerButtons}>
             <TouchableOpacity
               style={styles.headerButton}
+              onPress={handleSharePress}
+            >
+              <BlurView intensity={22} tint="dark" style={styles.buttonBlur}>
+                <MaterialIcons name="open-in-new" size={22} color="#FFF" />
+              </BlurView>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.headerButton}
               onPress={() => { setIsCreatingNewLive(false); setShowEditScreen(true); }}
             >
-              <BlurView intensity={20} tint="dark" style={styles.buttonBlur}>
-                <FontAwesome name="sliders" size={20} color="#FFF" />
+              <BlurView intensity={22} tint="dark" style={styles.buttonBlur}>
+                <FontAwesome name="sliders" size={22} color="#FFF" />
               </BlurView>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.headerButton}
               onPress={() => navigation.navigate('Settings')}
             >
-              <BlurView intensity={20} tint="dark" style={styles.buttonBlur}>
-                <MaterialIcons name="settings" size={20} color="#FFF" />
+              <BlurView intensity={22} tint="dark" style={styles.buttonBlur}>
+                <MaterialIcons name="settings" size={22} color="#FFF" />
               </BlurView>
             </TouchableOpacity>
           </View>
@@ -376,33 +387,8 @@ function CountdownMain({ navigation }: any) {
           )}
         </View>
 
-        {/* 機能ボタン */}
-        <View style={styles.featureButtonsContainer}>
-          <TouchableOpacity style={[styles.featureButton, {position:'absolute', top: -15, left: 20, transform: [{ rotate: '-3deg' }]}]} onPress={handleMapPress}>
-            <Image
-              source={require('../assets/button-icon/map.png')}
-              style={styles.featureButtonIcon}
-              contentFit="contain"
-            />
-            <Text style={styles.featureButtonLabel}>#会場マップ</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.featureButton, {position:'absolute', top: 10, left: 140, transform: [{ rotate: '3deg' }]}]} onPress={handleChecklistPress}>
-            <Image
-              source={require('../assets/button-icon/prepare.png')}
-              style={styles.featureButtonIcon}
-              contentFit="contain"
-            />
-            <Text style={styles.featureButtonLabel}>#持ち物リスト</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.featureButton, {position:'absolute', top: -15, left: 250, transform: [{ rotate: '-3deg' }]}]} onPress={handleSharePress}>
-            <Image
-              source={require('../assets/button-icon/share.png')}
-              style={styles.featureButtonIcon}
-              contentFit="contain"
-            />
-            <Text style={styles.featureButtonLabel}>#参戦シェア</Text>
-          </TouchableOpacity>
-        </View>
+        {/* 空白スペース - 代替案検討中 */}
+        <View style={{ height: 100 }} />
 
         {/* チケットカード */}
         <View style={[styles.ticketHost, { height: cardHeight + 40 }]}>
@@ -412,11 +398,22 @@ function CountdownMain({ navigation }: any) {
             </Svg>
             <View style={styles.ticketContent} pointerEvents="box-none">
               <View style={styles.qrBlock}>
-                <Image
-                  source={require('../assets/no-qr.png')}
-                  style={{ width: qrSize, height: qrSize, resizeMode: 'contain' }}
-                />
-                <Text style={styles.qrText}>M3M0R135-N3V3R-D13</Text>
+                {record.qrCode ? (
+                  <QRCode
+                    value={record.qrCode}
+                    size={qrSize}
+                    color="#000"
+                    backgroundColor="#fff"
+                  />
+                ) : (
+                  <Image
+                    source={require('../assets/no-qr.png')}
+                    style={{ width: qrSize, height: qrSize, resizeMode: 'contain' }}
+                  />
+                )}
+                <Text style={styles.qrText}>
+                  {record.qrCode ? 'M3M0RY-N3V3R-D13' : 'NO DATA'}
+                </Text>
               </View>
 
               {record.imageUrl ? (
@@ -493,6 +490,7 @@ function CountdownMain({ navigation }: any) {
             startTime: nextRecord.startTime || '18:00',
             endTime: nextRecord.endTime || '20:00',
             imageUrl: nextRecord.imageUrl,
+            imageUrls: nextRecord.imageUrls,
             qrCode: nextRecord.qrCode,
             memo: nextRecord.memo,
             detail: nextRecord.detail,
@@ -661,7 +659,7 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     backgroundColor: 'transparent',
     overflow: 'hidden',
-    paddingHorizontal: 5,
+    paddingHorizontal: 4,
     paddingVertical: 1,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
@@ -675,8 +673,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   buttonBlur: {
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 14,
     borderRadius: 35,
   },
   countdownDisplayContainer: {

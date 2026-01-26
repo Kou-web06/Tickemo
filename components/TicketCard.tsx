@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
 import { Image } from 'expo-image';
 import Svg, { Path, Rect, Defs, Pattern, Use, Image as SvgImage } from 'react-native-svg';
+import QRCode from 'react-native-qrcode-svg';
 import { ChekiRecord } from '../contexts/RecordsContext';
 
 interface TicketCardProps {
@@ -161,11 +162,19 @@ export const TicketCard: React.FC<TicketCardProps> = ({ record, width, isAnimati
       >
         {/* QR Code in center-left */}
         <View style={[styles.qrContainer, { width: imageSize * 1.2, height: imageSize * 1.2 }]}>
-          {/* QRコードが無い場合は画像を表示 */}
-          <Image
-            source={require('../assets/no-qr.png')}
-            style={{ width: imageSize, height: imageSize, resizeMode: 'contain' }}
-          />
+          {record.qrCode ? (
+            <QRCode
+              value={record.qrCode}
+              size={imageSize}
+              color="#000"
+              backgroundColor="#fff"
+            />
+          ) : (
+            <Image
+              source={require('../assets/no-qr.png')}
+              style={{ width: imageSize, height: imageSize, resizeMode: 'contain' }}
+            />
+          )}
         </View>
 
         {/* Text info on the right */}

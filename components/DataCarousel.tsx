@@ -51,7 +51,7 @@ export default function DataCarousel({ children }: DataCarouselProps) {
             style={[
               styles.dot,
               {
-                backgroundColor: activeIndex === index ? '#FFFFFF' : '#D0D0D0',
+                backgroundColor: activeIndex === index ? '#535353' : '#D0D0D0',
               },
             ]}
           />

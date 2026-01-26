@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Image, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Image, Alert, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -303,6 +303,10 @@ export default function SettingsScreen({ navigation }: any) {
                     onPress={() => {
                       if (item.id === 'delete') {
                         handleAccountDelete();
+                      } else if (item.id === 'sns') {
+                        Linking.openURL('https://x.com/tickemo_app').catch(() => {
+                          Alert.alert('エラー', 'URLを開けませんでした');
+                        });
                       }
                     }}
                   >

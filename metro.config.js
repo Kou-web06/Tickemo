@@ -17,8 +17,9 @@ config.resolver.extraNodeModules = {
 };
 
 // Prefer compiled entry points over "react-native" field (which points to TS src)
-config.resolver.resolverMainFields = ['module', 'main', 'react-native'];
-config.resolver.mainFields = ['module', 'main', 'react-native'];
+// But keep react-native first for native components compatibility
+config.resolver.resolverMainFields = ['react-native', 'browser', 'main'];
+config.resolver.mainFields = ['react-native', 'browser', 'main'];
 
 // Ensure .cjs is handled (some compiled deps use it)
 if (!config.resolver.sourceExts.includes('cjs')) {

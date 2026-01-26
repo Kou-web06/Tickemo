@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { Image } from 'expo-image';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { theme } from '../theme';
@@ -25,7 +25,8 @@ interface LiveInfo {
   seat?: string;
   startTime: string;
   endTime: string;
-  imageUrl?: string; // 単一画像
+  imageUrl?: string; // ジャケット写真（最初の画像）
+  imageUrls?: string[]; // 最大6枚の画像
   qrCode?: string;
   memo?: string;
   detail?: string;
@@ -57,27 +58,47 @@ export default function LiveEditScreen({ initialData, onSave, onCancel }: Props)
   const [seat, setSeat] = useState(initialData?.seat || '');
   const [startTimeHour, setStartTimeHour] = useState(parseHour(initialData?.startTime, 18));
   const [endTimeHour, setEndTimeHour] = useState(parseHour(initialData?.endTime, 20));
-  const [imageUrl, setImageUrl] = useState<string>(initialData?.imageUrl || '');
+  const [imageUrls, setImageUrls] = useState<string[]>(initialData?.imageUrls || (initialData?.imageUrl ? [initialData.imageUrl] : []));
   const [qrCode, setQrCode] = useState(initialData?.qrCode || '');
   const [memo, setMemo] = useState(initialData?.memo || '');
   const [detail, setDetail] = useState(initialData?.detail || '');
   const [showDatePicker, setShowDatePicker] = useState(false);
 
   const handlePickImage = async () => {
+    if (imageUrls.length >= 6) {
+      Alert.alert('画像は6枚まで', '最大6枚まで登録できます');
+      return;
+    }
+
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
-      aspect: [16, 9],
+      aspect: [1, 1],
       quality: 1,
     });
 
     if (!result.canceled) {
-      setImageUrl(result.assets[0].uri);
+      setImageUrls([...imageUrls, result.assets[0].uri]);
     }
   };
 
-  const handleRemoveImage = () => {
-    setImageUrl('');
+  const handleReplaceImage = async (index: number) => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 1,
+    });
+
+    if (!result.canceled) {
+      const newUrls = [...imageUrls];
+      newUrls[index] = result.assets[0].uri;
+      setImageUrls(newUrls);
+    }
+  };
+
+  const handleRemoveImage = (index: number) => {
+    setImageUrls(imageUrls.filter((_, i) => i !== index));
   };
 
   const handleSave = () => {
@@ -86,7 +107,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel }: Props)
       return;
     }
 
-    const primaryImage = imageUrl || '';
+    const primaryImage = imageUrls.length > 0 ? imageUrls[0] : '';
 
     onSave({
       name,
@@ -97,6 +118,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel }: Props)
       startTime: `${String(startTimeHour).padStart(2, '0')}:00`,
       endTime: `${String(endTimeHour).padStart(2, '0')}:00`,
       imageUrl: primaryImage,
+      imageUrls,
       qrCode,
       memo,
       detail,
@@ -123,33 +145,38 @@ export default function LiveEditScreen({ initialData, onSave, onCancel }: Props)
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* 画像（単一） */}
+        {/* 画像（最大6枚） */}
         <View style={styles.section}>
-          <Text style={styles.sectionLabel}>画像</Text>
-          <Text style={styles.caption}>1枚のみ選択できます</Text>
-          <View style={{ flexDirection: 'row', gap: 14, paddingVertical: 6 }}>
-            {imageUrl ? (
-              <View style={styles.imageCard}>
-                <Image source={{ uri: imageUrl }} style={styles.imagePreview} contentFit="cover" />
-                <View style={styles.imageCardFooter}>
-                  <Text style={[styles.imageBadge, styles.imageBadgePrimary]}>選択中</Text>
-                  <View style={styles.imageActions}>
-                    <TouchableOpacity style={styles.actionPill} onPress={handlePickImage}>
-                      <Text style={styles.actionPillText}>差し替え</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.removeButton} onPress={handleRemoveImage}>
-                      <Ionicons name="close" size={16} color="#fff" />
-                    </TouchableOpacity>
+          <Text style={styles.sectionLabel}>ライブの思い出</Text>
+          <Text style={styles.caption}>最大6枚まで選択できます（1枚目がジャケット写真になります）</Text>
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: 14, paddingVertical: 6 }}
+          >
+            {imageUrls.map((url, index) => (
+              <View key={index} style={styles.imageCard}>
+                <Image source={{ uri: url }} style={styles.imagePreview} contentFit="cover" />
+                {index === 0 && (
+                  <View style={styles.jacketBadge}>
+                    <MaterialIcons name="art-track" size={18} color="#D6007A" />
                   </View>
-                </View>
+                )}
+                <TouchableOpacity 
+                  style={styles.removeButtonOverlay} 
+                  onPress={() => handleRemoveImage(index)}
+                >
+                  <Ionicons name="close" size={16} color="#fff" />
+                </TouchableOpacity>
               </View>
-            ) : (
+            ))}
+            {imageUrls.length < 6 && (
               <TouchableOpacity style={styles.addImageCard} onPress={handlePickImage}>
-                <Ionicons name="add" size={28} color="#999" />
-                <Text style={styles.addImageText}>画像を追加</Text>
+                <Ionicons name="add" size={60} color="#999" />
+                <Text style={styles.addImageSub}>{imageUrls.length}/6</Text>
               </TouchableOpacity>
             )}
-          </View>
+          </ScrollView>
         </View>
 
         {/* ライブ名 */}
@@ -430,6 +457,7 @@ const styles = StyleSheet.create({
   },
   imageCard: {
     width: 140,
+    height: 140,
     borderRadius: 14,
     backgroundColor: '#FFFFFF',
     shadowColor: '#000',
@@ -438,56 +466,35 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
     overflow: 'hidden',
+    position: 'relative',
   },
   imagePreview: {
     width: '100%',
-    height: 140,
+    height: '100%',
   },
-  imageCardFooter: {
-    padding: 10,
-    gap: 8,
-  },
-  imageBadge: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 10,
-    backgroundColor: '#EEE',
-    color: '#555',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  imageBadgePrimary: {
-    backgroundColor: '#FFE7F3',
-    color: '#D6007A',
-  },
-  imageActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  actionPill: {
-    paddingHorizontal: 10,
+  jacketBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    paddingHorizontal: 6,
     paddingVertical: 6,
-    borderRadius: 10,
-    backgroundColor: '#F2F2F2',
+    borderRadius: 18,
+    backgroundColor: '#FFE7F3',
   },
-  actionPillText: {
-    fontSize: 12,
-    color: '#555',
-    fontWeight: '600',
-  },
-  removeButton: {
+  removeButtonOverlay: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#FF3B30',
+    backgroundColor: '#fb6f67',
     alignItems: 'center',
     justifyContent: 'center',
   },
   addImageCard: {
     width: 140,
-    height: 188,
+    height: 140,
     borderRadius: 14,
     borderWidth: 1,
     borderStyle: 'dashed',
@@ -499,10 +506,10 @@ const styles = StyleSheet.create({
   addImageText: {
     fontSize: 14,
     color: '#777',
-    fontWeight: '600',
+    fontWeight: '700',
   },
   addImageSub: {
-    fontSize: 11,
+    fontSize: 12,
     color: '#999',
   },
   dateButton: {

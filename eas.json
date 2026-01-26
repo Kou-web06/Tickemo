@@ -6,7 +6,18 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "cache": {
+        "key": "v1",
+        "paths": []
+      },
+      "ios": {
+        "resourceClass": "m-medium"
+      },
+      "env": {
+        "EXPO_USE_APPLE_SILICON": "1",
+        "RCT_NEW_ARCH_ENABLED": "0"
+      }
     },
     "preview": {
       "distribution": "internal"

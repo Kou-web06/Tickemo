@@ -10,6 +10,7 @@ export interface ChekiRecord {
   endTime?: string;    // DBカラム: end_time
   imagePath?: string;  // DBカラム: image_path (Storageのパス)
   imageUrl?: string;   // 表示用の一時的な署名付きURL (DBには保存しない・先頭画像)
+  imageUrls?: string[]; // 最大6枚の画像URL配列
   memo: string;
   detail?: string;     // DBカラム: setlist
   qrCode?: string;     // DBカラム: qr_code_data

@@ -5,6 +5,7 @@ import { Image } from 'expo-image';
 import { FontAwesome, Ionicons, Octicons, MaterialIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import Svg, { Path, Rect, Defs, Pattern, Use, Image as SvgImage } from 'react-native-svg';
+import QRCode from 'react-native-qrcode-svg';
 import { ChekiRecord, useRecords } from '../contexts/RecordsContext';
 import LiveEditScreen from '../screens/LiveEditScreen';
 import ShareImageGenerator from './ShareImageGenerator';
@@ -95,9 +96,11 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
       liveName: info.name,
       date: formatDate(info.date),
       venue: info.venue,
+      seat: info.seat,
       startTime: info.startTime,
       endTime: info.endTime,
       imageUrl: info.imageUrl || record.imageUrl,
+      imageUrls: info.imageUrls || record.imageUrls || [],
       memo: info.memo || record.memo,
       detail: info.detail || record.detail,
       qrCode: info.qrCode || record.qrCode,
@@ -219,12 +222,22 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
               <View style={styles.contentContainer} pointerEvents="box-none">
                 {/* QR Code section at top */}
                 <View style={styles.qrContainer}>
-                  {/* QRコードが無い場合は画像を表示 */}
-                  <Image
-                    source={require('../assets/no-qr.png')}
-                    style={{ width: qrSize, height: qrSize, resizeMode: 'contain' }}
-                  />
-                  <Text style={styles.qrText}>M3M0R135-N3V3R-D13</Text>
+                  {record.qrCode ? (
+                    <QRCode
+                      value={record.qrCode}
+                      size={qrSize}
+                      color="#000"
+                      backgroundColor="#fff"
+                    />
+                  ) : (
+                    <Image
+                      source={require('../assets/no-qr.png')}
+                      style={{ width: qrSize, height: qrSize, resizeMode: 'contain' }}
+                    />
+                  )}
+                  <Text style={styles.qrText}>
+                    {record.qrCode ? 'M3M0RY-N3V3R-D13' : 'NO DATA'}
+                  </Text>
                 </View>
 
                 {/* Jacket image overlay on QR */}
@@ -303,9 +316,11 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
             artist: record.artist,
             date: new Date(record.date.replace(/\./g, '-')),
             venue: record.venue || '',
+            seat: record.seat,
             startTime: record.startTime || '18:00',
             endTime: record.endTime || '20:00',
             imageUrl: record.imageUrl,
+            imageUrls: record.imageUrls,
             qrCode: record.qrCode,
             memo: record.memo,
             detail: record.detail,

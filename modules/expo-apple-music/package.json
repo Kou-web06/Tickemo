@@ -1,0 +1,14 @@
+{
+  "name": "expo-apple-music",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "scripts": {},
+  "dependencies": {},
+  "peerDependencies": {
+    "expo": "*",
+    "expo-modules-core": "*"
+  },
+  "devDependencies": {
+    "expo-modules-core": "~2.1.4"
+  }
+}

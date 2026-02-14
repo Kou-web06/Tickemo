@@ -6,9 +6,15 @@ import { FontAwesome, Ionicons, Octicons, MaterialIcons } from '@expo/vector-ico
 import { BlurView } from 'expo-blur';
 import Svg, { Path, Rect, Defs, Pattern, Use, Image as SvgImage } from 'react-native-svg';
 import QRCode from 'react-native-qrcode-svg';
+import TextTicker from 'react-native-text-ticker';
 import { ChekiRecord, useRecords } from '../contexts/RecordsContext';
 import LiveEditScreen from '../screens/LiveEditScreen';
+import { buildLiveAlbumName, deleteImage, normalizeStoredImageUri, uploadMultipleImages } from '../lib/imageUpload';
+import { saveSetlist, getSetlist } from '../lib/setlistDb';
 import ShareImageGenerator from './ShareImageGenerator';
+import { PhotoStack } from './PhotoStack';
+import type { SetlistItem } from '../types/setlist';
+import { NO_IMAGE_URI, useResolvedImageUri } from '../hooks/useResolvedImageUri';
 
 interface TicketDetailProps {
   record: ChekiRecord;
@@ -18,36 +24,49 @@ interface TicketDetailProps {
 interface LiveInfo {
   name: string;
   artist: string;
+  artistImageUrl?: string;
   date: Date;
   venue: string;
+  seat?: string;
   startTime: string;
   endTime: string;
   imageUrl?: string;
+  imageUrls?: string[];
   qrCode?: string;
   memo?: string;
   detail?: string;
+  setlistSongs?: SetlistItem[];
 }
 
 export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) => {
   const { updateRecord, deleteRecord } = useRecords();
   const [showEditScreen, setShowEditScreen] = useState(false);
   const [showShareGenerator, setShowShareGenerator] = useState(false);
-  const [isTitleTruncated, setIsTitleTruncated] = useState(false);
+  const [setlistSongs, setSetlistSongs] = useState<SetlistItem[]>([]);
+  const pendingCloseAfterSave = useRef(false);
   const width = 330;
   const height = 852;
   const qrSize = 155;
+  const titleTickerWidth = width - 90;
+  const liveName = record.liveName || '-';
+  const isLongName = liveName.length >= 8;
+  const coverUri = useResolvedImageUri(record.imageUrls?.[0], record.imageAssetIds?.[0]);
 
   const translateY = useRef(new Animated.Value(1000)).current;
   // jacketTranslateXはtranslateYからinterpolateで算出
   const lastOffset = useRef(0);
 
-  const handleTitleLayout = (event: any) => {
-    const { lines } = event.nativeEvent;
-    if (lines && lines.length > 1) {
-      setIsTitleTruncated(true);
-    } else {
-      setIsTitleTruncated(false);
-    }
+  // スライドアウトアニメーション付きで閉じる共通メソッド
+  const handleClose = () => {
+    Animated.timing(translateY, {
+      toValue: 1000,
+      duration: 300,
+      useNativeDriver: true,
+    }).start(() => {
+      if (onBack) {
+        onBack();
+      }
+    });
   };
 
   const handleDeletePress = () => {
@@ -64,9 +83,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
           text: '削除',
           onPress: () => {
             deleteRecord(record.id);
-            if (onBack) {
-              onBack();
-            }
+            handleClose();
           },
           style: 'destructive',
         },
@@ -74,7 +91,15 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
     );
   };
 
-  const handleEditPress = () => {
+  const handleEditPress = async () => {
+    // セットリストを読み込む
+    try {
+      const songs = await getSetlist(record.id);
+      setSetlistSongs(songs);
+    } catch (error) {
+      console.error('[TicketDetail] セットリスト読み込みエラー:', error);
+      setSetlistSongs([]);
+    }
     setShowEditScreen(true);
   };
 
@@ -82,33 +107,116 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
     setShowShareGenerator(true);
   };
 
-  const handleSaveLiveInfo = (info: LiveInfo) => {
-    const formatDate = (date: Date) => {
-      const year = date.getFullYear();
-      const month = `${date.getMonth() + 1}`.padStart(2, '0');
-      const day = `${date.getDate()}`.padStart(2, '0');
-      return `${year}.${month}.${day}`;
-    };
+  const handleSaveLiveInfo = async (info: LiveInfo) => {
+    try {
+      const formatDate = (date: Date) => {
+        const year = date.getFullYear();
+        const month = `${date.getMonth() + 1}`.padStart(2, '0');
+        const day = `${date.getDate()}`.padStart(2, '0');
+        return `${year}.${month}.${day}`;
+      };
 
-    const updatedRecord: ChekiRecord = {
-      ...record,
-      artist: info.artist,
-      liveName: info.name,
-      date: formatDate(info.date),
-      venue: info.venue,
-      seat: info.seat,
-      startTime: info.startTime,
-      endTime: info.endTime,
-      imageUrl: info.imageUrl || record.imageUrl,
-      imageUrls: info.imageUrls || record.imageUrls || [],
-      memo: info.memo || record.memo,
-      detail: info.detail || record.detail,
-      qrCode: info.qrCode || record.qrCode,
-    };
-    updateRecord(record.id, updatedRecord);
-    setShowEditScreen(false);
-    if (onBack) {
-      onBack();
+      // ユーザーIDを取得
+      const userId = 'local-user';
+
+      // 新しい画像をアップロード（file:// で始まる新規選択画像のみ）
+      let uploadedImageUrls: string[] = [];
+      let uploadedImageAssetIds: Array<string | null> = [];
+      if (info.imageUrls && info.imageUrls.length > 0) {
+        // 既存 imageAssetIds をサイズに合わせて確保（不足分は null でパディング）
+        const recordAssetIds = record.imageAssetIds || [];
+        const recordAssetIdsWithPadding = Array.from({ length: record.imageUrls?.length || 0 }, 
+          (_, i) => recordAssetIds[i] ?? null
+        );
+        
+        const existingAssetIdsByUrl = new Map(
+          (record.imageUrls || []).map((url, index) => [normalizeStoredImageUri(url), recordAssetIdsWithPadding[index]])
+        );
+        const normalizedUrls = info.imageUrls.map((uri: string) => normalizeStoredImageUri(uri));
+        const existingUrls = normalizedUrls.filter((uri: string) => !uri.startsWith('file://'));
+        uploadedImageUrls.push(...existingUrls);
+        uploadedImageAssetIds.push(...existingUrls.map((uri) => existingAssetIdsByUrl.get(uri) ?? null));
+        
+        // 新しくアップロードされた画像を後に追加
+        const newImageFileUris = normalizedUrls.filter((uri: string) => uri.startsWith('file://'));
+        if (newImageFileUris.length > 0) {
+          // console.log('[TicketDetail] 複数画像をアップロード中');
+          const albumName = buildLiveAlbumName(info.date, info.name);
+          const totalImageCount = info.imageUrls?.length ?? record.imageUrls?.length ?? 0;
+          const previousImageCount = record.imageUrls?.length ?? 0;
+          const uploadResult = await uploadMultipleImages(
+            newImageFileUris,
+            userId,
+            record.id,
+            albumName,
+            previousImageCount,
+            totalImageCount
+          );
+          uploadedImageUrls.push(...uploadResult.imageUrls);
+          uploadedImageAssetIds.push(...uploadResult.assetIds);
+          // console.log('[TicketDetail] アップロード完了:', uploadedImageUrls);
+          // アップロード後、URLがアクセス可能になるまで少し待機
+          await new Promise(resolve => setTimeout(resolve, 1200));
+        }
+      }
+
+      // 新しくアップロードされた画像があるかを確認
+      const newlyUploadedImages = uploadedImageUrls.filter((uri: string) => !uri.startsWith('file://'));
+      
+      // 古い画像をStorageから削除（新しいアップロードがある場合のみ）
+      if (newlyUploadedImages.length > 0 && record.imageUrls?.length) {
+        // console.log('[TicketDetail] 古い画像を削除中');
+        for (const oldImageUrl of record.imageUrls) {
+          try {
+            await deleteImage(oldImageUrl);
+          } catch (error) {
+            // console.warn('[TicketDetail] 画像削除エラー:', error);
+            // 削除失敗しても続行
+          }
+        }
+        // console.log('[TicketDetail] 古い画像削除完了');
+      }
+
+      // imageUrls と imageAssetIds のサイズを確保（同じ長さにする）
+      const finalImageUrls = uploadedImageUrls.length > 0 ? uploadedImageUrls : (info.imageUrls || record.imageUrls || []);
+      const finalImageAssetIds = Array.from({ length: finalImageUrls.length }, 
+        (_, i) => uploadedImageAssetIds[i] ?? null
+      );
+
+      const updatedRecord: ChekiRecord = {
+        ...record,
+        artist: info.artist,
+        artistImageUrl: info.artistImageUrl || record.artistImageUrl,
+        liveName: info.name,
+        date: formatDate(info.date),
+        venue: info.venue,
+        seat: info.seat,
+        startTime: info.startTime,
+        endTime: info.endTime,
+        imageUrls: finalImageUrls,
+        imageAssetIds: finalImageAssetIds,
+        memo: info.memo || record.memo,
+        detail: info.detail || record.detail,
+        qrCode: info.qrCode || record.qrCode,
+      };
+      await updateRecord(record.id, updatedRecord);
+      
+      // セットリストを保存（既存を削除して新規挿入）
+      if (info.setlistSongs) {
+        try {
+          await saveSetlist(record.id, info.setlistSongs);
+          console.log('[TicketDetail] setlist 保存完了');
+        } catch (setlistError) {
+          console.error('[TicketDetail] setlist保存エラー（スキップ）:', setlistError);
+          // セットリストの保存に失敗してもレコードは更新済みなので続行
+        }
+      }
+
+      pendingCloseAfterSave.current = true;
+    } catch (error) {
+      console.error('[TicketDetail] ライブ情報保存エラー:', error);
+      Alert.alert('エラー', 'ライブ情報の保存に失敗しました。もう一度お試しください。');
+      throw error;
     }
   };
 
@@ -159,8 +267,13 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
 
   return (
     <>
-      <TouchableWithoutFeedback onPress={onBack}>
+      <TouchableWithoutFeedback onPress={handleClose}>
         <View style={{ flex: 1 }}>
+          {/* PhotoStack: 写真の山 */}
+          {record.imageUrls && record.imageUrls.length > 0 && (
+            <PhotoStack photos={record.imageUrls} assetIds={record.imageAssetIds} translateY={translateY} />
+          )}
+
           {/* トップバー（ダイナミックアイランド風） */}
           <Animated.View 
             style={[
@@ -178,7 +291,20 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
           >
             <TouchableOpacity style={styles.topBarButton} onPress={handleSharePress}>
               <BlurView intensity={10} tint="dark" style={styles.topBarButtonBlur}>
-                <MaterialIcons name="open-in-new" size={26} color="#FFF" />
+                <Svg width={24} height={24} viewBox="0 0 24 24" fill="#fff">
+                  <Path
+                    d="M12 22.75C6.07 22.75 1.25 17.93 1.25 12C1.25 6.07 6.07 1.25 12 1.25C12.41 1.25 12.75 1.59 12.75 2C12.75 2.41 12.41 2.75 12 2.75C6.9 2.75 2.75 6.9 2.75 12C2.75 17.1 6.9 21.25 12 21.25C17.1 21.25 21.25 17.1 21.25 12C21.25 11.59 21.59 11.25 22 11.25C22.41 11.25 22.75 11.59 22.75 12C22.75 17.93 17.93 22.75 12 22.75Z"
+                    fill="white"
+                  />
+                  <Path
+                    d="M12.9999 11.7502C12.8099 11.7502 12.6199 11.6802 12.4699 11.5302C12.1799 11.2402 12.1799 10.7602 12.4699 10.4702L20.6699 2.27023C20.9599 1.98023 21.4399 1.98023 21.7299 2.27023C22.0199 2.56023 22.0199 3.04023 21.7299 3.33023L13.5299 11.5302C13.3799 11.6802 13.1899 11.7502 12.9999 11.7502Z"
+                    fill="white"
+                  />
+                  <Path
+                    d="M22 7.58C21.59 7.58 21.25 7.24 21.25 6.83V2.75H17.17C16.76 2.75 16.42 2.41 16.42 2C16.42 1.59 16.76 1.25 17.17 1.25H22C22.41 1.25 22.75 1.59 22.75 2V6.83C22.75 7.24 22.41 7.58 22 7.58Z"
+                    fill="white"
+                  />
+                </Svg>
               </BlurView>
             </TouchableOpacity>
 
@@ -232,7 +358,8 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
                   ) : (
                     <Image
                       source={require('../assets/no-qr.png')}
-                      style={{ width: qrSize, height: qrSize, resizeMode: 'contain' }}
+                      style={{ width: qrSize, height: qrSize }}
+                      contentFit="contain"
                     />
                   )}
                   <Text style={styles.qrText}>
@@ -260,7 +387,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
                 >
                   <View style={styles.jacketOverlay}>
                     <Image
-                      source={{ uri: record.imageUrl }}
+                      source={{ uri: coverUri ?? NO_IMAGE_URI }}
                       style={styles.jacketImage}
                       contentFit="cover"
                     />
@@ -269,13 +396,27 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
 
                 {/* Info section */}
                 <ScrollView style={styles.infoScroll} showsVerticalScrollIndicator={false} pointerEvents="auto">
-                  <View style={styles.infoSection}>
-                    <Text 
-                      style={[styles.mainTitle, (record.liveName || '').length >= 15 && {fontSize: 22}]}
-                      onTextLayout={handleTitleLayout}
-                    >
-                      {isTitleTruncated ? `${(record.liveName || '-').substring(0, 10)}\n${(record.liveName || '-').substring(10)}` : (record.liveName || '-')}
-                    </Text>
+                  <View style={styles.infoSection} pointerEvents="box-none">
+                    {isLongName ? (
+                      <View style={[styles.mainTitleWrapper, { width: titleTickerWidth }]}>
+                        <TextTicker
+                          style={[styles.mainTitleText, { fontSize: 28 }]}
+                          duration={liveName.length * 300}
+                          loop
+                          bounce={false}
+                          repeatSpacer={50}
+                          marqueeDelay={1000}
+                        >
+                          {liveName}
+                        </TextTicker>
+                      </View>
+                    ) : (
+                      <View style={[styles.mainTitleWrapper, { width: titleTickerWidth }]}>
+                        <Text style={styles.mainTitleText} numberOfLines={1}>
+                          {liveName}
+                        </Text>
+                      </View>
+                    )}
                     <Text style={[styles.artistName, (record.liveName || '').length >= 12 && {top: 75}]}>
                       {record.artist || '-'} 
                     </Text>
@@ -287,7 +428,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <Text style={[styles.infoLabel, { width: 100, textAlign: 'right' }]}>START</Text>
-                        <Text style={[styles.infoValue, { flex: 1, textAlign: 'left' }]}>{record.startTime || '-'}</Text>
+                        <Text style={[styles.infoValue, { flex: 1, textAlign: 'left' }]}>{record.startTime || '18:00'}</Text>
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <Text style={[styles.infoLabel, { width: 100, textAlign: 'right' }]}>VENUE</Text>
@@ -314,19 +455,28 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
           initialData={{
             name: record.liveName,
             artist: record.artist,
+            artistImageUrl: record.artistImageUrl,
             date: new Date(record.date.replace(/\./g, '-')),
             venue: record.venue || '',
             seat: record.seat,
             startTime: record.startTime || '18:00',
             endTime: record.endTime || '20:00',
-            imageUrl: record.imageUrl,
             imageUrls: record.imageUrls,
             qrCode: record.qrCode,
             memo: record.memo,
             detail: record.detail,
+            setlistSongs: setlistSongs,
           }}
           onSave={handleSaveLiveInfo}
-          onCancel={() => setShowEditScreen(false)}
+            onCancel={async () => {
+              const shouldCloseDetail = pendingCloseAfterSave.current;
+              pendingCloseAfterSave.current = false;
+              setShowEditScreen(false);
+              if (shouldCloseDetail) {
+                await new Promise(resolve => setTimeout(resolve, 400));
+                handleClose();
+              }
+            }}
         />
       </Modal>
 
@@ -355,6 +505,7 @@ export const TicketDetailOld: React.FC<TicketDetailProps> = ({ record, onBack })
   const width = 330;
   const height = 852;
   const qrSize = 155;
+  const coverUri = useResolvedImageUri(record.imageUrls?.[0], record.imageAssetIds?.[0]);
 
   const translateY = useRef(new Animated.Value(1000)).current;
   // jacketTranslateXはtranslateYからinterpolateで算出
@@ -438,7 +589,8 @@ export const TicketDetailOld: React.FC<TicketDetailProps> = ({ record, onBack })
                 {/* QRコードが無い場合は画像を表示 */}
                 <Image
                   source={require('../assets/no-qr.png')}
-                  style={{ width: qrSize, height: qrSize, resizeMode: 'contain' }}
+                  style={{ width: qrSize, height: qrSize }}
+                  contentFit="contain"
                 />
                 <Text style={styles.qrText}>M3M0R135-N3V3R-D13</Text>
               </View>
@@ -463,7 +615,7 @@ export const TicketDetailOld: React.FC<TicketDetailProps> = ({ record, onBack })
               >
                 <View style={styles.jacketOverlay}>
                   <Image
-                    source={{ uri: record.imageUrl }}
+                      source={{ uri: coverUri ?? NO_IMAGE_URI }}
                     style={styles.jacketImage}
                     contentFit="cover"
                   />
@@ -487,7 +639,7 @@ export const TicketDetailOld: React.FC<TicketDetailProps> = ({ record, onBack })
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <Text style={[styles.infoLabel, { width: 100, textAlign: 'right' }]}>START</Text>
-                        <Text style={[styles.infoValue, { flex: 1, textAlign: 'left' }]}>{record.startTime || '-'}</Text>
+                      <Text style={[styles.infoValue, { flex: 1, textAlign: 'left' }]}>{record.startTime || '18:00'}</Text>
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                       <Text style={[styles.infoLabel, { width: 100, textAlign: 'right' }]}>VENUE</Text>
@@ -604,10 +756,21 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 10,
     left: 70,
-    fontSize: 28,
+    fontSize: 30,
     fontWeight: '900',
     color: '#000',
     marginBottom: 5,
+  },
+  mainTitleWrapper: {
+    position: 'absolute',
+    top: 10,
+    left: 70,
+    height: 36,
+  },
+  mainTitleText: {
+    fontSize: 28,
+    fontWeight: '900',
+    color: '#000',
   },
   artistName: {
     position: 'absolute',

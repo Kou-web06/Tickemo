@@ -12,17 +12,18 @@ const { width } = Dimensions.get('window');
 const CARD_WIDTH = width - 40; // padding を考慮
 
 interface DataCarouselProps {
-  children: React.ReactNode[];
+  children: React.ReactNode | React.ReactNode[];
 }
 
 export default function DataCarousel({ children }: DataCarouselProps) {
   const [activeIndex, setActiveIndex] = useState(0);
   const scrollViewRef = useRef<ScrollView>(null);
+  const totalSlides = React.Children.count(children);
 
   const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const contentOffsetX = event.nativeEvent.contentOffset.x;
     const currentIndex = Math.round(contentOffsetX / CARD_WIDTH);
-    setActiveIndex(Math.min(currentIndex, children.length - 1));
+    setActiveIndex(Math.min(currentIndex, Math.max(totalSlides - 1, 0)));
   };
 
   return (
@@ -44,19 +45,21 @@ export default function DataCarousel({ children }: DataCarouselProps) {
       </ScrollView>
 
       {/* ページネーションドット */}
-      <View style={styles.paginationContainer}>
-        {React.Children.map(children, (_, index) => (
-          <View
-            key={index}
-            style={[
-              styles.dot,
-              {
-                backgroundColor: activeIndex === index ? '#535353' : '#D0D0D0',
-              },
-            ]}
-          />
-        ))}
-      </View>
+      {totalSlides > 1 ? (
+        <View style={styles.paginationContainer}>
+          {React.Children.map(children, (_, index) => (
+            <View
+              key={index}
+              style={[
+                styles.dot,
+                {
+                  backgroundColor: activeIndex === index ? '#535353' : '#D0D0D0',
+                },
+              ]}
+            />
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }

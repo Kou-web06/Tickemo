@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Platform, Text } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Octicons, Ionicons, MaterialIcons, MaterialCommunityIcons, FontAwesome6 } from '@expo/vector-icons';
 import { theme } from '../theme';
@@ -12,6 +12,7 @@ interface TabBarProps {
 
 export const FloatingTabBar: React.FC<TabBarProps> = ({ state, descriptors, navigation }) => {
   const [pressedTab, setPressedTab] = useState<string | null>(null);
+  
   // Check if any focused route wants to hide the tab bar
   const focusedRoute = state.routes[state.index];
   const { options } = descriptors[focusedRoute.key];
@@ -26,7 +27,9 @@ export const FloatingTabBar: React.FC<TabBarProps> = ({ state, descriptors, navi
       case 'Home':
         return { IconComponent: Ionicons, name: 'albums' };
       case 'Countdown':
-        return { IconComponent: MaterialIcons, name: 'timer' };
+        return { IconComponent: Octicons, name: 'home-fill' };
+      case 'Statistics':
+        return { IconComponent: Ionicons, name: 'stats-chart' };
       default:
         return { IconComponent: Octicons, name: 'circle' };
     }
@@ -84,7 +87,7 @@ export const FloatingTabBar: React.FC<TabBarProps> = ({ state, descriptors, navi
                 color={(isFocused || isPressed) ? theme.colors.tabBar.activeIcon : theme.colors.tabBar.inactiveIcon}
               />
             </TouchableOpacity>
-          );        })}
+          ); })}
           </View>
         </BlurView>
       </View>
@@ -100,37 +103,39 @@ const styles = StyleSheet.create({
     right: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.md,
     zIndex: 9999,
   },
   tabBarWrapper: {
     borderRadius: theme.tabBar.borderRadius,
-    overflow: 'hidden',
+    overflow: 'visible',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.3,
-    shadowRadius: 12,
+    shadowRadius: 3,
     elevation: 8,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   blurView: {
+    borderRadius: theme.tabBar.borderRadius,
     overflow: 'hidden',
   },
   tabBar: {
-    width: 140,
+    minWidth: 220,
     flexDirection: 'row',
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    borderRadius: theme.tabBar.borderRadius,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     paddingVertical: theme.tabBar.padding,
-    paddingHorizontal: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: theme.spacing.lg,
+    gap: theme.spacing.xxl,
   },
   tab: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: theme.spacing.xs,
+    paddingVertical: theme.spacing.xxs,
     paddingHorizontal: theme.spacing.xs,
   },
 });

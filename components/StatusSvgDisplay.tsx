@@ -24,11 +24,14 @@ const StatusSvgDisplay = React.memo(({ fanLevel, style }: StatusSvgDisplayProps)
     }
   }, [fanLevel, statusSvgUris]);
 
+  const width = style?.width ?? 110;
+  const height = style?.height ?? 110;
+
   return (
     <SvgUri
       uri={uri}
-      width={110}
-      height={110}
+      width={width}
+      height={height}
       style={style}
     />
   );

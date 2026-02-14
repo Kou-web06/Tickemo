@@ -1,17 +1,34 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, StatusBar, ImageBackground, Modal, Dimensions, Animated, Pressable, Linking, Share, Alert, TextInput, ScrollView, Image as RNImage } from 'react-native';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, StatusBar, Modal, Dimensions, Animated, Pressable, Linking, Share, Alert, TextInput, ScrollView, Image as RNImage, ActivityIndicator } from 'react-native';
 import Svg, { Path, SvgXml, SvgUri } from 'react-native-svg';
 import QRCode from 'react-native-qrcode-svg';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Image } from 'expo-image';
+import { Asset } from 'expo-asset';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons, MaterialIcons, FontAwesome } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons, MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
+import { Anton_400Regular } from '@expo-google-fonts/anton';
+import * as Crypto from 'expo-crypto';
+import TextTicker from 'react-native-text-ticker';
+import Reanimated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { theme } from '../theme';
 import LiveEditScreen from './LiveEditScreen';
 import SettingsScreen from './SettingsScreen';
+import ProfileEditScreen from './ProfileEditScreen';
 import { useRecords, ChekiRecord } from '../contexts/RecordsContext';
-import { ShareImageGenerator } from '../components/ShareImageGenerator';
+import ShareImageGenerator from '../components/ShareImageGenerator';
+import TodaySong from '../components/TodaySong';
+import { buildLiveAlbumName, uploadMultipleImages, deleteImage, normalizeStoredImageUri } from '../lib/imageUpload';
+import { saveSetlist, getSetlist } from '../lib/setlistDb';
+import type { SetlistItem } from '../types/setlist';
+import { isTestflightMode } from '../utils/appMode';
+import { NO_IMAGE_URI, useResolvedImageUri } from '../hooks/useResolvedImageUri';
+
+const Stack = createNativeStackNavigator();
+
+// Apple Music Developer Token (JWT)
+const APPLE_MUSIC_DEVELOPER_TOKEN = 'eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjMyTVlRNk5WOTYifQ.eyJpc3MiOiJRMkxMMkI3OTJWIiwiaWF0IjoxNzY5ODQ5MDA5LCJleHAiOjE3ODU0MDEwMDksImF1ZCI6Imh0dHBzOi8vYXBwbGVpZC5hcHBsZS5jb20iLCJzdWIiOiJtZWRpYS5jb20uYW5vbnltb3VzLlRpY2tlbW8ifQ.ect6vO1q3aC9XJVYCUBVLlTHaVEcZebm0-dVZ3ak6uglI33e1ra3qcwkawXaScFFcLB8sgX5TEcFEj9QGF1Z8A';
 
 const EMPTY_TICKET_SVG = `
 <svg width="280" height="470" viewBox="0 0 280 470" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -24,65 +41,38 @@ const EMPTY_TICKET_SVG = `
 interface LiveInfo {
   name: string;
   artist: string;
+  artistImageUrl?: string;
   date: Date;
   venue: string;
   seat?: string;
   startTime: string;
   endTime: string;
   imageUrl?: string;
+  imageUrls?: string[];
   qrCode?: string;
   memo?: string;
   detail?: string;
+  setlistSongs?: SetlistItem[];
 }
-
-const Stack = createNativeStackNavigator();
 
 function CountdownMain({ navigation }: any) {
   const { records, addRecord, updateRecord } = useRecords();
   const pointingSvgUri = RNImage.resolveAssetSource(require('../assets/pointing.svg')).uri;
   const emptyTicketWidth = 280;
   const emptyTicketHeight = 470;
+  const screenHeight = Dimensions.get('window').height;
   const [showEditScreen, setShowEditScreen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false); // ローディング状態
   const [isJacketMoved, setIsJacketMoved] = useState(false);
-  const [showChecklist, setShowChecklist] = useState(false);
   const [showShareImage, setShowShareImage] = useState(false);
-  const [checklistItems, setChecklistItems] = useState([
-    { id: '1', text: '身分証明証', checked: false },
-    { id: '2', text: '財布・現金', checked: false },
-    { id: '3', text: 'ペンライト', checked: false },
-    { id: '4', text: '充電器', checked: false },
-    { id: '5', text: 'タオル', checked: false },
-  ]);
+  const [isAccordionOpen, setIsAccordionOpen] = useState(false);
+  const [selectedLiveId, setSelectedLiveId] = useState<string | null>(null);
+  const [setlistSongs, setSetlistSongs] = useState<SetlistItem[]>([]);
   const jacketAnimX = useRef(new Animated.Value(0)).current;
   const jacketAnimRotate = useRef(new Animated.Value(0)).current;
-  
-  // 日付で新しい順にソート（最新のライブが先頭）
-  const toTime = (record: ChekiRecord) => {
-    if (!record?.date) return 0;
-    const time = new Date(record.date.replace(/\./g, '-')).getTime();
-    return Number.isNaN(time) ? 0 : time;
-  };
-  const sortedRecords = [...records].sort((a, b) => toTime(b) - toTime(a));
-
-  const formatDate = (date: Date) => {
-    const year = date.getFullYear();
-    const month = `${date.getMonth() + 1}`.padStart(2, '0');
-    const day = `${date.getDate()}`.padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-  
-  // カウントダウンするライブを決定
-  let nextRecord: ChekiRecord | null = null;
-  const now = new Date().getTime();
-  
-  // ソート済みレコードから最初の未来のライブを探す
-  for (const record of sortedRecords) {
-    const liveDate = new Date(record.date?.replace(/\./g, '-') || '').getTime();
-    if (liveDate > now) {
-      nextRecord = record;
-      break;
-    }
-  }
+  const accordionHeight = useSharedValue(0);
+  const accordionOpacity = useSharedValue(0);
+  const accordionTranslateY = useSharedValue(-12);
   const [countdown, setCountdown] = useState({
     days: 0,
     hours: 0,
@@ -93,59 +83,205 @@ function CountdownMain({ navigation }: any) {
   const [showEmptyAfterEnd, setShowEmptyAfterEnd] = useState(false);
   const [isCreatingNewLive, setIsCreatingNewLive] = useState(false);
 
+  const parseRecordDate = (value?: string) => {
+    if (!value) return null;
+    const parts = value.split(/[.-]/).map((part) => Number(part));
+    if (parts.length === 3 && parts.every((part) => !Number.isNaN(part))) {
+      const [year, month, day] = parts;
+      if (!year || !month || !day) return null;
+      return new Date(year, month - 1, day, 12, 0, 0, 0);
+    }
+
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed;
+  };
+
+  // 日付で新しい順にソート（最新のライブが先頭）
+  const toTime = (record: ChekiRecord) => {
+    if (!record?.date) return 0;
+    const parsed = parseRecordDate(record.date);
+    const time = parsed ? parsed.getTime() : 0;
+    return Number.isNaN(time) ? 0 : time;
+  };
+  const sortedRecords = [...records].sort((a, b) => toTime(b) - toTime(a));
+
+  const formatDate = (date: Date) => {
+    const year = date.getFullYear();
+    const month = `${date.getMonth() + 1}`.padStart(2, '0');
+    const day = `${date.getDate()}`.padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const formatShortDate = (dateStr?: string) => {
+    if (!dateStr) return '-';
+    const parsed = parseRecordDate(dateStr);
+    if (!parsed) return dateStr;
+    return `${parsed.getMonth() + 1}/${parsed.getDate()}`;
+  };
+
+  const futureLives = useMemo(() => {
+    const now = new Date();
+    const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return sortedRecords
+      .map((record) => ({
+        record,
+        date: parseRecordDate(record.date),
+      }))
+      .filter(({ date }) => Boolean(date))
+      .filter(({ date }) => {
+        const liveDate = date as Date;
+        const liveDateOnly = new Date(liveDate.getFullYear(), liveDate.getMonth(), liveDate.getDate());
+        return liveDateOnly.getTime() >= todayDate.getTime();
+      })
+      .sort((a, b) => (a.date as Date).getTime() - (b.date as Date).getTime())
+      .map(({ record }) => record);
+  }, [sortedRecords]);
+
+  useEffect(() => {
+    if (selectedLiveId && !futureLives.some((record) => record.id === selectedLiveId)) {
+      setSelectedLiveId(null);
+    }
+  }, [selectedLiveId, futureLives]);
+
+  const selectedRecord = useMemo(
+    () => futureLives.find((record) => record.id === selectedLiveId) ?? null,
+    [futureLives, selectedLiveId]
+  );
+
+  const nextRecord = selectedRecord ?? futureLives[0] ?? null;
+  const accordionMaxHeight = Math.min(futureLives.length * 66 + 24, screenHeight * 0.5);
+
+  useEffect(() => {
+    const targetHeight = isAccordionOpen ? accordionMaxHeight : 0;
+    const targetOpacity = isAccordionOpen ? 1 : 0;
+    const targetTranslateY = isAccordionOpen ? 0 : -12;
+    accordionHeight.value = withSpring(targetHeight, { damping: 15, stiffness: 90, mass: 1 });
+    accordionOpacity.value = withSpring(targetOpacity, { damping: 15, stiffness: 90, mass: 1 });
+    accordionTranslateY.value = withSpring(targetTranslateY, { damping: 15, stiffness: 90, mass: 1 });
+  }, [accordionHeight, accordionMaxHeight, accordionOpacity, isAccordionOpen]);
+
+  const accordionStyle = useAnimatedStyle(() => ({
+    height: accordionHeight.value,
+    opacity: accordionOpacity.value,
+    transform: [{ translateY: accordionTranslateY.value }],
+  }));
+
+  const coverUri = useResolvedImageUri(nextRecord?.imageUrls?.[0], nextRecord?.imageAssetIds?.[0]);
+  const backgroundUri = nextRecord ? (coverUri ?? NO_IMAGE_URI) : null;
+
+  useEffect(() => {
+    const preloadCountdownImages = async () => {
+      try {
+        const uris = new Set<string>();
+        records.forEach((record) => {
+          if (record.imageUrls && Array.isArray(record.imageUrls)) {
+            record.imageUrls.forEach((uri) => {
+              if (uri && !uri.startsWith('file://')) {
+                uris.add(uri);
+              }
+            });
+          }
+        });
+
+        if (uris.size === 0) return;
+
+        const assets = Array.from(uris).map((uri) => Asset.fromURI(uri));
+        await Promise.all(assets.map((asset) => asset.downloadAsync()));
+      } catch (error) {
+        console.log('Failed to preload countdown images:', error);
+      }
+    };
+
+    preloadCountdownImages();
+  }, [records]);
+
   useEffect(() => {
     if (!nextRecord || !nextRecord.date || typeof nextRecord.date !== 'string') return;
     // 新しいレコード評価時に終了後の空画面フラグをリセット
     setShowEmptyAfterEnd(false);
     
-    const liveDate = new Date(nextRecord.date.replace(/\./g, '-'));
-    const startTime = nextRecord.startTime || '00:00';
-    const endTime = nextRecord.endTime || '23:59';
+    const liveDate = parseRecordDate(nextRecord.date);
+    if (!liveDate) return;
+
+    const startTime = nextRecord.startTime || '18:00';
+    const endTime = nextRecord.endTime || '20:00';
     
     // 開始時刻と終了時刻を設定
-    const [startHour, startMin] = startTime.split(':').map(Number);
-    const [endHour, endMin] = endTime.split(':').map(Number);
+    const parseTime = (value: string, fallback: string) => {
+      const target = value || fallback;
+      const [h, m] = target.split(':').map(Number);
+      if (Number.isNaN(h) || Number.isNaN(m)) {
+        const [fh, fm] = fallback.split(':').map(Number);
+        return { hour: fh, min: fm };
+      }
+      return { hour: h, min: m };
+    };
+
+    const { hour: startHour, min: startMin } = parseTime(startTime, '18:00');
+    const { hour: endHour, min: endMin } = parseTime(endTime, '20:00');
     
     const liveStartDateTime = new Date(liveDate);
     liveStartDateTime.setHours(startHour, startMin, 0, 0);
     
     const liveEndDateTime = new Date(liveDate);
     liveEndDateTime.setHours(endHour, endMin, 0, 0);
+    if (liveEndDateTime.getTime() < liveStartDateTime.getTime()) {
+      liveEndDateTime.setDate(liveEndDateTime.getDate() + 1);
+    }
     
-    const timer = setInterval(() => {
+    const tick = () => {
       const now = new Date();
-      
+      const nowMs = now.getTime();
+
       // 終了時刻を過ぎた場合
-      if (now.getTime() >= liveEndDateTime.getTime()) {
+      if (nowMs >= liveEndDateTime.getTime()) {
         setLiveStatus('after');
         setCountdown({ days: 0, hours: 0, minutes: 0, seconds: 0 });
-        // 3秒間「Enjoy」を表示した後、設定未画面へ
-        const timeout = setTimeout(() => {
-          setShowEmptyAfterEnd(true);
-        }, 3000);
-        clearInterval(timer);
-        return () => clearTimeout(timeout);
+        return;
       }
-      
+
       // 開始時刻を過ぎた場合
-      if (now.getTime() >= liveStartDateTime.getTime()) {
+      if (nowMs >= liveStartDateTime.getTime()) {
         setLiveStatus('during');
         setCountdown({ days: 0, hours: 0, minutes: 0, seconds: 0 });
         return;
       }
-      
+
       // 開始前：カウントダウン表示
       setLiveStatus('before');
-      const diff = liveStartDateTime.getTime() - now.getTime();
+      const diff = Math.max(0, liveStartDateTime.getTime() - nowMs);
       const days = Math.floor(diff / (1000 * 60 * 60 * 24));
       const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
       const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
       const seconds = Math.floor((diff % (1000 * 60)) / 1000);
       setCountdown({ days, hours, minutes, seconds });
-    }, 1000);
-    
+    };
+
+    tick();
+    const timer = setInterval(tick, 1000);
+
     return () => clearInterval(timer);
   }, [nextRecord]);
+
+  // 編集画面を開く際にセットリストを読み込む
+  useEffect(() => {
+    const loadSetlist = async () => {
+      if (showEditScreen && !isCreatingNewLive && nextRecord) {
+        try {
+          const songs = await getSetlist(nextRecord.id);
+          setSetlistSongs(songs);
+        } catch (error) {
+          console.error('[CountdownScreen] セットリスト読み込みエラー:', error);
+          setSetlistSongs([]);
+        }
+      } else {
+        // 新規作成時はクリア
+        setSetlistSongs([]);
+      }
+    };
+    loadSetlist();
+  }, [showEditScreen, isCreatingNewLive, nextRecord]);
 
   const handleJacketTap = () => {
     const toX = isJacketMoved ? 0 : -130;
@@ -169,19 +305,9 @@ function CountdownMain({ navigation }: any) {
     setIsJacketMoved(!isJacketMoved);
   };
 
-  const handleMapPress = () => {
-    if (!nextRecord?.venue) {
-      Alert.alert('会場情報がありません', 'ライブ情報を設定してください');
-      return;
-    }
-    const url = `https://maps.google.com/?q=${encodeURIComponent(nextRecord.venue)}`;
-    Linking.openURL(url).catch(() => {
-      Alert.alert('エラー', 'マップアプリを開けませんでした');
-    });
-  };
-
-  const handleChecklistPress = () => {
-    setShowChecklist(true);
+  const handleSelectLive = (record: ChekiRecord) => {
+    setSelectedLiveId(record.id);
+    setIsAccordionOpen(false);
   };
 
   const handleSharePress = async () => {
@@ -189,78 +315,154 @@ function CountdownMain({ navigation }: any) {
     setShowShareImage(true);
   };
 
-  const toggleChecklistItem = (id: string) => {
-    setChecklistItems(items =>
-      items.map(item =>
-        item.id === id ? { ...item, checked: !item.checked } : item
-      )
-    );
-  };
+  const handleSaveLiveInfo = async (info: LiveInfo) => {
+    try {
+      // console.log('[CountdownScreen] 保存開始:', info);
+      
+      // ローディング表示開始
+      setIsLoading(true);
+      
+      const userId = 'local-user';
 
-  const addChecklistItem = (text: string) => {
-    if (text.trim()) {
-      setChecklistItems(items => [
-        ...items,
-        { id: Date.now().toString(), text: text.trim(), checked: false },
-      ]);
+      // console.log('[CountdownScreen] ユーザーID:', userId);
+
+      // 複数画像をアップロード（file:// で始まる新規選択画像のみ）
+      let uploadedImageUrls: string[] = [];
+      let uploadedImageAssetIds: Array<string | null> = [];
+      if (info.imageUrls?.length) {
+        // 既存URL（file:// で始まらないもの）を先に追加（最初の画像がジャケットになる）
+        const existingAssetIdsByUrl = new Map(
+          (nextRecord?.imageUrls || []).map((url, index) => [normalizeStoredImageUri(url), nextRecord?.imageAssetIds?.[index] ?? null])
+        );
+        const normalizedUrls = info.imageUrls.map((uri: string) => normalizeStoredImageUri(uri));
+        const existingUrls = normalizedUrls.filter((uri: string) => !uri.startsWith('file://'));
+        uploadedImageUrls.push(...existingUrls);
+        uploadedImageAssetIds.push(...existingUrls.map((uri) => existingAssetIdsByUrl.get(uri) ?? null));
+        
+        // 新しくアップロードされた画像を後に追加
+        const fileUris = normalizedUrls.filter((uri: string) => uri.startsWith('file://'));
+        if (fileUris.length > 0) {
+          // console.log('[CountdownScreen] 複数画像アップロード中:', fileUris.length);
+          // liveIdを決定: 新規作成なら新規ID、編集なら既存レコードのID
+          const liveId = !nextRecord || isCreatingNewLive 
+            ? Crypto.randomUUID() 
+            : nextRecord.id;
+          const albumName = buildLiveAlbumName(info.date, info.name);
+          const totalImageCount = info.imageUrls?.length ?? 0;
+          const previousImageCount = (!nextRecord || isCreatingNewLive)
+            ? 0
+            : (nextRecord.imageUrls?.length ?? 0);
+          const uploadResult = await uploadMultipleImages(
+            fileUris,
+            userId,
+            liveId,
+            albumName,
+            previousImageCount,
+            totalImageCount
+          );
+          uploadedImageUrls.push(...uploadResult.imageUrls);
+          uploadedImageAssetIds.push(...uploadResult.assetIds);
+          // console.log('[CountdownScreen] 複数画像アップロード完了:', uploadedImageUrls);
+          // アップロード後、URLがアクセス可能になるまで少し待機
+          await new Promise(resolve => setTimeout(resolve, 1200));
+        }
+      }
+
+      if (!nextRecord || isCreatingNewLive) {
+        // 新規作成の場合
+        // console.log('[CountdownScreen] 新規レコード作成');
+        const newRecord: ChekiRecord = {
+          id: Crypto.randomUUID(),
+          user_id: userId,
+          artist: info.artist,
+          artistImageUrl: info.artistImageUrl || '',
+          liveName: info.name,
+          date: formatDate(info.date),
+          venue: info.venue,
+          seat: info.seat || '',
+          startTime: info.startTime || '',
+          endTime: info.endTime || '',
+          imageUrls: uploadedImageUrls,
+          imageAssetIds: uploadedImageAssetIds,
+          memo: info.memo || '',
+          detail: info.detail || '',
+          qrCode: info.qrCode || '',
+          createdAt: new Date().toISOString(),
+        };
+        // console.log('[CountdownScreen] addRecord 呼び出し');
+        await addRecord(newRecord);
+        
+        // セットリストを保存
+        if (info.setlistSongs && info.setlistSongs.length > 0) {
+          await saveSetlist(newRecord.id, info.setlistSongs);
+        }
+        // console.log('[CountdownScreen] addRecord 完了');
+      } else {
+        // 既存レコードの更新
+        // console.log('[CountdownScreen] レコード更新開始');
+        // console.log('[CountdownScreen] nextRecord.id:', nextRecord.id);
+        // console.log('[CountdownScreen] uploadedImageUrls:', uploadedImageUrls);
+        
+        // 新しくアップロードされた画像があるかを確認（file:// で始まらないもの = アップロード済みURL）
+        const newlyUploadedImages = uploadedImageUrls.filter((uri: string) => !uri.startsWith('file://'));
+        
+        // 古い画像をStorageから削除（新しいアップロードがある場合のみ）
+        if (newlyUploadedImages.length > 0 && nextRecord.imageUrls?.length) {
+          // console.log('[CountdownScreen] 古い画像を削除中');
+          for (const oldImageUrl of nextRecord.imageUrls) {
+            try {
+              await deleteImage(oldImageUrl);
+            } catch (error) {
+              // console.warn('[CountdownScreen] 画像削除エラー:', error);
+              // 削除失敗しても続行
+            }
+          }
+          // console.log('[CountdownScreen] 古い画像削除完了');
+        }
+        
+        const updatedRecord: ChekiRecord = {
+          ...nextRecord,
+          user_id: userId,
+          artist: info.artist,
+          artistImageUrl: info.artistImageUrl || nextRecord.artistImageUrl || '',
+          liveName: info.name,
+          date: formatDate(info.date),
+          venue: info.venue,
+          seat: info.seat || nextRecord.seat || '',
+          startTime: info.startTime || nextRecord.startTime || '',
+          endTime: info.endTime || nextRecord.endTime || '',
+          imageUrls: uploadedImageUrls.length > 0 ? uploadedImageUrls : (nextRecord.imageUrls || []),
+          imageAssetIds: uploadedImageUrls.length > 0 ? uploadedImageAssetIds : (nextRecord.imageAssetIds || []),
+          memo: info.memo || nextRecord.memo,
+          detail: info.detail || nextRecord.detail,
+          qrCode: info.qrCode || nextRecord.qrCode,
+          createdAt: nextRecord.createdAt || new Date().toISOString(),
+        };
+        // console.log('[CountdownScreen] updateRecord 呼び出し前のデータ:', updatedRecord);
+        await updateRecord(nextRecord.id, updatedRecord);
+        
+        // セットリストを保存（既存を削除して新規挿入）
+        if (info.setlistSongs) {
+          try {
+            await saveSetlist(nextRecord.id, info.setlistSongs);
+            console.log('[CountdownScreen] setlist 保存完了');
+          } catch (setlistError) {
+            console.error('[CountdownScreen] setlist保存エラー（スキップ）:', setlistError);
+            // セットリストの保存に失敗してもレコードは更新済みなので続行
+          }
+        }
+        // console.log('[CountdownScreen] updateRecord 完了');
+      }
+      // console.log('[CountdownScreen] 保存成功、画面を閉じます');
+      
+      // ローディングを先に非表示にしてから画面を閉じる
+      setIsLoading(false);
+    } catch (error) {
+      console.error('[CountdownScreen] ライブ情報保存エラー:', error);
+      setIsLoading(false);
+      Alert.alert('エラー', 'ライブ情報の保存に失敗しました。もう一度お試しください。');
+      throw error;
     }
-  };
-
-  const deleteChecklistItem = (id: string) => {
-    setChecklistItems(items => items.filter(item => item.id !== id));
-  };
-
-  const completedChecklistCount = checklistItems.filter(item => item.checked).length;
-  const checklistProgress = checklistItems.length
-    ? completedChecklistCount / checklistItems.length
-    : 0;
-
-  const handleSaveLiveInfo = (info: LiveInfo) => {
-    const primaryImage = info.imageUrl || '';
-
-    if (!nextRecord || isCreatingNewLive) {
-      // 新規作成の場合
-      const newRecord: ChekiRecord = {
-        id: Date.now().toString(),
-        user_id: 'demo-user-id',
-        artist: info.artist,
-        liveName: info.name,
-        date: formatDate(info.date),
-        venue: info.venue,
-        seat: info.seat || '',
-        startTime: info.startTime,
-        endTime: info.endTime,
-        imageUrl: primaryImage,
-        imageUrls: info.imageUrls || [],
-        memo: info.memo || '',
-        detail: info.detail || '',
-        qrCode: info.qrCode || '',
-        createdAt: new Date().toISOString(),
-      };
-      addRecord(newRecord);
-    } else {
-      // 既存レコードの更新
-      const updatedRecord: ChekiRecord = {
-        ...nextRecord,
-        user_id: nextRecord.user_id || 'demo-user-id',
-        artist: info.artist,
-        liveName: info.name,
-        date: formatDate(info.date),
-        venue: info.venue,
-        seat: info.seat || nextRecord.seat,
-        startTime: info.startTime,
-        endTime: info.endTime,
-        imageUrl: primaryImage || nextRecord.imageUrl,
-        imageUrls: info.imageUrls || nextRecord.imageUrls || [],
-        memo: info.memo || nextRecord.memo,
-        detail: info.detail || nextRecord.detail,
-        qrCode: info.qrCode || nextRecord.qrCode,
-        createdAt: nextRecord.createdAt || new Date().toISOString(),
-      };
-      updateRecord(nextRecord.id, updatedRecord);
-    }
-    setShowEditScreen(false);
-    setIsCreatingNewLive(false);
   };
 
   const renderEmptyState = () => (
@@ -274,7 +476,7 @@ function CountdownMain({ navigation }: any) {
           onPress={() => navigation.navigate('Settings')}
         >
           <BlurView intensity={20} tint="dark" style={styles.settingsButtonBlur}>
-            <Ionicons name="settings-outline" size={24} color="#FFF" />
+            <MaterialIcons name="settings" size={24} color="#FFF" />
           </BlurView>
         </TouchableOpacity>
         <View style={styles.emptyContainer}>
@@ -284,7 +486,18 @@ function CountdownMain({ navigation }: any) {
           <TouchableOpacity
             style={[styles.emptyTicketWrapper, { width: emptyTicketWidth }]}
             activeOpacity={0.9}
-            onPress={() => { setIsCreatingNewLive(true); setShowEditScreen(true); }}
+            onPress={() => {
+              // TestFlight: 5枚までの制限
+              if (records.length >= 5) {
+                Alert.alert(
+                  '上限に達しました',
+                  'β版では5枚まで追加可能です。正式リリースをお待ちください！🐿️'
+                );
+                return;
+              }
+              setIsCreatingNewLive(true);
+              setShowEditScreen(true);
+            }}
           >
             <View style={styles.pointingWrapper}>
               <SvgUri uri={pointingSvgUri} width={120} height={120} />
@@ -313,13 +526,14 @@ function CountdownMain({ navigation }: any) {
       <View style={styles.container}>
         <StatusBar barStyle="light-content" />
         {/* Dynamic Blur Background */}
-        {record.imageUrl ? (
+        {backgroundUri ? (
           <>
-            <ImageBackground
-              source={{ uri: record.imageUrl }}
+            <Image
+              source={{ uri: backgroundUri }}
               style={styles.backgroundImage}
-              resizeMode="cover"
-              blurRadius={50}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              transition={0}
             />
             <BlurView intensity={50} tint="dark" style={styles.blurOverlay} />
           </>
@@ -330,37 +544,109 @@ function CountdownMain({ navigation }: any) {
         {/* ヘッダー */}
         <View style={styles.headerContainer}>
           <Text style={styles.headerTitle}>NEXT LIVE</Text>
-          <View style={styles.headerButtons}>
+          <BlurView intensity={24} tint="dark" style={styles.headerButtons}>
             <TouchableOpacity
               style={styles.headerButton}
               onPress={handleSharePress}
             >
-              <BlurView intensity={22} tint="dark" style={styles.buttonBlur}>
-                <MaterialIcons name="open-in-new" size={22} color="#FFF" />
-              </BlurView>
+              <Svg width={24} height={24} viewBox="0 0 24 24" fill="#fff">
+                <Path
+                  d="M12 22.75C6.07 22.75 1.25 17.93 1.25 12C1.25 6.07 6.07 1.25 12 1.25C12.41 1.25 12.75 1.59 12.75 2C12.75 2.41 12.41 2.75 12 2.75C6.9 2.75 2.75 6.9 2.75 12C2.75 17.1 6.9 21.25 12 21.25C17.1 21.25 21.25 17.1 21.25 12C21.25 11.59 21.59 11.25 22 11.25C22.41 11.25 22.75 11.59 22.75 12C22.75 17.93 17.93 22.75 12 22.75Z"
+                  fill="white"
+                />
+                <Path
+                  d="M12.9999 11.7502C12.8099 11.7502 12.6199 11.6802 12.4699 11.5302C12.1799 11.2402 12.1799 10.7602 12.4699 10.4702L20.6699 2.27023C20.9599 1.98023 21.4399 1.98023 21.7299 2.27023C22.0199 2.56023 22.0199 3.04023 21.7299 3.33023L13.5299 11.5302C13.3799 11.6802 13.1899 11.7502 12.9999 11.7502Z"
+                  fill="white"
+                />
+                <Path
+                  d="M22 7.58C21.59 7.58 21.25 7.24 21.25 6.83V2.75H17.17C16.76 2.75 16.42 2.41 16.42 2C16.42 1.59 16.76 1.25 17.17 1.25H22C22.41 1.25 22.75 1.59 22.75 2V6.83C22.75 7.24 22.41 7.58 22 7.58Z"
+                  fill="white"
+                />
+              </Svg>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.headerButton}
-              onPress={() => { setIsCreatingNewLive(false); setShowEditScreen(true); }}
+              onPress={() => setIsAccordionOpen((prev) => !prev)}
             >
-              <BlurView intensity={22} tint="dark" style={styles.buttonBlur}>
-                <FontAwesome name="sliders" size={22} color="#FFF" />
-              </BlurView>
+              <FontAwesome5 name="exchange-alt" size={22} color="#FFF" />
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.headerButton}
               onPress={() => navigation.navigate('Settings')}
             >
-              <BlurView intensity={22} tint="dark" style={styles.buttonBlur}>
-                <MaterialIcons name="settings" size={22} color="#FFF" />
-              </BlurView>
+              <Svg width={24} height={24} viewBox="0 0 24 24" fill="#fff">
+                <Path
+                  d="M20.1 9.21945C18.29 9.21945 17.55 7.93945 18.45 6.36945C18.97 5.45945 18.66 4.29945 17.75 3.77945L16.02 2.78945C15.23 2.31945 14.21 2.59945 13.74 3.38945L13.63 3.57945C12.73 5.14945 11.25 5.14945 10.34 3.57945L10.23 3.38945C9.78 2.59945 8.76 2.31945 7.97 2.78945L6.24 3.77945C5.33 4.29945 5.02 5.46945 5.54 6.37945C6.45 7.93945 5.71 9.21945 3.9 9.21945C2.86 9.21945 2 10.0694 2 11.1194V12.8794C2 13.9194 2.85 14.7794 3.9 14.7794C5.71 14.7794 6.45 16.0594 5.54 17.6294C5.02 18.5394 5.33 19.6994 6.24 20.2194L7.97 21.2094C8.76 21.6794 9.78 21.3995 10.25 20.6094L10.36 20.4194C11.26 18.8494 12.74 18.8494 13.65 20.4194L13.76 20.6094C14.23 21.3995 15.25 21.6794 16.04 21.2094L17.77 20.2194C18.68 19.6994 18.99 18.5294 18.47 17.6294C17.56 16.0594 18.3 14.7794 20.11 14.7794C21.15 14.7794 22.01 13.9294 22.01 12.8794V11.1194C22 10.0794 21.15 9.21945 20.1 9.21945ZM12 15.2494C10.21 15.2494 8.75 13.7894 8.75 11.9994C8.75 10.2094 10.21 8.74945 12 8.74945C13.79 8.74945 15.25 10.2094 15.25 11.9994C15.25 13.7894 13.79 15.2494 12 15.2494Z"
+                  fill="white"
+                />
+              </Svg>
             </TouchableOpacity>
-          </View>
+          </BlurView>
         </View>
+
+        {isAccordionOpen && (
+          <Pressable
+            style={styles.accordionBackdrop}
+            onPress={() => setIsAccordionOpen(false)}
+          />
+        )}
+
+        <Reanimated.View
+          pointerEvents={isAccordionOpen ? 'auto' : 'none'}
+          style={[styles.accordionContainer, accordionStyle]}
+        >
+          <View style={styles.accordionCard}>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.accordionList}
+            >
+              {futureLives.length === 0 ? (
+                <Text style={styles.accordionEmpty}>予定されているライブがありません</Text>
+              ) : (
+                futureLives.map((record) => {
+                  const isSelected = record.id === nextRecord?.id;
+                  return (
+                    <TouchableOpacity
+                      key={record.id}
+                      activeOpacity={0.85}
+                      onPress={() => handleSelectLive(record)}
+                    >
+                      <BlurView
+                        intensity={20}
+                        tint="dark"
+                        style={[
+                          styles.accordionItem,
+                          isSelected && styles.accordionItemSelected,
+                        ]}
+                      >
+                        <View style={styles.accordionItemContent}>
+                          <Text style={styles.accordionDate}>{formatShortDate(record.date)}</Text>
+                          <View style={styles.accordionTextBlock}>
+                            <Text style={styles.accordionArtist} numberOfLines={1}>
+                              {record.artist || '-'}
+                            </Text>
+                            <Text style={styles.accordionTitle} numberOfLines={1}>
+                              {record.liveName || '-'}
+                            </Text>
+                          </View>
+                          {isSelected && (
+                            <View style={styles.accordionCheck}>
+                              <Ionicons name="checkmark" size={16} color={theme.colors.accent.primary} />
+                            </View>
+                          )}
+                        </View>
+                      </BlurView>
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </ScrollView>
+          </View>
+        </Reanimated.View>
 
         {/* カウントダウン */}
         <View style={styles.countdownDisplayContainer}>
-          {liveStatus === 'during' || liveStatus === 'after' ? (
+          {liveStatus === 'during' ? (
             <Text style={styles.enjoyText}>Enjoy Your Live !!</Text>
           ) : (
             <View style={styles.countdownRow}>
@@ -387,8 +673,15 @@ function CountdownMain({ navigation }: any) {
           )}
         </View>
 
-        {/* 空白スペース - 代替案検討中 */}
-        <View style={{ height: 100 }} />
+        {/* 今日の1曲 */}
+        {nextRecord?.artist && (
+          <View style={{ position: 'absolute', top: 235, left: 0, right: 0 }}>
+            <TodaySong 
+              artistName={nextRecord.artist} 
+              developerToken={APPLE_MUSIC_DEVELOPER_TOKEN}
+            />
+          </View>
+        )}
 
         {/* チケットカード */}
         <View style={[styles.ticketHost, { height: cardHeight + 40 }]}>
@@ -408,7 +701,10 @@ function CountdownMain({ navigation }: any) {
                 ) : (
                   <Image
                     source={require('../assets/no-qr.png')}
-                    style={{ width: qrSize, height: qrSize, resizeMode: 'contain' }}
+                    style={{ width: qrSize, height: qrSize }}
+                    contentFit="contain"
+                    cachePolicy="memory-disk"
+                    transition={0}
                   />
                 )}
                 <Text style={styles.qrText}>
@@ -416,40 +712,59 @@ function CountdownMain({ navigation }: any) {
                 </Text>
               </View>
 
-              {record.imageUrl ? (
-                <Pressable onPress={handleJacketTap}>
-                  <Animated.View 
-                    style={[
-                      styles.jacketShadow,
-                      {
-                        transform: [
-                          { translateX: jacketAnimX },
-                          { 
-                            rotate: jacketAnimRotate.interpolate({
-                              inputRange: [-8, 0],
-                              outputRange: ['-8deg', '0deg'],
-                            })
-                          },
-                        ],
-                      },
-                    ]}
-                  >
-                    <View style={styles.jacketContainer}>
-                      <Image source={{ uri: record.imageUrl }} style={styles.jacketImage} contentFit="cover" />
-                    </View>
-                  </Animated.View>
-                </Pressable>
-              ) : null}
+              <Pressable onPress={handleJacketTap}>
+                <Animated.View 
+                  style={[
+                    styles.jacketShadow,
+                    {
+                      transform: [
+                        { translateX: jacketAnimX },
+                        { 
+                          rotate: jacketAnimRotate.interpolate({
+                            inputRange: [-8, 0],
+                            outputRange: ['-8deg', '0deg'],
+                          })
+                        },
+                      ],
+                    },
+                  ]}
+                >
+                  <View style={styles.jacketContainer}>
+                    <Image
+                      source={{ uri: coverUri ?? NO_IMAGE_URI }}
+                      style={styles.jacketImage}
+                      contentFit="cover"
+                      cachePolicy="memory-disk"
+                      transition={0}
+                    />
+                  </View>
+                </Animated.View>
+              </Pressable>
 
               <View style={styles.infoBlock}>
-                <Text style={[styles.ticketTitle, (record.liveName || '').length >= 12 && { fontSize: 12 }]}>
-                  {record.liveName || '-'}
-                </Text>
+                {(record.liveName || '-').length >= 8 ? (
+                  <View style={styles.ticketTitleWrapper}>
+                    <TextTicker
+                      style={styles.ticketTitleText}
+                      duration={(record.liveName || '-').length * 300}
+                      loop
+                      bounce={false}
+                      repeatSpacer={50}
+                      marqueeDelay={1000}
+                    >
+                      {record.liveName || '-'}
+                    </TextTicker>
+                  </View>
+                ) : (
+                  <Text style={[styles.ticketTitle, (record.liveName || '').length >= 12 && { fontSize: 12 }]}>
+                    {record.liveName || '-'}
+                  </Text>
+                )}
                 <Text style={styles.ticketArtist}>{record.artist || '-'}</Text>
                 <View style={[styles.info, { flexDirection: 'column', gap: 6, marginTop: 40 }]}>
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                     <Text style={[styles.infoLabel, { width: 100, textAlign: 'right' }]}>DATE</Text>
-                    <Text style={[styles.infoValue, { flex: 1, textAlign: 'left' }]}>{record.date || '-'}   {record.startTime || '-'}</Text>
+                    <Text style={[styles.infoValue, { flex: 1, textAlign: 'left' }]}>{record.date || '-'}   {record.startTime || '18:00'}</Text>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                     <Text style={[styles.infoLabel, { width: 100, textAlign: 'right' }]}>SEAT</Text>
@@ -484,87 +799,22 @@ function CountdownMain({ navigation }: any) {
           initialData={!isCreatingNewLive && nextRecord ? {
             name: nextRecord.liveName,
             artist: nextRecord.artist,
-            date: new Date(nextRecord.date.replace(/\./g, '-')),
+            artistImageUrl: nextRecord.artistImageUrl,
+            date: parseRecordDate(nextRecord.date) || new Date(),
             venue: nextRecord.venue || '',
             seat: nextRecord.seat || '',
             startTime: nextRecord.startTime || '18:00',
             endTime: nextRecord.endTime || '20:00',
-            imageUrl: nextRecord.imageUrl,
             imageUrls: nextRecord.imageUrls,
             qrCode: nextRecord.qrCode,
             memo: nextRecord.memo,
             detail: nextRecord.detail,
+            setlistSongs: setlistSongs,
           } : null}
           onSave={handleSaveLiveInfo}
           onCancel={() => { setShowEditScreen(false); setIsCreatingNewLive(false); }}
+          isLoading={isLoading}
         />
-      </Modal>
-
-      <Modal
-        visible={showChecklist}
-        animationType="slide"
-        presentationStyle="formSheet"
-        onRequestClose={() => setShowChecklist(false)}
-      >
-        <View style={styles.checklistContainer}>
-          <View style={styles.checklistHeader}>
-            <TouchableOpacity onPress={() => setShowChecklist(false)} style={styles.checklistHeaderButton}>
-              <Ionicons name="close" size={28} color="#000" />
-            </TouchableOpacity>
-            <Text style={styles.checklistHeaderTitle}>持ち物リスト</Text>
-            <View style={styles.checklistHeaderButton} />
-          </View>
-
-          <View style={styles.checklistProgressCard}>
-            <View style={styles.checklistProgressRow}>
-              <Text style={styles.checklistProgressLabel}>Countdown</Text>
-              <Text style={styles.checklistProgressValue}>{Math.round(checklistProgress * 100)}%</Text>
-            </View>
-            <View style={styles.checklistProgressBarTrack}>
-              <View
-                style={[
-                  styles.checklistProgressBarFill,
-                  { width: `${Math.round(checklistProgress * 100)}%` },
-                ]}
-              />
-            </View>
-            <Text style={styles.checklistProgressSub}>
-              {`${completedChecklistCount} / ${checklistItems.length || 0} 完了`}
-            </Text>
-          </View>
-
-          <ScrollView style={styles.checklistScroll} contentContainerStyle={styles.checklistScrollContent}>
-            {checklistItems.map((item) => (
-              <View key={item.id} style={styles.checklistItem}>
-                <TouchableOpacity
-                  style={styles.checklistCheckbox}
-                  onPress={() => toggleChecklistItem(item.id)}
-                >
-                  <View style={[styles.checkbox, item.checked && styles.checkboxChecked]}>
-                    {item.checked && <Ionicons name="checkmark" size={20} color="#FFF" />}
-                  </View>
-                  <Text style={[styles.checklistItemText, item.checked && styles.checklistItemTextChecked]}>
-                    {item.text}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => deleteChecklistItem(item.id)}>
-                  <Ionicons name="trash-outline" size={20} color="#999" />
-                </TouchableOpacity>
-              </View>
-            ))}
-
-            <View style={styles.checklistAddContainer}>
-              <TextInput
-                style={styles.checklistInput}
-                placeholder="アイテムを追加..."
-                placeholderTextColor="#999"
-                onSubmitEditing={(e) => {
-                  addChecklistItem(e.nativeEvent.text);
-                }}
-              />
-            </View>
-          </ScrollView>
-        </View>
       </Modal>
 
       {nextRecord && (
@@ -583,6 +833,8 @@ export default function CountdownScreen() {
     <Stack.Navigator
       screenOptions={{
         headerShown: false,
+        gestureEnabled: false,
+        fullScreenGestureEnabled: false,
         contentStyle: {
           backgroundColor: theme.colors.background.primary,
         },
@@ -595,6 +847,18 @@ export default function CountdownScreen() {
         options={{
           animation: 'slide_from_right',
           presentation: 'card',
+          gestureEnabled: false,
+          fullScreenGestureEnabled: false,
+        }}
+      />
+      <Stack.Screen
+        name="ProfileEdit"
+        component={ProfileEditScreen}
+        options={{
+          animation: 'slide_from_right',
+          presentation: 'card',
+          gestureEnabled: false,
+          fullScreenGestureEnabled: false,
         }}
       />
     </Stack.Navigator>
@@ -641,7 +905,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 65,
     left: '10%',
-    right: '5%',
+    right: '2%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -656,26 +920,100 @@ const styles = StyleSheet.create({
   },
   headerButtons: {
     flexDirection: 'row',
-    borderRadius: 30,
-    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 35,
     overflow: 'hidden',
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    shadowColor: '#000',
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    shadowColor: '#323232',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
     elevation: 8,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   headerButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+  },
+  accordionBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    zIndex: 15,
+  },
+  accordionContainer: {
+    position: 'absolute',
+    top: 120,
+    left: 20,
+    right: 20,
+    zIndex: 20,
     overflow: 'hidden',
   },
-  buttonBlur: {
-    paddingHorizontal: 8,
-    paddingVertical: 14,
-    borderRadius: 35,
+  accordionCard: {
+    borderRadius: 18,
+    backgroundColor: '#141414',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
+    elevation: 12,
+  },
+  accordionList: {
+    padding: 12,
+    gap: 10,
+  },
+  accordionItem: {
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  accordionItemSelected: {
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.35)',
+  },
+  accordionItemContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 12,
+  },
+  accordionDate: {
+    width: 48,
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    textAlign: 'center',
+  },
+  accordionTextBlock: {
+    flex: 1,
+  },
+  accordionArtist: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255, 255, 255, 0.7)',
+  },
+  accordionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginTop: 2,
+  },
+  accordionCheck: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  accordionEmpty: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    textAlign: 'center',
+    paddingVertical: 16,
+    fontSize: 13,
   },
   countdownDisplayContainer: {
     width: '100%',
@@ -693,13 +1031,16 @@ const styles = StyleSheet.create({
   },
   countdownNumber: {
     alignItems: 'center',
+    overflow: 'hidden',
   },
   countdownValue: {
-    fontSize: 44,
+    fontSize: 60,
     fontWeight: '900',
+    fontFamily: 'Anton_400Regular',
     color: '#FFF',
     fontVariant: ['tabular-nums'],
-    lineHeight: 52,
+    lineHeight: 72,
+    letterSpacing: 1,
   },
   countdownLabel: {
     fontSize: 16,
@@ -715,18 +1056,19 @@ const styles = StyleSheet.create({
     lineHeight: 60,
   },
   enjoyText: {
-    fontSize: 40,
+    fontSize: 45,
     fontWeight: '900',
+    fontFamily: 'Anton_400Regular',
     color: '#FFF',
     textAlign: 'center',
-    letterSpacing: 1,
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
+    letterSpacing: 2,
+    textShadowColor: 'rgba(0, 0, 0, 0.2)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 8,
   },
   ticketHost: {
     position: 'absolute',
-    top: 240,
+    top: 210,
     bottom: 0,
     left: 0,
     right: 0,
@@ -802,6 +1144,18 @@ const styles = StyleSheet.create({
     color: '#000',
     textAlign: 'center',
     marginBottom: 5,
+  },
+  ticketTitleWrapper: {
+    position: 'absolute',
+    top: 0,
+    left: 35,
+    width: 220,
+    height: 32,
+  },
+  ticketTitleText: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#000',
   },
   ticketArtist: {
     position: 'absolute',

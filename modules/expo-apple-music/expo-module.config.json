@@ -1,0 +1,7 @@
+{
+  "name": "expo-apple-music",
+  "platforms": ["ios"],
+  "ios": {
+    "deploymentTarget": "15.0"
+  }
+}

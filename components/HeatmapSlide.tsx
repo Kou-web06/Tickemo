@@ -8,6 +8,7 @@ const CARD_WIDTH = width - 40;
 
 interface HeatmapSlideProps {
   records: Array<{ date: string; [key: string]: any }>;
+  variant?: 'light' | 'dark';
 }
 
 // 月の略称
@@ -77,9 +78,46 @@ const getSmoothPath = (points: Array<{ x: number; y: number }>) => {
   return path;
 };
 
-export default function HeatmapSlide({ records }: HeatmapSlideProps) {
+export default function HeatmapSlide({ records, variant = 'light' }: HeatmapSlideProps) {
+  const isDark = variant === 'dark';
   const currentYear = new Date().getFullYear();
   const [selectedYear, setSelectedYear] = useState(currentYear);
+
+  const palette = useMemo(
+    () =>
+      isDark
+        ? {
+            card: 'rgba(16, 16, 20, 0.95)',
+            cardBorder: 'rgba(255, 255, 255, 0.08)',
+            title: 'rgba(255, 255, 255, 0.92)',
+            subtitle: 'rgba(255, 255, 255, 0.6)',
+            grid: 'rgba(255, 255, 255, 0.08)',
+            axis: 'rgba(255, 255, 255, 0.6)',
+            line: '#ff4da3',
+            statsText: 'rgba(255, 255, 255, 0.7)',
+            statsValue: 'rgba(255, 255, 255, 0.95)',
+            divider: 'rgba(255, 255, 255, 0.12)',
+            navEnabled: 'rgba(255, 255, 255, 0.75)',
+            navDisabled: 'rgba(255, 255, 255, 0.25)',
+            shadow: 'rgba(0, 0, 0, 0.6)',
+          }
+        : {
+            card: '#FFFFFF',
+            cardBorder: 'transparent',
+            title: '#383838',
+            subtitle: '#8E8E93',
+            grid: '#F0F0F0',
+            axis: '#999999',
+            line: '#ff0099',
+            statsText: '#666666',
+            statsValue: '#383838',
+            divider: '#E8E8E8',
+            navEnabled: '#666666',
+            navDisabled: '#DDDDDD',
+            shadow: '#d2d2d2',
+          },
+    [isDark]
+  );
   
   const pulseData = useMemo(() => generatePulseData(records, selectedYear), [records, selectedYear]);
   
@@ -194,7 +232,13 @@ export default function HeatmapSlide({ records }: HeatmapSlideProps) {
   // 未使用の変数を削除
 
   return (
-    <View style={styles.card}>
+    <View
+      style={[
+        styles.card,
+        isDark && styles.cardDark,
+        { backgroundColor: palette.card, borderColor: palette.cardBorder, shadowColor: palette.shadow },
+      ]}
+    >
       <View style={styles.header}>
         <View style={styles.titleRow}>
           <TouchableOpacity
@@ -205,12 +249,16 @@ export default function HeatmapSlide({ records }: HeatmapSlideProps) {
             <Ionicons
               name="chevron-back"
               size={20}
-              color={hasPrevYear ? '#666666' : '#DDDDDD'}
+              color={hasPrevYear ? palette.navEnabled : palette.navDisabled}
             />
           </TouchableOpacity>
           <View style={styles.titleContainer}>
-            <Text style={styles.title}>{selectedYear}</Text>
-            <Text style={styles.subtitle}>年間ライブ記録</Text>
+            <Text style={[styles.title, isDark && styles.titleDark, { color: palette.title }]}>
+              {selectedYear}
+            </Text>
+            <Text style={[styles.subtitle, isDark && styles.subtitleDark, { color: palette.subtitle }]}>
+              年間ライブ記録
+            </Text>
           </View>
           <TouchableOpacity
             onPress={handleNextYear}
@@ -220,7 +268,7 @@ export default function HeatmapSlide({ records }: HeatmapSlideProps) {
             <Ionicons
               name="chevron-forward"
               size={20}
-              color={hasNextYear ? '#666666' : '#DDDDDD'}
+              color={hasNextYear ? palette.navEnabled : palette.navDisabled}
             />
           </TouchableOpacity>
         </View>
@@ -232,8 +280,8 @@ export default function HeatmapSlide({ records }: HeatmapSlideProps) {
           <Defs>
             {/* グラデーション（上から下：60%→10%） */}
             <LinearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
-              <Stop offset="0%" stopColor="#ff0099" stopOpacity="0.5" />
-              <Stop offset="100%" stopColor="#ff0099" stopOpacity="0.05" />
+              <Stop offset="0%" stopColor={palette.line} stopOpacity={isDark ? 0.25 : 0.3} />
+              <Stop offset="100%" stopColor={palette.line} stopOpacity={isDark ? 0.02 : 0.01} />
             </LinearGradient>
           </Defs>
 
@@ -247,7 +295,7 @@ export default function HeatmapSlide({ records }: HeatmapSlideProps) {
                 y1={y}
                 x2={SVG_WIDTH - GRAPH_PADDING_HORIZONTAL}
                 y2={y}
-                stroke="#F0F0F0"
+                stroke={palette.grid}
                 strokeWidth="1"
               />
             );
@@ -266,7 +314,7 @@ export default function HeatmapSlide({ records }: HeatmapSlideProps) {
             <Path
               d={smoothPath}
               fill="none"
-              stroke="#ff0099"
+              stroke={palette.line}
               strokeWidth="3"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -281,7 +329,7 @@ export default function HeatmapSlide({ records }: HeatmapSlideProps) {
                 x={point.x}
                 y={SVG_HEIGHT - 10}
                 fontSize="10"
-                fill="#999999"
+                fill={palette.axis}
                 textAnchor="middle"
                 fontWeight="500"
               >
@@ -300,7 +348,7 @@ export default function HeatmapSlide({ records }: HeatmapSlideProps) {
                 x={GRAPH_PADDING_HORIZONTAL - 8}
                 y={y + 4}
                 fontSize="9"
-                fill="#CCCCCC"
+                fill={palette.axis}
                 textAnchor="end"
               >
                 {value}
@@ -314,7 +362,7 @@ export default function HeatmapSlide({ records }: HeatmapSlideProps) {
               cx={lastPoint.x}
               cy={lastPoint.y}
               r="3"
-              fill="#ff0099"
+              fill={palette.line}
             />
           )}
         </Svg>
@@ -334,6 +382,7 @@ export default function HeatmapSlide({ records }: HeatmapSlideProps) {
                     outputRange: [0, 0.3],
                   }),
                   transform: [{ scale: dotScale }],
+                  backgroundColor: palette.line,
                 },
               ]}
             />
@@ -345,6 +394,7 @@ export default function HeatmapSlide({ records }: HeatmapSlideProps) {
                   left: lastPoint.x - 7,
                   top: lastPoint.y - 7,
                   opacity: dotOpacity,
+                  backgroundColor: palette.line,
                 },
               ]}
             />
@@ -353,9 +403,13 @@ export default function HeatmapSlide({ records }: HeatmapSlideProps) {
       </View>
 
       {/* 統計情報 */}
-      <View style={styles.stats}>
-        <Text style={styles.statsText}>
-          {selectedYear}年は <Text style={styles.statsValue}>{pulseData.reduce((sum, d) => sum + d.count, 0)}</Text> 回参戦
+      <View style={[styles.stats, isDark && styles.statsDark, { borderTopColor: palette.divider }]}>
+        <Text style={[styles.statsText, isDark && styles.statsTextDark, { color: palette.statsText }]}>
+          {selectedYear}年は{' '}
+          <Text style={[styles.statsValue, isDark && styles.statsValueDark, { color: palette.statsValue }]}>
+            {pulseData.reduce((sum, d) => sum + d.count, 0)}
+          </Text>{' '}
+          回参戦
         </Text>
       </View>
     </View>
@@ -374,6 +428,9 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
     height: 300,
+  },
+  cardDark: {
+    borderWidth: 1,
   },
   header: {
     marginBottom: 12,
@@ -397,13 +454,19 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#000000',
+    color: '#383838',
     marginBottom: 2,
+  },
+  titleDark: {
+    color: 'rgba(255, 255, 255, 0.92)',
   },
   subtitle: {
     fontSize: 11,
     fontWeight: '500',
     color: '#8E8E93',
+  },
+  subtitleDark: {
+    color: 'rgba(255, 255, 255, 0.6)',
   },
   graphContainer: {
     marginBottom: 12,
@@ -430,14 +493,23 @@ const styles = StyleSheet.create({
     borderTopColor: '#E8E8E8',
     marginTop: 8,
   },
+  statsDark: {
+    borderTopColor: 'rgba(255, 255, 255, 0.12)',
+  },
   statsText: {
     fontSize: 12,
     fontWeight: '500',
     color: '#666666',
     textAlign: 'center',
   },
+  statsTextDark: {
+    color: 'rgba(255, 255, 255, 0.7)',
+  },
   statsValue: {
     fontWeight: '700',
-    color: '#000000',
+    color: '#383838',
+  },
+  statsValueDark: {
+    color: 'rgba(255, 255, 255, 0.95)',
   },
 });

@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android", "web"],
+  "apple": {
+    "modules": ["TickemoPlayerModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.tickemoplayer.TickemoPlayerModule"]
+  }
+}

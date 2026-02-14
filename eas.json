@@ -16,14 +16,21 @@
       },
       "env": {
         "EXPO_USE_APPLE_SILICON": "1",
-        "RCT_NEW_ARCH_ENABLED": "0"
+        "RCT_NEW_ARCH_ENABLED": "1",
+        "EXPO_PUBLIC_APP_MODE": "testflight"
       }
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_APP_MODE": "testflight"
+      }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_APP_MODE": "production"
+      }
     }
   },
   "submit": {

@@ -1,29 +1,18 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { createContext, useContext, useEffect, ReactNode, useMemo } from 'react';
 import type { ChekiRecord } from '../types/record';
+import { scheduleLiveReminders } from '../utils/liveNotifications';
+import { useAppStore } from '../store/useAppStore';
+import { deleteLiveImages, migrateLegacyImagesToTickemo, resolveLocalImageUri } from '../lib/imageUpload';
+import { useCloudSync } from '../hooks/useCloudSync';
 export type { ChekiRecord } from '../types/record';
-
-const INITIAL_RECORDS: ChekiRecord[] = [
-  {
-    id: '00000000-0000-0000-0000-000000000001',
-    user_id: 'demo-user-id',
-    artist: 'The Beatles',
-    liveName: 'Reunion Tour 2024',
-    date: '2024-12-15',
-    venue: '東京ドーム',
-    imageUrl: 'https://picsum.photos/300/400?random=1',
-    memo: '最高のコンサートでした！',
-    detail: 'Let It Be\nThe Long and Winding Road\nHey Jude\nHere Comes the Sun',
-    createdAt: '2024-12-01T12:00:00Z',
-  },
-];
 
 interface RecordsContextType {
   records: ChekiRecord[];
-  addRecord: (record: ChekiRecord) => void;
-  updateRecord: (id: string, record: ChekiRecord) => void;
-  deleteRecord: (id: string) => void;
-  clearRecords: () => void;
+  addRecord: (record: ChekiRecord) => Promise<void>;
+  updateRecord: (id: string, record: ChekiRecord) => Promise<void>;
+  deleteRecord: (id: string) => Promise<void>;
+  clearRecords: () => Promise<void>;
+  isLoading: boolean;
 }
 
 const RecordsContext = createContext<RecordsContextType | undefined>(undefined);
@@ -34,7 +23,6 @@ const RecordsContext = createContext<RecordsContextType | undefined>(undefined);
 const normalizeDateFormat = (record: ChekiRecord): ChekiRecord => {
   if (!record.date) return record;
   
-  // 「2025-01-12」形式を「2025.01.12」に変換
   const normalized = record.date.replace(/-/g, '.');
   
   return {
@@ -43,66 +31,72 @@ const normalizeDateFormat = (record: ChekiRecord): ChekiRecord => {
   };
 };
 
-export const RecordsProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [records, setRecords] = useState<ChekiRecord[]>(INITIAL_RECORDS.map((r) => normalizeDateFormat(r)));
-  const [isLoaded, setIsLoaded] = useState(false);
+const resolveRecordImages = (record: ChekiRecord): ChekiRecord => {
+  if (!record.imageUrls || record.imageUrls.length === 0) return record;
+  const resolvedEntries = record.imageUrls
+    .map((uri, index) => {
+      const resolvedUri = resolveLocalImageUri(uri);
+      if (!resolvedUri) return null;
+      return {
+        uri: resolvedUri,
+        assetId: record.imageAssetIds?.[index] ?? null,
+      };
+    })
+    .filter((entry): entry is { uri: string; assetId: string | null } => Boolean(entry));
+  return {
+    ...record,
+    imageUrls: resolvedEntries.map((entry) => entry.uri),
+    imageAssetIds: record.imageAssetIds ? resolvedEntries.map((entry) => entry.assetId) : record.imageAssetIds,
+  };
+};
 
-  // AsyncStorageからデータを読み込む
+
+export const RecordsProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const lives = useAppStore((state) => state.lives);
+  const addLive = useAppStore((state) => state.addLive);
+  const updateLive = useAppStore((state) => state.updateLive);
+  const deleteLive = useAppStore((state) => state.deleteLive);
+  const clearLives = useAppStore((state) => state.clearLives);
+  
+  const { isSyncing } = useCloudSync();
+
+  const records = useMemo(
+    () => lives.map((record) => resolveRecordImages(normalizeDateFormat(record))),
+    [lives]
+  );
+  const isLoading = isSyncing;
+
   useEffect(() => {
-    loadRecords();
+    migrateLegacyImagesToTickemo().catch((error) => {
+      console.log('[RecordsContext] Legacy image migration failed:', error);
+    });
   }, []);
 
-  // recordsが変更されたら保存
   useEffect(() => {
-    if (isLoaded) {
-      saveRecords();
-    }
-  }, [records, isLoaded]);
+    scheduleLiveReminders(records).catch((error) => {
+      console.log('[RecordsContext] Failed to schedule reminders:', error);
+    });
+  }, [records]);
 
-  const loadRecords = async () => {
-    try {
-      const storedRecords = await AsyncStorage.getItem('@records');
-      if (storedRecords !== null) {
-        const parsedRecords = JSON.parse(storedRecords) as ChekiRecord[];
-        // 日付形式を統一する
-        const normalizedRecords = parsedRecords.map((r) => normalizeDateFormat(r));
-        setRecords(normalizedRecords);
-      }
-    } catch (error) {
-      console.error('Failed to load records:', error);
-    } finally {
-      setIsLoaded(true);
-    }
+  const addRecord = async (record: ChekiRecord) => {
+    addLive(normalizeDateFormat(record));
   };
 
-  const saveRecords = async () => {
-    try {
-      await AsyncStorage.setItem('@records', JSON.stringify(records));
-    } catch (error) {
-      console.error('Failed to save records:', error);
-    }
+  const updateRecord = async (id: string, updatedRecord: ChekiRecord) => {
+    updateLive(id, normalizeDateFormat(updatedRecord));
   };
 
-  const addRecord = (record: ChekiRecord) => {
-    const normalized = normalizeDateFormat(record);
-    setRecords([normalized, ...records]);
+  const deleteRecord = async (id: string) => {
+    await deleteLiveImages(id);
+    deleteLive(id);
   };
 
-  const updateRecord = (id: string, updatedRecord: ChekiRecord) => {
-    const normalized = normalizeDateFormat(updatedRecord);
-    setRecords(records.map(r => r.id === id ? normalized : r));
-  };
-
-  const deleteRecord = (id: string) => {
-    setRecords(records.filter(r => r.id !== id));
-  };
-
-  const clearRecords = () => {
-    setRecords([]);
+  const clearRecords = async () => {
+    clearLives();
   };
 
   return (
-    <RecordsContext.Provider value={{ records, addRecord, updateRecord, deleteRecord, clearRecords }}>
+    <RecordsContext.Provider value={{ records, addRecord, updateRecord, deleteRecord, clearRecords, isLoading }}>
       {children}
     </RecordsContext.Provider>
   );

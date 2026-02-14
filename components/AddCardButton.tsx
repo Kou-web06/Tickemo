@@ -26,6 +26,7 @@ export const AddCardButton: React.FC<AddCardButtonProps> = ({ width }) => {
           <Ionicons name="add" size={60} color="#7e7e7e" />
         </View>
       </View>
+
     </View>
   );
 };

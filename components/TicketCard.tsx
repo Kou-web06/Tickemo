@@ -1,9 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Animated } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, Animated, TouchableWithoutFeedback, Easing, ScrollView } from 'react-native';
 import { Image } from 'expo-image';
 import Svg, { Path, Rect, Defs, Pattern, Use, Image as SvgImage } from 'react-native-svg';
 import QRCode from 'react-native-qrcode-svg';
+import TextTicker from 'react-native-text-ticker';
 import { ChekiRecord } from '../contexts/RecordsContext';
+import { NO_IMAGE_URI, useResolvedImageUri } from '../hooks/useResolvedImageUri';
 
 interface TicketCardProps {
   record: ChekiRecord;
@@ -11,25 +13,18 @@ interface TicketCardProps {
   isAnimating?: boolean;
   animationDirection?: 'out' | 'in';
   onAnimationEnd?: () => void;
-  animationProgress?: Animated.AnimatedInterpolation | number; // 0~1, 親から連動
+  animationProgress?: Animated.AnimatedInterpolation<number> | number; // 0~1, 親から連動
 }
 
 export const TicketCard: React.FC<TicketCardProps> = ({ record, width, isAnimating = false, animationDirection = 'out', onAnimationEnd, animationProgress }) => {
-  const [isTitleTruncated, setIsTitleTruncated] = useState(false);
   const height = width * 0.366; // 118/322 ratio from SVG
   const imageSize = height * 0.619; // 73/118
+  const liveName = record.liveName || '-';
+  const isLongName = liveName.length >= 8;
+  const coverUri = useResolvedImageUri(record.imageUrls?.[0], record.imageAssetIds?.[0]);
 
   const backgroundSlideAnim = useRef(new Animated.Value(0)).current;
   const jacketSlideAnim = useRef(new Animated.Value(0)).current;
-
-  const handleTitleLayout = (event: any) => {
-    const { lines } = event.nativeEvent;
-    if (lines && lines.length > 1) {
-      setIsTitleTruncated(true);
-    } else {
-      setIsTitleTruncated(false);
-    }
-  };
 
   useEffect(() => {
     if (isAnimating) {
@@ -143,7 +138,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({ record, width, isAnimati
       >
         <View style={styles.jacketContainer}>
           <Image
-            source={{ uri: record.imageUrl }}
+            source={{ uri: coverUri ?? NO_IMAGE_URI }}
             style={styles.image}
             contentFit="cover"
           />
@@ -172,20 +167,32 @@ export const TicketCard: React.FC<TicketCardProps> = ({ record, width, isAnimati
           ) : (
             <Image
               source={require('../assets/no-qr.png')}
-              style={{ width: imageSize, height: imageSize, resizeMode: 'contain' }}
+              style={{ width: imageSize, height: imageSize }}
+              contentFit="contain"
             />
           )}
         </View>
 
         {/* Text info on the right */}
         <View style={styles.infoContainer}>
-          <Text 
-            style={styles.title} 
-            numberOfLines={1}
-            onTextLayout={handleTitleLayout}
-          >
-            {isTitleTruncated ? (record.liveName || '-').substring(0, 10) + '...' : (record.liveName || '-')}
-          </Text>
+          {isLongName ? (
+            <View style={styles.titleContainer}>
+              <TextTicker
+                style={styles.titleText}
+                duration={liveName.length * 250}
+                loop
+                bounce={false}
+                repeatSpacer={40}
+                marqueeDelay={1000}
+              >
+                {liveName}
+              </TextTicker>
+            </View>
+          ) : (
+            <Text style={styles.title} numberOfLines={1}>
+              {liveName}
+            </Text>
+          )}
           <Text style={styles.subtitle} numberOfLines={1}>
             {record.artist || '-'}
           </Text>
@@ -264,6 +271,13 @@ const styles = StyleSheet.create({
     position: 'relative',
     height: '100%',
   },
+  titleContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 25,
+    width: 180,
+    height: 20,
+  },
   title: {
     position: 'absolute',
     top: 0,
@@ -272,6 +286,11 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#000',
     marginBottom: 4,
+  },
+  titleText: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#000',
   },
   subtitle: {
     position: 'absolute',

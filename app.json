@@ -3,28 +3,43 @@
     "name": "Tickemo",
     "slug": "Tickemo",
     "version": "1.0.0",
+    "buildNumber": "9",
     "orientation": "portrait",
     "icon": "./assets/app-icon/icon1.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": false,
+    "newArchEnabled": true,
     "splash": {
-      "image": "./assets/app-icon/icon1.png",
+      "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#000000"
     },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.anonymous.Tickemo",
+      "frameworks": [
+        "MusicKit"
+      ],
       "infoPlist": {
+        "UIFileSharingEnabled": true,
+        "LSSupportsOpeningDocumentsInPlace": true,
         "ITSAppUsesNonExemptEncryption": false,
         "NSPhotoLibraryUsageDescription": "ライブの思い出を画像として保存するために、フォトライブラリへのアクセスが必要です。",
-        "NSPhotoLibraryAddUsageDescription": "ライブの思い出を画像として保存するために、フォトライブラリへのアクセスが必要です。"
-      }
+        "NSPhotoLibraryAddUsageDescription": "ライブの思い出を画像として保存するために、フォトライブラリへのアクセスが必要です。",
+        "NSAppleMusicUsageDescription": "アーティストの楽曲を再生するために、Apple Musicへのアクセスが必要です。",
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLSchemes": [
+              "com.googleusercontent.apps.177149194090-q3lsjb53p2bgls307mrsc5q3fkk2kbjt"
+            ]
+          }
+        ]
+      },
+      "googleMobileAdsAppId": "ca-app-pub-2769977162057386~9124706504"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/app-icon/icon1.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#0A0A0A"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -39,13 +54,16 @@
         "android.permission.READ_MEDIA_IMAGES",
         "android.permission.READ_MEDIA_VIDEO",
         "android.permission.READ_MEDIA_AUDIO"
-      ]
+      ],
+      "googleMobileAdsAppId": "ca-app-pub-2769977162057386~9124706504"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
+      "react-native-cloud-storage",
       "expo-font",
+      "expo-file-system",
       [
         "expo-media-library",
         {
@@ -53,12 +71,38 @@
           "savePhotosPermission": "ライブの思い出を画像として保存するために使用します。"
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static"
+          }
+        }
+      ],
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-2769977162057386~9124706504",
+          "iosAppId": "ca-app-pub-2769977162057386~9124706504"
+        }
+      ],
+      "expo-sqlite"
     ],
     "extra": {
       "eas": {
         "projectId": "4179883a-5098-498d-9b2d-028149d2dfab"
-      }
+      },
+      "googleSignIn": {
+        "iosClientId": "177149194090-q3lsjb53p2bgls307mrsc5q3fkk2kbjt.apps.googleusercontent.com",
+        "webClientId": "177149194090-s6dhkpmn70k7fl70uv7eibm2puf164tc.apps.googleusercontent.com"
+      },
+      "supabaseUrl": "",
+      "supabaseAnonKey": "",
+      "supabaseStorageBucket": ""
+    },
+    "experiments": {
+      "typedRoutes": false
     }
   }
 }

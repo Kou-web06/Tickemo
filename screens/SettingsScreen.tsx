@@ -19,30 +19,31 @@ import {
   Clipboard,
   ImageSourcePropType,
   DeviceEventEmitter,
+  Platform,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Crypto from 'expo-crypto';
-import * as DocumentPicker from 'expo-document-picker';
 import * as WebBrowser from 'expo-web-browser';
+import { Asset } from 'expo-asset';
 import { useFocusEffect } from '@react-navigation/native';
 import { useFonts, Anton_400Regular } from '@expo-google-fonts/anton';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, Ionicons, AntDesign, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { Path, Defs, Rect, RadialGradient, Stop } from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { captureRef } from 'react-native-view-shot';
 import * as MediaLibrary from 'expo-media-library';
 import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
+import QRCode from 'react-native-qrcode-svg';
 // import changeIcon from 'react-native-change-icon';
 import { theme } from '../theme';
-import { useTabBar } from '../contexts/TabBarContext';
 import { useRecords } from '../contexts/RecordsContext';
 import { useAppStore } from '../store/useAppStore';
 import { getShareCardSource } from '../utils/statusSvgs';
 import { isTestflightMode } from '../utils/appMode';
-import type { ChekiRecord } from '../types/record';
+import { normalizeStoredImageUri, resolveLocalImageUri, resolveStoredImageUri } from '../lib/imageUpload';
+import { pullImageFromCloud } from '../lib/icloudImageSync';
+import { getMembershipActionLabel, getMembershipLabel } from '../lib/membership';
 
 interface SettingItem {
   id: string;
@@ -92,6 +93,12 @@ interface MyPageShareModalProps {
 
 const SECTIONS: SettingSection[] = [
   {
+    title: '一般',
+    data: [
+      { id: 'icloud-sync', label: 'iCloud同期' },
+    ],
+  },
+  {
     title: '通知',
     data: [
       { id: 'notifications', label: '通知' },
@@ -100,7 +107,6 @@ const SECTIONS: SettingSection[] = [
   {
     title: 'このアプリについて',
     data: [
-      { id: 'about', label: 'Tickemoについて', value: '' },
       { id: 'apple-music', label: 'Data provided by Apple Music', value: '' },
       { id: 'terms', label: '利用規約' },
       { id: 'privacy', label: 'プライバシーポリシー' },
@@ -109,13 +115,14 @@ const SECTIONS: SettingSection[] = [
   {
     title: 'サポート',
     data: [
-      // { id: 'review', label: '5つ星レビューをお願いします' },
+      { id: 'review', label: '5つ星レビューをお願いします' },
+      { id: 'faq', label: 'よくある質問' },
       { id: 'feedback', label: 'フィードバック' },
-      { id: 'sns', label: '開発者SNS' },
+      { id: 'sns', label: 'X' },
     ],
   },
   {
-    title: 'データ初期化',
+    title: 'アカウント',
     data: [
       { id: 'delete', label: 'すべてのデータを削除', destructive: true },
     ],
@@ -129,17 +136,69 @@ const APP_ICONS = [
   { id: 'icon4', image: require('../assets/app-icon/icon4.png') },
 ];
 
+const APP_STORE_URL = 'https://apps.apple.com/ja/app/tickemo-%E3%83%A9%E3%82%A4%E3%83%96%E3%81%AE%E6%80%9D%E3%81%84%E5%87%BA%E3%82%92%E8%A8%98%E9%8C%B2/id6758604980';
+const APP_STORE_REVIEW_URL = `${APP_STORE_URL}?action=write-review`;
+
 export default function SettingsScreen({ navigation }: any) {
-  const { setTabBarVisible } = useTabBar();
-  const { records, addRecord, updateRecord, clearRecords } = useRecords();
+  const { records, clearRecords } = useRecords();
   const userProfile = useAppStore((state) => state.userProfile);
+  const hasHydrated = useAppStore((state) => state.hasHydrated);
+  const membershipType = useAppStore((state) => state.membershipType);
   const [selectedIcon, setSelectedIcon] = useState<string>('icon1');
   const [shareModalVisible, setShareModalVisible] = useState(false);
   const [xHandle, setXHandle] = useState('');
   const [instagramHandle, setInstagramHandle] = useState('');
-  const [lastBackupLabel, setLastBackupLabel] = useState('未作成');
-  const [backupNoteExpanded, setBackupNoteExpanded] = useState(false);
-  const hasBackup = lastBackupLabel !== '未作成';
+  const [firstLaunchAt, setFirstLaunchAt] = useState('');
+  const [resolvedProfileAvatarUri, setResolvedProfileAvatarUri] = useState('');
+
+  const resolveProfileAvatar = useCallback(async () => {
+    if (!hasHydrated) return;
+
+    const avatarUri = userProfile?.avatarUri || '';
+    if (!avatarUri) {
+      setResolvedProfileAvatarUri('');
+      return;
+    }
+
+    const normalized = normalizeStoredImageUri(avatarUri) || avatarUri;
+    let restored = await resolveStoredImageUri(normalized, null);
+
+    if (!restored && normalized.startsWith('Tickemo/')) {
+      try {
+        const pulled = await pullImageFromCloud(normalized);
+        if (pulled) {
+          restored = resolveLocalImageUri(normalized) || '';
+        }
+      } catch (error) {
+        console.log('[Settings] Failed to pull profile avatar from iCloud:', error);
+      }
+    }
+
+    const fallback = resolveLocalImageUri(normalized) || normalized;
+    setResolvedProfileAvatarUri(restored || fallback || '');
+  }, [hasHydrated, userProfile?.avatarUri]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const run = async () => {
+      if (!isMounted) return;
+      await resolveProfileAvatar();
+    };
+
+    void run();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [resolveProfileAvatar]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void resolveProfileAvatar();
+    }, [resolveProfileAvatar])
+  );
+
   const profile = useMemo(() => {
     const displayName = userProfile?.name || 'User';
     const rawUsername = userProfile?.username || 'user';
@@ -147,10 +206,10 @@ export default function SettingsScreen({ navigation }: any) {
     return {
       displayName,
       username,
-      avatarUrl: userProfile?.avatarUri || '',
-      joinedAt: userProfile?.joinedAt || '',
+      avatarUrl: resolvedProfileAvatarUri,
+      joinedAt: userProfile?.joinedAt || firstLaunchAt || '',
     };
-  }, [userProfile]);
+  }, [firstLaunchAt, resolvedProfileAvatarUri, userProfile]);
 
   // 統計情報
   const stats = useMemo(() => {
@@ -179,7 +238,6 @@ export default function SettingsScreen({ navigation }: any) {
 
     // 統計計算用：参戦済みレコードのみ
     const totalCheckIns = pastRecords.length;
-    
     let daysSinceStart = 0;
     let sinceDate = '';
     if (records.length > 0) {
@@ -275,39 +333,44 @@ export default function SettingsScreen({ navigation }: any) {
     [stats.fanLevel]
   );
 
-  const shareSummary = useMemo(() => {
-    const lines = [
-      `Your Live Rank: ${stats.fanLevel}`,
-      `Total Lives: ${stats.totalCheckIns}`,
-      stats.fanLevel !== 'LEGEND'
-        ? `Next: ${stats.nextLevel} in ${stats.remainingLives} lives`
-        : 'LEGEND到達',
-      stats.sinceDate ? `初参戦: ${stats.sinceDate}` : '',
-      stats.topArtist ? `最多参戦: ${stats.topArtist} (${stats.topArtistCount})` : '',
-    ].filter(Boolean);
-
-    return `${lines.join('\n')}\n#Tickemo`;
-  }, [stats]);
-
-  useEffect(() => {
-    setTabBarVisible(false);
-    loadSelectedIcon();
-    loadSocialHandles();
-    loadLatestBackupLabel();
-    return () => {
-      setTabBarVisible(true);
-    };
-  }, []);
-
-  useFocusEffect(
-    useCallback(() => {
-      DeviceEventEmitter.emit('app:bannerVisibility', false);
-      return () => {
-        DeviceEventEmitter.emit('app:bannerVisibility', true);
-      };
-    }, [])
+  const shareSummary = useMemo(
+    () => 'Tickemoでプロフィールカードを作成しました！\n趣味の合う方、仲良くしてください🙌\n#Tickemo',
+    []
   );
 
+  const membershipLabel = useMemo(() => {
+    return getMembershipLabel(membershipType);
+  }, [membershipType]);
+
+  const handleMembershipButtonPress = useCallback(() => {
+    if (membershipType === 'lifetime') {
+      Share.share({
+        title: 'Tickemo',
+        message: APP_STORE_URL,
+        url: APP_STORE_URL,
+      }).catch(() => {
+        Alert.alert('エラー', '共有に失敗しました');
+      });
+      return;
+    }
+
+    navigation.navigate('Paywall');
+  }, [membershipType, navigation]);
+
+  useEffect(() => {
+    loadSelectedIcon();
+    loadSocialHandles();
+    loadFirstLaunchDate();
+  }, []);
+
+  useEffect(() => {
+    Asset.loadAsync([
+      require('../assets/paywall/paywallBackground.png'),
+      require('../assets/paywall/Plus.logo.png'),
+    ]).catch(() => {
+      // noop
+    });
+  }, []);
 
   useEffect(() => {
     if (profile.avatarUrl) {
@@ -335,6 +398,17 @@ export default function SettingsScreen({ navigation }: any) {
       setInstagramHandle(map['@sns_instagram'] || '');
     } catch (error) {
       console.log('Failed to load social handles:', error);
+    }
+  };
+
+  const loadFirstLaunchDate = async () => {
+    try {
+      const stored = await AsyncStorage.getItem('@has_launched');
+      if (stored && !Number.isNaN(Date.parse(stored))) {
+        setFirstLaunchAt(stored);
+      }
+    } catch (error) {
+      console.log('Failed to load first launch date:', error);
     }
   };
 
@@ -426,7 +500,7 @@ export default function SettingsScreen({ navigation }: any) {
               ]);
               DeviceEventEmitter.emit('app:resetToWelcome');
               DeviceEventEmitter.emit('app:goToHome');
-              if (navigation?.popToTop) {
+              if (navigation?.popToTop && navigation?.canGoBack?.()) {
                 navigation.popToTop();
               }
             } catch (error) {
@@ -439,297 +513,8 @@ export default function SettingsScreen({ navigation }: any) {
     );
   };
 
-  const buildBackupFileName = () => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = `${now.getMonth() + 1}`.padStart(2, '0');
-    const day = `${now.getDate()}`.padStart(2, '0');
-    return `Tickemo_Backup_${year}${month}${day}.txt`;
-  };
-
-  const getBackupDirectory = async () => {
-    const baseDir = FileSystem.documentDirectory;
-    if (!baseDir) return null;
-    const dir = `${baseDir}Tickemo/backup/`;
-    await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
-    return dir;
-  };
-
-  const getLatestBackupFileUri = async () => {
-    const backupDir = await getBackupDirectory();
-    if (!backupDir) return null;
-    const files = await FileSystem.readDirectoryAsync(backupDir);
-    const backupFiles = files
-      .map((name) => ({ name, match: name.match(/^Tickemo_Backup_(\d{8})\.txt$/) }))
-      .filter((entry) => entry.match)
-      .sort((a, b) => (a.match?.[1] ?? '').localeCompare(b.match?.[1] ?? ''));
-    const latest = backupFiles[backupFiles.length - 1];
-    return latest ? `${backupDir}${latest.name}` : null;
-  };
-
-  const pickBackupFileUri = async () => {
-    const result = await DocumentPicker.getDocumentAsync({
-      type: ['text/plain', 'application/json'],
-      copyToCacheDirectory: true,
-      multiple: false,
-    });
-    if (result.canceled) return null;
-    return result.assets?.[0]?.uri ?? null;
-  };
-
-  const formatBackupTimestamp = (value?: Date | null) => {
-    if (!value) return '未作成';
-    const year = value.getFullYear();
-    const month = `${value.getMonth() + 1}`.padStart(2, '0');
-    const day = `${value.getDate()}`.padStart(2, '0');
-    const hours = `${value.getHours()}`.padStart(2, '0');
-    const minutes = `${value.getMinutes()}`.padStart(2, '0');
-    return `${year}.${month}.${day} ${hours}:${minutes}`;
-  };
-
-  const loadLatestBackupLabel = async () => {
-    try {
-      const backupDir = await getBackupDirectory();
-      if (!backupDir) {
-        setLastBackupLabel('未作成');
-        return;
-      }
-      const files = await FileSystem.readDirectoryAsync(backupDir);
-      const backupFiles = files
-        .map((name) => ({ name, match: name.match(/^Tickemo_Backup_(\d{8})\.txt$/) }))
-        .filter((entry) => entry.match)
-        .sort((a, b) => (a.match?.[1] ?? '').localeCompare(b.match?.[1] ?? ''));
-      const latest = backupFiles[backupFiles.length - 1];
-      if (!latest) {
-        setLastBackupLabel('未作成');
-        return;
-      }
-      const latestUri = `${backupDir}${latest.name}`;
-      const info = await FileSystem.getInfoAsync(latestUri, { size: false } as any);
-      const modifiedAt = typeof info.modificationTime === 'number'
-        ? new Date(info.modificationTime * 1000)
-        : null;
-      setLastBackupLabel(formatBackupTimestamp(modifiedAt));
-    } catch (error) {
-      console.log('Failed to load backup label:', error);
-      setLastBackupLabel('未作成');
-    }
-  };
-
-  const normalizeImportedRecord = (
-    raw: Partial<ChekiRecord>,
-    existingIds: Set<string>,
-  ): ChekiRecord | null => {
-    const base = raw ?? {};
-    const artist = typeof base.artist === 'string' ? base.artist : '';
-    const liveName = typeof base.liveName === 'string' ? base.liveName : '';
-    const date = typeof base.date === 'string' ? base.date : '';
-    if (!artist || !liveName || !date) return null;
-
-    let nextId = typeof base.id === 'string' && base.id.trim()
-      ? base.id
-      : Crypto.randomUUID();
-    while (existingIds.has(nextId)) {
-      nextId = Crypto.randomUUID();
-    }
-
-    const imageUrls = Array.isArray(base.imageUrls)
-      ? base.imageUrls.filter((value): value is string => typeof value === 'string')
-      : undefined;
-    const imageAssetIds = Array.isArray(base.imageAssetIds)
-      ? base.imageAssetIds.map((value) => (typeof value === 'string' ? value : null))
-      : undefined;
-
-    return {
-      id: nextId,
-      user_id: typeof base.user_id === 'string' ? base.user_id : undefined,
-      artist,
-      artistImageUrl: typeof base.artistImageUrl === 'string' ? base.artistImageUrl : undefined,
-      liveName,
-      date,
-      venue: typeof base.venue === 'string' ? base.venue : undefined,
-      seat: typeof base.seat === 'string' ? base.seat : undefined,
-      startTime: typeof base.startTime === 'string' ? base.startTime : undefined,
-      endTime: typeof base.endTime === 'string' ? base.endTime : undefined,
-      imagePath: typeof base.imagePath === 'string' ? base.imagePath : undefined,
-      imageUrls,
-      imageAssetIds,
-      memo: typeof base.memo === 'string' ? base.memo : '',
-      detail: typeof base.detail === 'string' ? base.detail : undefined,
-      qrCode: typeof base.qrCode === 'string' ? base.qrCode : undefined,
-      createdAt: typeof base.createdAt === 'string' ? base.createdAt : new Date().toISOString(),
-    };
-  };
-
-  const buildRecordKey = (record: Pick<ChekiRecord, 'artist' | 'liveName' | 'date'>) => {
-    const artist = record.artist?.trim().toLowerCase() || '';
-    const liveName = record.liveName?.trim().toLowerCase() || '';
-    const date = record.date?.trim() || '';
-    if (!artist || !liveName || !date) return '';
-    return `${artist}__${liveName}__${date}`;
-  };
-
-  const mergeImageData = (
-    existing: ChekiRecord,
-    incoming: ChekiRecord
-  ): { imageUrls?: string[]; imageAssetIds?: Array<string | null>; changed: boolean } => {
-    const existingUrls = existing.imageUrls ?? [];
-    const existingAssetIds = existing.imageAssetIds ?? [];
-    const incomingUrls = incoming.imageUrls ?? [];
-    const incomingAssetIds = incoming.imageAssetIds ?? [];
-
-    if (incomingUrls.length === 0) {
-      return { imageUrls: existing.imageUrls, imageAssetIds: existing.imageAssetIds, changed: false };
-    }
-
-    const urlToAsset = new Map<string, string | null>();
-    existingUrls.forEach((url, index) => {
-      if (url) urlToAsset.set(url, existingAssetIds[index] ?? null);
-    });
-
-    let changed = false;
-    incomingUrls.forEach((url, index) => {
-      if (!url) return;
-      if (!urlToAsset.has(url)) {
-        urlToAsset.set(url, incomingAssetIds[index] ?? null);
-        changed = true;
-        return;
-      }
-      const currentAsset = urlToAsset.get(url) ?? null;
-      const incomingAsset = incomingAssetIds[index] ?? null;
-      if (!currentAsset && incomingAsset) {
-        urlToAsset.set(url, incomingAsset);
-        changed = true;
-      }
-    });
-
-    if (!changed) {
-      return { imageUrls: existing.imageUrls, imageAssetIds: existing.imageAssetIds, changed: false };
-    }
-
-    const mergedUrls = Array.from(urlToAsset.keys());
-    const mergedAssetIds = mergedUrls.map((url) => urlToAsset.get(url) ?? null);
-    return { imageUrls: mergedUrls, imageAssetIds: mergedAssetIds, changed: true };
-  };
-
-  const handleExportBackup = async () => {
-    if (!records.length) {
-      Alert.alert('バックアップなし', '保存できるデータがありません');
-      return;
-    }
-
-    try {
-      const fileName = buildBackupFileName();
-      const backupDir = await getBackupDirectory();
-      const fileUri = backupDir ? `${backupDir}${fileName}` : `${FileSystem.cacheDirectory}${fileName}`;
-      const payload = JSON.stringify(records);
-      await FileSystem.writeAsStringAsync(fileUri, payload, {
-        encoding: 'utf8',
-      });
-      Alert.alert('バックアップ完了', 'このiPhone内 > Tickemo > backup に保存しました。');
-      setLastBackupLabel(formatBackupTimestamp(new Date()));
-    } catch (error) {
-      console.log('Failed to export backup:', error);
-      Alert.alert('エラー', 'バックアップの作成に失敗しました');
-    }
-  };
-
-  const handleImportBackup = async () => {
-    try {
-      let targetUri = await getLatestBackupFileUri();
-      if (!targetUri) {
-        targetUri = await pickBackupFileUri();
-        if (!targetUri) return;
-      }
-
-      const content = await FileSystem.readAsStringAsync(targetUri, {
-        encoding: 'utf8',
-      });
-      const parsed = JSON.parse(content);
-      if (!Array.isArray(parsed)) {
-        Alert.alert('エラー', 'バックアップ形式が正しくありません');
-        return;
-      }
-
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('写真アクセスが必要', '復元には写真アプリへのアクセス許可が必要です。設定から許可してください。');
-        return;
-      }
-
-      const existingIds = new Set(records.map((record) => record.id));
-      const existingByKey = new Map<string, ChekiRecord>();
-      records.forEach((record) => {
-        const key = buildRecordKey(record);
-        if (key) existingByKey.set(key, record);
-      });
-      let importedCount = 0;
-      let skippedCount = 0;
-      let mergedCount = 0;
-
-      for (const raw of parsed) {
-        if (!raw || typeof raw !== 'object') {
-          skippedCount += 1;
-          continue;
-        }
-
-        const normalized = normalizeImportedRecord(raw, existingIds);
-        if (!normalized) {
-          skippedCount += 1;
-          continue;
-        }
-
-        const recordKey = buildRecordKey(normalized);
-        if (recordKey && existingByKey.has(recordKey)) {
-          const existingRecord = existingByKey.get(recordKey);
-          if (existingRecord) {
-            const merged = mergeImageData(existingRecord, normalized);
-            if (merged.changed) {
-              await updateRecord(existingRecord.id, {
-                ...existingRecord,
-                imageUrls: merged.imageUrls,
-                imageAssetIds: merged.imageAssetIds,
-              });
-              mergedCount += 1;
-            } else {
-              skippedCount += 1;
-            }
-          } else {
-            skippedCount += 1;
-          }
-          continue;
-        }
-
-        existingIds.add(normalized.id);
-        await addRecord(normalized);
-        importedCount += 1;
-        if (recordKey) {
-          existingByKey.set(recordKey, normalized);
-        }
-      }
-
-      Alert.alert(
-        '復元完了',
-        `インポートしました: ${importedCount}件${mergedCount ? ` / 画像追加: ${mergedCount}件` : ''}${skippedCount ? ` / スキップ: ${skippedCount}件` : ''}`
-      );
-    } catch (error) {
-      console.log('Failed to import backup:', error);
-      Alert.alert('エラー', 'バックアップの復元に失敗しました');
-    }
-  };
-
-
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="chevron-back" size={28} color="#000000" />
-        </TouchableOpacity>
-        <View style={styles.headerSpacer} />
-      </View>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.content}>
         <View style={styles.titleRow}>
           <Text style={styles.title}>マイページ</Text>
@@ -757,7 +542,7 @@ export default function SettingsScreen({ navigation }: any) {
 
         <View style={styles.bentoCardContainer}>
           <LinearGradient
-            colors={['#1A1A1A', '#111111']}
+            colors={['#202020', '#111111']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.bentoCardBackground}
@@ -805,55 +590,17 @@ export default function SettingsScreen({ navigation }: any) {
         )} */}
 
         <View style={styles.sectionWrapper}>
-          <Text style={styles.sectionLabel}>データ管理</Text>
-          <View style={styles.card}>
+          <View style={styles.membershipCard}>
+            <Text style={styles.membershipText}>あなたは{membershipLabel}です</Text>
             <TouchableOpacity
-              style={styles.row}
-              activeOpacity={0.7}
-              onPress={handleExportBackup}
+              style={styles.membershipButton}
+              activeOpacity={0.8}
+              onPress={handleMembershipButtonPress}
             >
-              <View style={styles.rowContent}>
-                <Text style={styles.rowLabel}>バックアップを作成</Text>
-                <Text style={styles.backupMeta}>最終バックアップ：{lastBackupLabel}</Text>
-                {!hasBackup ? (
-                  <Text style={styles.backupHint}>まだバックアップがありません。今すぐ作成できます。</Text>
-                ) : null}
-              </View>
-              {hasBackup ? (
-                <View style={styles.rowRight}>
-                  <Ionicons name="finger-print" size={24} color="#bebec6" />
-                </View>
-              ) : null}
+              <Text style={styles.membershipButtonText}>
+                {getMembershipActionLabel(membershipType)}
+              </Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.row, styles.rowLast]}
-              activeOpacity={0.7}
-              onPress={handleImportBackup}
-            >
-              <Text style={styles.rowLabel}>ファイルから復元</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={styles.backupNote}>
-            <TouchableOpacity
-              style={styles.backupNoteHeader}
-              activeOpacity={0.7}
-              onPress={() => setBackupNoteExpanded((prev) => !prev)}
-            >
-              <MaterialCommunityIcons name="alert-decagram" size={12} color="#8E8E93" />
-              <Text style={styles.backupNoteTitle}>機種変更や、もしもの時のために...</Text>
-              <MaterialIcons
-                name={backupNoteExpanded ? 'keyboard-arrow-up' : 'keyboard-arrow-down'}
-                size={18}
-                color="#8E8E93"
-              />
-            </TouchableOpacity>
-            {backupNoteExpanded ? (
-              <View style={styles.backupNoteBody}>
-                <Text style={styles.backupNoteText}>
-                  アプリ内のデータは、アプリを消すと一緒に消えてしまいます。「ファイル」アプリからクラウド（iCloud/Google等）にコピーしておくと安心です！
-                </Text>
-              </View>
-            ) : null}
           </View>
         </View>
 
@@ -869,11 +616,19 @@ export default function SettingsScreen({ navigation }: any) {
                     style={[styles.row, isLast && styles.rowLast]}
                     activeOpacity={0.7}
                     onPress={() => {
-                      if (item.id === 'delete') {
+                      if (item.id === 'icloud-sync') {
+                        navigation.navigate('ICloudSync');
+                      } else if (item.id === 'delete') {
                         handleAccountDelete();
                       } else if (item.id === 'notifications') {
                         Linking.openSettings().catch(() => {
                           Alert.alert('エラー', '設定を開けませんでした');
+                        });
+                      } else if (item.id === 'faq') {
+                        navigation.navigate('FAQ');
+                      } else if (item.id === 'review') {
+                        Linking.openURL(APP_STORE_REVIEW_URL).catch(() => {
+                          Alert.alert('エラー', 'App Storeを開けませんでした');
                         });
                       } else if (item.id === 'feedback') {
                         const feedbackUrl = isTestflightMode
@@ -883,7 +638,7 @@ export default function SettingsScreen({ navigation }: any) {
                           Alert.alert('エラー', 'URLを開けませんでした');
                         });
                       } else if (item.id === 'sns') {
-                        WebBrowser.openBrowserAsync('https://x.com/tickemo_app').catch(() => {
+                        Linking.openURL('https://x.com/tickemo_app').catch(() => {
                           Alert.alert('エラー', 'URLを開けませんでした');
                         });
                       } else if (item.id === 'about') {
@@ -919,8 +674,11 @@ export default function SettingsScreen({ navigation }: any) {
                     </Text>
                     <View style={styles.rowRight}>
                       {item.value && <Text style={styles.rowValue}>{item.value}</Text>}
-                      {!item.destructive && item.id !== 'about' && item.id !== 'apple-music' && (
+                      {!item.destructive && item.id !== 'about' && item.id !== 'apple-music' && item.id !== 'faq' && item.id !== 'icloud-sync' && (
                         <MaterialIcons name="arrow-outward" size={20} color="#C7C7CC" />
+                      )}
+                      {(item.id === 'faq' || item.id === 'icloud-sync') && (
+                        <MaterialIcons name="arrow-forward-ios" size={15} color="#C7C7CC" />
                       )}
                     </View>
                   </TouchableOpacity>
@@ -987,11 +745,11 @@ const MyPageShareModal: React.FC<MyPageShareModalProps> = ({
   const dragY = useRef(new Animated.Value(0)).current;
   const prevVisibleRef = useRef(visible);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [selectedAction, setSelectedAction] = useState<'save' | 'copy' | 'twitter' | 'other' | null>(null);
+  const [selectedAction, setSelectedAction] = useState<'save' | 'copy' | 'twitter' | null>(null);
 
   const outputWidth = 600;
   const outputHeight = 900;
-  const displayScale = 0.50;
+  const displayScale = 0.45; // プレビュー表示用の縮小率
 
   useEffect(() => {
     if (visible && !prevVisibleRef.current) {
@@ -1036,11 +794,21 @@ const MyPageShareModal: React.FC<MyPageShareModalProps> = ({
     }
 
     try {
+      if (Platform.OS === 'android') {
+        const uri = await captureRef(viewRef, {
+          format: 'png',
+          quality: 1,
+          result: 'tmpfile',
+        });
+        return uri;
+      }
+      // iOSの場合はこれで綺麗に撮れることが多いが、viewRefのstyleにbackgroundColor: transparentがないと角が白くなる可能性がある
+      // そこで、captureRefのオプションではなく、View階層で調整済み。
+      // ただし、snapshotContentContainer: true にすると中身だけ撮れる場合がある
       const uri = await captureRef(viewRef, {
         format: 'png',
         quality: 1,
-        width: outputWidth,
-        height: outputHeight,
+        result: 'tmpfile',
       });
       return uri;
     } catch (error) {
@@ -1051,7 +819,7 @@ const MyPageShareModal: React.FC<MyPageShareModalProps> = ({
   };
 
   const runWithProcessing = async (
-    action: 'save' | 'copy' | 'twitter' | 'other',
+    action: 'save' | 'copy' | 'twitter',
     task: () => Promise<void>,
   ) => {
     setSelectedAction(action);
@@ -1125,14 +893,6 @@ const MyPageShareModal: React.FC<MyPageShareModalProps> = ({
     });
   };
 
-  const handleShareOther = async () => {
-    await runWithProcessing('other', async () => {
-      const uri = await captureCard();
-      if (!uri) return;
-      await Share.share({ url: uri, message: shareText });
-      onClose();
-    });
-  };
 
   const formatHandle = (value: string) => {
     const trimmed = value.trim();
@@ -1212,42 +972,74 @@ const MyPageShareModal: React.FC<MyPageShareModalProps> = ({
             </View>
 
             <View style={shareStyles.previewArea}>
+              
               <View
+                collapsable={false}
                 style={{
                   position: 'absolute',
-                  top: '3%',
-                  left: '11%',
-                  width: outputWidth * 0.9,
-                  height: outputHeight * 0.9,
-                  marginTop: -(outputHeight * displayScale) / 2,
-                  marginLeft: -(outputWidth * displayScale) / 2,
-                  borderRadius: 50,
-                  overflow: 'hidden',
-                  shadowColor: '#5f5f5f',
-                  shadowOffset: { width: 0, height: 0 },
-                  shadowOpacity: 0.20,
-                  shadowRadius: 10,
-                  elevation: 10,
+                  top: '-3%',
+                  left: '8%',
+                  width: outputWidth * 0.9 + 80,
+                  height: outputHeight * 0.9 + 80,
+                  marginTop: -(outputHeight * displayScale) / 2 - 40,
+                  marginLeft: -(outputWidth * displayScale) / 2 - 40,
+                  backgroundColor: 'transparent',
                 }}
               >
+                <Svg
+                  width={outputWidth * 0.9 + 80}
+                  height={outputHeight * 0.9 + 80}
+                  style={{ position: 'absolute', top: 0, left: 0 }}
+                >
+                  <Defs>
+                    <RadialGradient id="shareShadow" cx="50%" cy="50%" rx="50%" ry="50%">
+                      <Stop offset="60%" stopColor="rgba(0,0,0,0)" />
+                      <Stop offset="100%" stopColor="rgba(0,0,0,0.22)" />
+                    </RadialGradient>
+                  </Defs>
+                  <Rect
+                    x={28}
+                    y={34}
+                    width={outputWidth * 0.9 + 24}
+                    height={outputHeight * 0.9 + 24}
+                    rx={60}
+                    fill="url(#shareShadow)"
+                  />
+                </Svg>
                 <View
-                  ref={viewRef}
-                  collapsable={false}
                   style={{
-                    width: outputWidth,
-                    height: outputHeight,
-                    transform: [{ scale: displayScale }],
-                    transformOrigin: 'center center',
-                    backgroundColor: 'transparent',
-                    borderRadius: 28,
-                    overflow: 'hidden',
+                    margin: 40,
+                    width: outputWidth * 0.9,
+                    height: outputHeight * 0.9,
+                    borderRadius: 50,
+                    backgroundColor: 'transparent', // 透明に変更して影用の背景を表示させない（実際には外側のSVGが影）
                   }}
                 >
-                  <ExpoImage
-                    source={shareCardSource}
-                    style={shareStyles.cardBackground}
-                    contentFit="cover"
-                  />
+                  <View
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      backgroundColor: '#fff', // カード背景を白に設定
+                    }}
+                  >
+                    <View
+                      ref={viewRef}
+                      collapsable={false}
+                      style={{
+                        width: outputWidth,
+                        height: outputHeight,
+                        transform: [{ scale: displayScale }],
+                        transformOrigin: 'center center',
+                        backgroundColor: '#fff', // カード背景を白に設定
+                        borderRadius: 28,
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <ExpoImage
+                        source={shareCardSource}
+                        style={shareStyles.cardBackground}
+                        contentFit="cover"
+                      />
 
                   <View style={shareStyles.cardContent}>
                     <Text style={shareStyles.totalLivesBackdrop}>
@@ -1335,6 +1127,18 @@ const MyPageShareModal: React.FC<MyPageShareModalProps> = ({
                           {stats.topArtist || '-'}
                         </Text>
                       </View>
+                    </View>
+
+                    <View style={shareStyles.storeQrWrap}>
+                      <QRCode
+                        value={APP_STORE_URL}
+                        size={74}
+                        ecl="M"
+                        backgroundColor="white"
+                        color="black"
+                      />
+                    </View>
+                  </View>
                     </View>
                   </View>
                 </View>
@@ -1439,20 +1243,6 @@ const MyPageShareModal: React.FC<MyPageShareModalProps> = ({
               <Text style={shareStyles.actionButtonLabel}>X (Twitter)</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={shareStyles.actionButtonWrapper}
-              onPress={handleShareOther}
-              disabled={isProcessing}
-            >
-              <View style={shareStyles.actionButtonCircle}>
-                {isProcessing && selectedAction === 'other' ? (
-                  <ActivityIndicator color="#666" size="small" />
-                ) : (
-                  <Ionicons name="ellipsis-horizontal" size={24} color="#333" />
-                )}
-              </View>
-              <Text style={shareStyles.actionButtonLabel}>その他</Text>
-            </TouchableOpacity>
           </View>
         </Animated.View>
       </View>
@@ -1478,6 +1268,8 @@ const shareStyles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
+    zIndex: 2,
   },
   handleBar: {
     width: 40,
@@ -1494,6 +1286,9 @@ const shareStyles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 24,
     paddingTop: 12,
+    position: 'relative',
+    zIndex: 2,
+    backgroundColor: '#FFFFFF',
   },
   sheetTitle: {
     fontSize: 22,
@@ -1514,7 +1309,7 @@ const shareStyles = StyleSheet.create({
   },
   cardContent: {
     position: 'absolute',
-    top: 0,
+    top: -60,
     left: 0,
     right: 0,
     bottom: 0,
@@ -1524,9 +1319,9 @@ const shareStyles = StyleSheet.create({
   },
   totalLivesBackdrop: {
     position: 'absolute',
-    right: 120,
-    top: 280,
-    fontSize: 180,
+    right: 135,
+    top: 350,
+    fontSize: 190,
     fontWeight: '900',
     color: '#cacaca',
     opacity: 0.3,
@@ -1541,7 +1336,7 @@ const shareStyles = StyleSheet.create({
   profileAvatarWrap: {
     width: 152,
     height: 152,
-    borderRadius: 46,
+    borderRadius: 76,
     borderWidth: 5,
     borderColor: '#4DC9D8',
     alignItems: 'center',
@@ -1553,12 +1348,12 @@ const shareStyles = StyleSheet.create({
   profileAvatar: {
     width: 140,
     height: 140,
-    borderRadius: 41,
+    borderRadius: 71,
   },
   profileAvatarFallback: {
     width: 140,
     height: 140,
-    borderRadius: 41,
+    borderRadius: 71,
     backgroundColor: '#1F1F1F',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1592,6 +1387,7 @@ const shareStyles = StyleSheet.create({
   },
   socialSection: {
     marginTop: 25,
+    marginBottom: 22,
     alignSelf: 'flex-start',
   },
   socialRow: {
@@ -1638,6 +1434,14 @@ const shareStyles = StyleSheet.create({
     marginTop: 16,
     marginLeft: -10,
     gap: 18,
+  },
+  storeQrWrap: {
+    position: 'absolute',
+    left: 55,
+    bottom: 75,
+    padding: 8,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
   },
   statusItem: {
     alignItems: 'flex-start',
@@ -1775,6 +1579,7 @@ const UserProfileHeader: React.FC<{
   };
   onPressEdit: () => void;
 }> = ({ stats, profile, onPressEdit }) => {
+  const membershipType = useAppStore((state) => state.membershipType);
   const rankColor = rankAccentColorMap[stats.fanLevel];
   const joinedText = formatJoinedAt(profile.joinedAt);
   const displayName = profile.displayName || 'User';
@@ -1786,6 +1591,7 @@ const UserProfileHeader: React.FC<{
     .slice(0, 2)
     .join('')
     .toUpperCase();
+  const isPremium = membershipType === 'plus' || membershipType === 'lifetime';
 
   return (
     <View style={styles.bentoGrid}>
@@ -1835,6 +1641,16 @@ const UserProfileHeader: React.FC<{
             <View style={styles.nameRow}>
               <Text style={styles.displayName}>{displayName}</Text>
               <View style={[styles.rankDot, { backgroundColor: rankColor }]} />
+              {isPremium && (
+                <LinearGradient
+                  colors={['#8FE58C', '#8872F8']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.plusBadge}
+                >
+                  <Text style={styles.plusBadgeText}>Plus</Text>
+                </LinearGradient>
+              )}
             </View>
             <Text style={styles.userMeta}>{username} • Joined {joinedText}</Text>
           </View>
@@ -1876,7 +1692,7 @@ const UserProfileHeader: React.FC<{
       >
         {stats.fanLevel === 'LEGEND' && (
           <LinearGradient
-            colors={['#F5E097', '#8E8361']}
+            colors={['#f3d66c', '#faefc8', '#8E8361']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.rankCardGradient}
@@ -1912,30 +1728,6 @@ const UserProfileHeader: React.FC<{
           contentFit="contain"
         />
       </View>
-
-      <View style={styles.statsRow}>
-        <View style={[styles.statsCard, styles.statsCardWide]}>
-          <Text style={styles.statsLabel}>MOST LOVED</Text>
-          <View style={styles.statsArtistRow}>
-            {stats.topArtistImageUrl ? (
-              <ExpoImage
-                source={{ uri: stats.topArtistImageUrl }}
-                style={styles.statsArtistImage}
-                contentFit="cover"
-              />
-            ) : (
-              <View style={styles.statsArtistFallback} />
-            )}
-            <Text style={styles.statsArtistName} numberOfLines={1}>
-              {stats.topArtist || '-'}
-            </Text>
-          </View>
-        </View>
-        <View style={[styles.statsCard, styles.statsCardNarrow]}>
-          <Text style={styles.statsLabel}>TOTAL</Text>
-          <Text style={styles.totalValue}>{stats.totalCheckIns}</Text>
-        </View>
-      </View>
     </View>
   );
 };
@@ -1948,26 +1740,10 @@ const styles = StyleSheet.create({
     zIndex: 9000,
     elevation: 30,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 3,
-    paddingTop: 35,
-    backgroundColor: '#F8F8F8',
-  },
-  backButton: {
-    padding: 2,
-    backgroundColor: 'transparent',
-  },
-  headerSpacer: {
-    width: 44,
-  },
   content: {
     paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 50,
+    paddingTop: 70,
+    paddingBottom: 120,
   },
   titleRow: {
     flexDirection: 'row',
@@ -2014,12 +1790,18 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   profileCard: {
-    backgroundColor: 'transparent',
+    backgroundColor: 'rgba(0,0,0,0.02)',
     paddingHorizontal: 8,
     paddingVertical: 18,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    borderRadius: 18,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.22,
+    shadowRadius: 12,
+    elevation: 6,
   },
   profileLeft: {
     flexDirection: 'row',
@@ -2030,7 +1812,7 @@ const styles = StyleSheet.create({
   avatarRing: {
     width: 68,
     height: 68,
-    borderRadius: 25,
+    borderRadius: 34,
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
@@ -2039,7 +1821,7 @@ const styles = StyleSheet.create({
   avatarRingLegend: {
     width: 68,
     height: 68,
-    borderRadius: 25,
+    borderRadius: 34,
     padding: 2,
     alignItems: 'center',
     justifyContent: 'center',
@@ -2047,7 +1829,7 @@ const styles = StyleSheet.create({
   avatarRingInner: {
     width: 64,
     height: 64,
-    borderRadius: 23,
+    borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#111111',
@@ -2055,12 +1837,12 @@ const styles = StyleSheet.create({
   avatarImage: {
     width: 60,
     height: 60,
-    borderRadius: 21,
+    borderRadius: 30,
   },
   avatarFallback: {
     width: 60,
     height: 60,
-    borderRadius: 25,
+    borderRadius: 30,
     backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
@@ -2088,8 +1870,27 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 4,
   },
+  plusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginLeft: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  plusBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
   userMeta: {
-    marginTop: 4,
+    marginTop: 8,
     fontSize: 12,
     color: '#9C9C9C',
   },
@@ -2153,60 +1954,6 @@ const styles = StyleSheet.create({
     width: 120,
     height: 120,
   },
-  statsRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  statsCard: {
-    flex: 1,
-    backgroundColor: '#252525',
-    borderRadius: 22,
-    padding: 16,
-    minHeight: 90,
-    justifyContent: 'space-between',
-  },
-  statsCardWide: {
-    flex: 8,
-  },
-  statsCardNarrow: {
-    flex: 2,
-  },
-  statsLabel: {
-    fontSize: 11,
-    textAlign: 'center',
-    color: '#8F8F8F',
-    fontWeight: '700',
-  },
-  statsArtistRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  statsArtistImage: {
-    width: 42,
-    height: 42,
-    borderRadius: 17,
-  },
-  statsArtistFallback: {
-    width: 42,
-    height: 42,
-    borderRadius: 17,
-    backgroundColor: '#2A2A2A',
-  },
-  statsArtistName: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
-    flex: 1,
-  },
-  totalValue: {
-    textAlign: 'center',
-    fontSize: 34,
-    fontWeight: '900',
-    color: '#FFFFFF',
-    marginTop: 6,
-  },
-
   sectionWrapper: {
     marginTop: 35,
   },
@@ -2225,6 +1972,42 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 8,
     elevation: 8,
+  },
+  membershipCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 30,
+    shadowColor: '#d2d2d2',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  membershipText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#000000',
+    marginLeft: 6,
+  },
+  membershipButton: {
+    height: 36,
+    minWidth: 116,
+    borderRadius: 18,
+    backgroundColor: '#111111',
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  membershipButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   iconCard: {
     backgroundColor: '#FFFFFF',
@@ -2271,7 +2054,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingVertical: 20,
     borderBottomWidth: 0.5,
     borderBottomColor: '#E8E8E8',
   },
@@ -2360,5 +2143,208 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#8E8E93',
     lineHeight: 14,
+  },
+});
+
+// ================ FAQ Screen Component ================
+export function FAQScreen({ navigation }: any) {
+  const faqData = [
+    {
+      category: 'トラブル・不具合',
+      items: [
+        {
+          question: 'チケットの画像が表示されなくなりました。',
+          answer: '端末のストレージ最適化やOSの更新により、画像のリンクが切れる場合があります。お手数ですが、一度その画像を削除し、再度アルバムから選択し直して保存してください。',
+        },
+        {
+          question: '画面が固まって動かないときは？',
+          answer: '一度アプリを終了して再起動してください。改善しない場合は端末の再起動をお試しください。',
+        },
+        {
+          question: 'アプリが落ちる・動作が重いです。',
+          answer: '画像サイズが大きい場合や、バックグラウンドで多数のアプリが動いている場合に発生することがあります。画像を少し小さくするか、アプリの再起動をお試しください。',
+        },
+      ],
+    },
+    {
+      category: 'データ・バックアップ',
+      items: [
+        {
+          question: '間違ってアプリを消してしまいました。データは復元できますか？',
+          answer: 'いいえ、できません。本アプリは、お客様の端末内（ローカル）のみにデータを保存しており、サーバーには送信していません。アプリを削除すると、データも全て削除されます。',
+        },
+        {
+          question: '機種変更をしたいのですが。',
+          answer: '設定画面の「iCloud同期」をONにしたうえで、同じApple IDで新しい端末にサインインしてください。同期完了まで少し時間がかかる場合があります。',
+        },
+      ],
+    },
+    {
+      category: '機能・仕様',
+      items: [
+        {
+          question: '友達とデータを共有できますか？',
+          answer: '現在、リアルタイムでの共有機能はありません。作成したチケット画像をSNSなどでシェアしてお楽しみください。',
+        },
+        {
+          question: 'Android版（またはiOS版）とデータを移行できますか？',
+          answer: '異なるOS間でのデータ移行は、バックアップファイルの形式が合えば可能ですが、動作保証はしておりません。',
+        },
+      ],
+    },
+    {
+      category: 'Plus・お支払い',
+      items: [
+        {
+          question: 'いつ課金されますか？（自動更新について）',
+          answer: 'Plusプランは「月額（または年額）」の自動更新の定期購読（サブスクリプション）です。\n登録いただいた日を起点として、1ヶ月（または1年）ごとに、ご使用のApple IDに自動的に請求が行われます。',
+        },
+        {
+          question: '解約（キャンセル）したいのですが、どうすればいいですか？',
+          answer: 'アプリを削除（アンインストール）しただけでは解約されませんのでご注意ください。解約をご希望の場合は、更新日の24時間前までに以下の手順で自動更新をオフにしてください。\n\n【iPhone (iOS) の場合】\n1. 端末の「設定」アプリを開く\n2. 一番上の自分の名前（Apple ID）をタップ\n3. 「サブスクリプション」をタップ\n4. 「Tickemo」を選択し、「サブスクリプションをキャンセルする」をタップ',
+        },
+        {
+          question: '機種変更をした場合、有料プランはどうなりますか？',
+          answer: '新しい端末でも、以前と同じApple IDをご利用であれば、引き続きプレミアムプランをご利用いただけます。\nアプリ内のプラン選択画面にある「購入を復元」ボタンをタップしていただくと、有料プランの状態が新しい端末に引き継がれます。（※追加の料金は発生しません）',
+        },
+        {
+          question: '領収書や購入履歴を確認したいです。',
+          answer: 'Tickemoアプリ内からは直接領収書を発行することはできません。\n購入履歴や領収書は、Apple（App Store）からご登録のメールアドレス宛に送信されるメール、またはアカウント設定（購入履歴）よりご確認ください。',
+        },
+      ],
+    },
+    {
+      category: 'その他',
+      items: [
+        {
+          question: '要望や不具合の報告はどこから？',
+          answer: '設定画面の「フィードバック」またはストアのレビューからお願いします。個人で開発しているため、すぐに対応できない場合もございますが、全てのメッセージに目を通しております。',
+        },
+      ],
+    },
+  ];
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F8F8' }}>
+      <View style={faqStyles.header}>
+        <TouchableOpacity style={faqStyles.backButton} onPress={() => navigation.goBack()}>
+          <MaterialIcons name="arrow-back-ios" size={22} color="#000" />
+        </TouchableOpacity>
+        <Text style={faqStyles.headerTitle}>よくある質問</Text>
+        <View style={{ width: 44 }} />
+      </View>
+
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={faqStyles.content}>
+        {faqData.map((section, sectionIndex) => (
+          <View key={sectionIndex} style={faqStyles.section}>
+            <Text style={faqStyles.categoryTitle}>{section.category}</Text>
+            {section.items.map((item, itemIndex) => (
+              <View key={itemIndex} style={faqStyles.faqItem}>
+                <View style={faqStyles.questionRow}>
+                  <Text style={faqStyles.qLabel}>Q.</Text>
+                  <Text style={faqStyles.questionText}>{item.question}</Text>
+                </View>
+                <View style={faqStyles.answerRow}>
+                  <Text style={faqStyles.aLabel}>A.</Text>
+                  <Text style={faqStyles.answerText}>{item.answer}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        ))}
+
+        <View style={faqStyles.footer}>
+          <Text style={faqStyles.footerText}>
+            その他ご不明な点は、設定画面の「フィードバック」からお問い合わせください。
+          </Text>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const faqStyles = StyleSheet.create({
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingTop: 60,
+    paddingBottom: 16,
+  },
+  backButton: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  content: {
+    padding: 20,
+    paddingBottom: 40,
+  },
+  section: {
+    marginBottom: 32,
+  },
+  categoryTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    marginBottom: 16,
+  },
+  faqItem: {
+    marginBottom: 20,
+    backgroundColor: '#F8F8F8',
+    borderRadius: 12,
+    padding: 16,
+  },
+  questionRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 10,
+  },
+  qLabel: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#000',
+    marginRight: 8,
+  },
+  questionText: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#000',
+    lineHeight: 22,
+  },
+  answerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  aLabel: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#666',
+    marginRight: 8,
+  },
+  answerText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 21,
+  },
+  footer: {
+    marginTop: 10,
+    marginBottom: 100,
+    padding: 16,
+    backgroundColor: '#F0F0F0',
+    borderRadius: 12,
+  },
+  footerText: {
+    fontSize: 13,
+    color: '#666',
+    lineHeight: 20,
+    textAlign: 'center',
   },
 });

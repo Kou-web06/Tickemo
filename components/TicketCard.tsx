@@ -208,6 +208,12 @@ export const TicketCard: React.FC<TicketCardProps> = ({ record, width, isAnimati
                   {record.venue || '-'}
                 </Text>
               </View>
+              <View style={{ flexDirection: 'row' }}>
+                <Text style={styles.detailLabel}>SEAT</Text>
+                <Text style={styles.detailValue}>
+                  {record.seat || '-'}
+                </Text>
+              </View>
             </View>
           </View>
         </View>

@@ -1,5 +1,6 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
+import { pushImageToCloud } from './icloudImageSync';
 
 // ファイルパスから拡張子を取得するヘルパー関数
 const getExtension = (uri: string) => {
@@ -41,10 +42,12 @@ export const buildLiveAlbumName = (date?: Date | string, liveName?: string) => {
 
 
 const getBaseDir = () => FileSystem.documentDirectory;
-const getTickemoDir = () => {
+
+export const getTickemoRootDir = () => {
   const baseDir = getBaseDir();
   return baseDir ? `${baseDir}Tickemo/` : null;
 };
+
 const getLegacyLivesDir = () => {
   const baseDir = getBaseDir();
   return baseDir ? `${baseDir}lives` : null;
@@ -70,8 +73,17 @@ export const normalizeStoredImageUri = (uri: string) => {
   if (!uri) return uri;
   if (!uri.startsWith('file://')) return uri;
 
+  // iOS/Androidでのサンドボックスパス変更対策:
+  // パスの中に "Tickemo/" が含まれていれば、そこから後ろを相対パスとして抽出する
+  // 例: file://.../Application/.../Tickemo/lives/123.jpg -> Tickemo/lives/123.jpg
+  const tickemoIndex = uri.indexOf('/Tickemo/');
+  if (tickemoIndex !== -1) {
+    // /Tickemo/ のスラッシュを含めずに "Tickemo/..." を返す
+    return uri.substring(tickemoIndex + 1);
+  }
+
   const baseDir = getBaseDir();
-  const tickemoDir = getTickemoDir();
+  const tickemoDir = getTickemoRootDir();
   if (tickemoDir && uri.startsWith(tickemoDir)) {
     return uri.replace(tickemoDir, 'Tickemo/');
   }
@@ -146,7 +158,7 @@ export const uploadImage = async (
     const baseName = fileName || 'cover';
     const targetFileName = buildFileName(fileUri, baseName);
     const baseDir = getBaseDir();
-    const tickemoDir = getTickemoDir();
+    const tickemoDir = getTickemoRootDir();
     
     // FileSystemが利用できない場合は元のURIをそのまま返す
     if (!baseDir) {
@@ -164,6 +176,13 @@ export const uploadImage = async (
 
     await FileSystem.makeDirectoryAsync(directory, { intermediates: true });
     await FileSystem.copyAsync({ from: fileUri, to: targetPath });
+
+    try {
+      await pushImageToCloud(relativePath, targetPath);
+    } catch (error) {
+      // iCloud push failed, continue with local save
+    }
+
     return relativePath;
 
   } catch (error) {
@@ -175,7 +194,7 @@ export const uploadImage = async (
 
 export const migrateLegacyImagesToTickemo = async (): Promise<void> => {
   try {
-    const tickemoDir = getTickemoDir();
+    const tickemoDir = getTickemoRootDir();
     const legacyDir = getLegacyLivesDir();
     if (!tickemoDir || !legacyDir) return;
 
@@ -267,7 +286,7 @@ export const deleteImage = async (storagePath: string): Promise<boolean> => {
 export const deleteLiveImages = async (liveId: string): Promise<void> => {
   try {
     const baseDir = getBaseDir();
-    const tickemoDir = getTickemoDir();
+    const tickemoDir = getTickemoRootDir();
     if (tickemoDir) {
       await FileSystem.deleteAsync(`${tickemoDir}lives/${liveId}`, { idempotent: true });
     }

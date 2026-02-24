@@ -2,19 +2,20 @@
   "expo": {
     "name": "Tickemo",
     "slug": "Tickemo",
-    "version": "1.0.0",
-    "buildNumber": "9",
+    "version": "1.1.0",
+    "buildNumber": "19",
     "orientation": "portrait",
     "icon": "./assets/app-icon/icon1.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash.png",
-      "resizeMode": "contain",
+      "resizeMode": "cover",
       "backgroundColor": "#000000"
     },
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
+      "buildNumber": "10",
       "bundleIdentifier": "com.anonymous.Tickemo",
       "frameworks": [
         "MusicKit"
@@ -34,6 +35,12 @@
           }
         ]
       },
+      "entitlements": {
+        "com.apple.developer.icloud-services": ["CloudDocuments", "CloudKit"],
+        "com.apple.developer.icloud-container-identifiers": ["iCloud.com.anonymous.Tickemo"],
+        "com.apple.developer.ubiquity-container-identifiers": ["iCloud.com.anonymous.Tickemo"],
+        "com.apple.developer.ubiquity-kvstore-identifier": "$(TeamIdentifierPrefix)com.anonymous.Tickemo"
+      },
       "googleMobileAdsAppId": "ca-app-pub-2769977162057386~9124706504"
     },
     "android": {
@@ -43,6 +50,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
+      "screenOrientation": "portrait",
       "package": "com.anonymous.Tickemo",
       "permissions": [
         "WRITE_EXTERNAL_STORAGE",
@@ -99,7 +107,8 @@
       },
       "supabaseUrl": "",
       "supabaseAnonKey": "",
-      "supabaseStorageBucket": ""
+      "supabaseStorageBucket": "",
+      "revenueCatAppleApiKey": "appl_hRVOeiwkPvuPNjTIAiZFuKvqELh"
     },
     "experiments": {
       "typedRoutes": false

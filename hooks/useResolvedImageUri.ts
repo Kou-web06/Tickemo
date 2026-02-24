@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { resolveStoredImageUri } from '../lib/imageUpload';
+import { resolveStoredImageUri, normalizeStoredImageUri, resolveLocalImageUri } from '../lib/imageUpload';
+import { pullImageFromCloud } from '../lib/icloudImageSync';
 
 const NO_IMAGE_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">' +
@@ -23,8 +24,28 @@ export const useResolvedImageUri = (savedUri?: string, assetId?: string | null) 
       }
 
       const uri = await resolveStoredImageUri(savedUri, assetId);
+      
+      // ローカルファイルが見つからず、iCloud 相対パスの場合は pull を試みる
+      if (!uri && savedUri) {
+        const normalized = normalizeStoredImageUri(savedUri) || savedUri;
+        if (normalized.startsWith('Tickemo/')) {
+          try {
+            const pulled = await pullImageFromCloud(normalized);
+            if (pulled) {
+              const resolvedAfterPull = resolveLocalImageUri(normalized) || '';
+              if (isActive) {
+                setResolvedUri(resolvedAfterPull || null);
+              }
+              return;
+            }
+          } catch (error) {
+            console.log('[useResolvedImageUri] iCloud pull failed:', error);
+          }
+        }
+      }
+      
       if (isActive) {
-        setResolvedUri(uri ?? null);
+        setResolvedUri(uri ?? savedUri ?? null);
       }
     };
 
@@ -51,9 +72,28 @@ export const useResolvedImageUris = (savedUris?: string[], assetIds?: Array<stri
       }
 
       const resolved = await Promise.all(
-        savedUris.map((uri, index) => resolveStoredImageUri(uri, assetIds?.[index]))
+        savedUris.map(async (uri, index) => {
+          const resolved = await resolveStoredImageUri(uri, assetIds?.[index]);
+          
+          // ローカルファイルが見つからず、iCloud 相対パスの場合は pull を試みる
+          if (!resolved && uri) {
+            const normalized = normalizeStoredImageUri(uri) || uri;
+            if (normalized.startsWith('Tickemo/')) {
+              try {
+                const pulled = await pullImageFromCloud(normalized);
+                if (pulled) {
+                  return resolveLocalImageUri(normalized) || null;
+                }
+              } catch (error) {
+                console.log('[useResolvedImageUris] iCloud pull failed for:', uri);
+              }
+            }
+          }
+          
+          return resolved;
+        })
       );
-      const finalUris = resolved.map((uri) => uri ?? NO_IMAGE_URI);
+      const finalUris = resolved.map((uri, index) => uri ?? savedUris[index] ?? NO_IMAGE_URI);
       if (isActive) {
         setResolvedUris(finalUris);
       }

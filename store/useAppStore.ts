@@ -11,13 +11,25 @@ export interface UserProfile {
   joinedAt: string;
 }
 
+export type MembershipType = 'free' | 'plus' | 'lifetime';
+
 interface AppState {
   lives: ChekiRecord[];
   setlists: Record<string, SetlistItem[]>;
   userProfile: UserProfile | null;
   hasOnboarded: boolean;
+  isPremium: boolean;
+  membershipType: MembershipType;
+  activeEntitlementIds: string[];
+  revenueCatInitialized: boolean;
   hasHydrated: boolean;
   setHasHydrated: (hasHydrated: boolean) => void;
+  setRevenueCatState: (payload: {
+    isPremium: boolean;
+    membershipType: MembershipType;
+    activeEntitlementIds: string[];
+    revenueCatInitialized: boolean;
+  }) => void;
   addLive: (live: ChekiRecord) => void;
   updateLive: (id: string, live: Partial<ChekiRecord>) => void;
   deleteLive: (id: string) => void;
@@ -36,8 +48,19 @@ export const useAppStore = create<AppState>()(
       setlists: {},
       userProfile: null,
       hasOnboarded: false,
+      isPremium: false,
+      membershipType: 'free',
+      activeEntitlementIds: [],
+      revenueCatInitialized: false,
       hasHydrated: false,
       setHasHydrated: (hasHydrated) => set(() => ({ hasHydrated })),
+      setRevenueCatState: (payload) =>
+        set(() => ({
+          isPremium: payload.isPremium,
+          membershipType: payload.membershipType,
+          activeEntitlementIds: payload.activeEntitlementIds,
+          revenueCatInitialized: payload.revenueCatInitialized,
+        })),
       addLive: (live) =>
         set((state) => ({
           lives: [live, ...state.lives],

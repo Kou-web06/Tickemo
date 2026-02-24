@@ -1,39 +1,182 @@
-import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView, Alert, ActivityIndicator, Clipboard, Animated, Easing, Switch, Share, PanResponder } from 'react-native';
+import React, { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView, Alert, ActivityIndicator, Clipboard, Animated, Easing, Share, PanResponder } from 'react-native';
 import { Image } from 'expo-image';
-import Svg, { Path, Defs, G } from 'react-native-svg';
-import QRCode from 'react-native-qrcode-svg';
-import { Feather, Ionicons, AntDesign } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
+import { Feather, Ionicons, AntDesign, MaterialCommunityIcons } from '@expo/vector-icons';
+import Svg, { Circle, Stop, LinearGradient, Defs, Path } from 'react-native-svg';
+import { useNavigation } from '@react-navigation/native';
 import { ChekiRecord } from '../contexts/RecordsContext';
-import { FallbackQRCode } from './FallbackQRCode';
 import { captureRef } from 'react-native-view-shot';
 import * as MediaLibrary from 'expo-media-library';
-import { NO_IMAGE_URI, useResolvedImageUri } from '../hooks/useResolvedImageUri';
+import { resolveLocalImageUri } from '../lib/imageUpload';
+import EditableTicketPreview, { StickerType } from './EditableTicketPreviewCard';
+import { useAppStore } from '../store/useAppStore';
 
 interface ShareImageGeneratorProps {
   record: ChekiRecord;
   visible: boolean;
   onClose: () => void;
+  onBeforeOpenPaywall?: () => void;
 }
+
+const DEFAULT_TICKET_BG_COLOR = '#FFFFFF';
+const TICKET_STICKERS: StickerType[] = [
+  'none',
+  'sticker1',
+  'sticker2',
+  'sticker3',
+  'sticker4',
+  'sticker5',
+  'sticker6',
+  'sticker7',
+  'sticker8',
+];
+const STICKER_PICKER_ITEMS: Exclude<StickerType, 'none'>[] = [
+  'sticker1',
+  'sticker2',
+  'sticker3',
+  'sticker4',
+  'sticker5',
+  'sticker6',
+  'sticker7',
+  'sticker8',
+];
+const STICKER_IMAGES: Record<Exclude<StickerType, 'none'>, any> = {
+  sticker1: require('../assets/shareStickers/sticker1.png'),
+  sticker2: require('../assets/shareStickers/sticker2.png'),
+  sticker3: require('../assets/shareStickers/sticker3.png'),
+  sticker4: require('../assets/shareStickers/sticker4.png'),
+  sticker5: require('../assets/shareStickers/sticker5.png'),
+  sticker6: require('../assets/shareStickers/sticker6.png'),
+  sticker7: require('../assets/shareStickers/sticker7.png'),
+  sticker8: require('../assets/shareStickers/sticker8.png'),
+};
+const PRESET_COLORS = [
+  // Reds & Pinks
+  '#FF3B30', '#FF2D55', '#7A1F3D', '#F4A7B9', '#F7D6E0',
+  // Oranges
+  '#FF9500', '#D9C2A7',
+  // Yellows
+  '#FFD60A',
+  // Greens
+  '#34C759', '#93EF84', '#8FE3C5', '#C7F9CC',
+  // Cyans & Blues
+  '#00F5D4', '#64D2FF', '#007AFF',
+  // Purples & Indigo
+  '#AF52DE', '#B8A1FF', '#5E60CE', '#4B0082',
+  // Neutrals
+  '#FFFFFF', '#111111', '#6B7280',
+  // Dark Navy
+  '#0B132B',
+] as const;
+const DYNAMIC_ICON_SIZE = 22;
 
 const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({
   record,
   visible,
   onClose,
+  onBeforeOpenPaywall,
 }) => {
+  const navigation = useNavigation<any>();
+  const isPremium = useAppStore((state) => state.isPremium);
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedAction, setSelectedAction] = useState<'copy' | 'save' | 'twitter' | null>(null);
   const [showParticipatedStamp, setShowParticipatedStamp] = useState(false);
+  const [ticketBgColor, setTicketBgColor] = useState(DEFAULT_TICKET_BG_COLOR);
+  const [stickerIndex, setStickerIndex] = useState(0);
+  const [showColorPalette, setShowColorPalette] = useState(false);
+  const [showStickerPicker, setShowStickerPicker] = useState(false);
+  const [captureBlurBackground, setCaptureBlurBackground] = useState(false);
+  const [cachedImageUri, setCachedImageUri] = useState<string | null>(null);
   const viewRef = useRef<View>(null);
   const translateY = useRef(new Animated.Value(1)).current;
   const dragY = useRef(new Animated.Value(0)).current;
+  const paletteOpacity = useRef(new Animated.Value(0)).current;
+  const paletteTranslateY = useRef(new Animated.Value(20)).current;
   const prevVisibleRef = useRef(visible);
 
   // 出力サイズを固定（横長のチケット用に調整）
   const outputWidth = 1480;
   const outputHeight = 1200;
   const displayScale = 0.25;
-  const coverUri = useResolvedImageUri(record.imageUrls?.[0], record.imageAssetIds?.[0]);
+  
+  // モーダルが開いたら、背景で画像を読み込む（ラグなし）
+  useEffect(() => {
+    if (visible && !cachedImageUri) {
+      const coverSource = record.imageUrls?.[0] ?? record.imagePath;
+      if (coverSource) {
+        const resolved = resolveLocalImageUri(coverSource);
+        setCachedImageUri(resolved || coverSource);
+      }
+    }
+  }, [visible, cachedImageUri, record.id]);  // ← record.imageUrls.imagePathではなく record.id を使用
+  
+  const coverUri = useMemo(() => {
+    const coverSource = record.imageUrls?.[0] ?? record.imagePath;
+    return cachedImageUri || (coverSource ? resolveLocalImageUri(coverSource) : null) || coverSource || null;
+  }, [cachedImageUri, record.imageUrls, record.imagePath]);
+
+  const selectedSticker = TICKET_STICKERS[stickerIndex];
+
+  const stickerOptions = useMemo(
+    () =>
+      STICKER_PICKER_ITEMS.map((sticker) => ({
+        id: sticker,
+        source: STICKER_IMAGES[sticker],
+      })),
+    []
+  );
+
+  const handleToggleColorPalette = useCallback(() => {
+    setShowColorPalette((prev) => {
+      const next = !prev;
+      if (next) {
+        setShowStickerPicker(false);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleCycleSticker = useCallback(() => {
+    setShowStickerPicker((prev) => {
+      const next = !prev;
+      if (next) {
+        setShowColorPalette(false);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleToggleParticipatedStamp = useCallback(() => {
+    setShowParticipatedStamp((prev) => !prev);
+  }, []);
+
+  const handleSelectPresetColor = useCallback((hex: string) => {
+    setTicketBgColor(hex);
+  }, []);
+
+  const handleSelectSticker = useCallback((stickerId: StickerType) => {
+    const stickerIndex = TICKET_STICKERS.indexOf(stickerId);
+    if (stickerIndex !== -1) {
+      setStickerIndex(stickerIndex);
+    }
+  }, []);
+
+  const handleResetOperations = useCallback(() => {
+    setTicketBgColor(DEFAULT_TICKET_BG_COLOR);
+    setStickerIndex(0);
+    setShowParticipatedStamp(false);
+    setShowColorPalette(false);
+    setShowStickerPicker(false);
+  }, []);
+
+  const handleOpenPaywallFromLock = useCallback(() => {
+    onBeforeOpenPaywall?.();
+    onClose();
+    requestAnimationFrame(() => {
+      navigation.navigate('Paywall');
+    });
+  }, [navigation, onBeforeOpenPaywall, onClose]);
 
   useLayoutEffect(() => {
     // visibleがfalseからtrueに変わった時だけ初期化
@@ -41,8 +184,41 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({
       translateY.setValue(1);
       dragY.setValue(0);
     }
+    // レンダー終了時に prevVisibleRef を更新
     prevVisibleRef.current = visible;
-  }, [visible, translateY, dragY]);
+  }, [visible]);  // ← transformY, dragY を依存配列から削除
+
+  const isPickerVisible = showColorPalette || showStickerPicker;
+
+  useEffect(() => {
+    if (isPickerVisible) {
+      Animated.parallel([
+        Animated.timing(paletteOpacity, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.timing(paletteTranslateY, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    } else {
+      Animated.parallel([
+        Animated.timing(paletteOpacity, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+        Animated.timing(paletteTranslateY, {
+          toValue: 20,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+  }, [isPickerVisible]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -84,7 +260,7 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({
     return null;
   }
 
-  const captureImage = async (): Promise<string | null> => {
+  const captureImage = async (includeBlurBackground: boolean = false): Promise<string | null> => {
     if (!viewRef.current) {
       Alert.alert('エラー', 'プレビューの準備ができていません');
       return null;
@@ -99,7 +275,6 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({
       });
       return uri;
     } catch (error) {
-      console.error('Capture error:', error);
       Alert.alert('エラー', '画像の生成に失敗しました');
       return null;
     }
@@ -116,7 +291,6 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({
         Alert.alert('エラー', 'QRコードが設定されていません');
       }
     } catch (error) {
-      console.error('Copy error:', error);
       Alert.alert('エラー', 'コピーに失敗しました');
     } finally {
       setIsGenerating(false);
@@ -125,7 +299,7 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({
 
   const handleSaveImage = async () => {
     setIsGenerating(true);
-    const uri = await captureImage();
+    const uri = await captureImage(false);
     if (uri) {
       try {
         const { status } = await MediaLibrary.requestPermissionsAsync();
@@ -138,15 +312,14 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({
         Alert.alert('完了', '画像をカメラロールに保存しました');
         onClose();
       } catch (error) {
-        console.error('Save error:', error);
         Alert.alert('エラー', '保存に失敗しました');
       }
     }
     setIsGenerating(false);
   };
 
-  const captureAndSaveToLibrary = async (): Promise<string | null> => {
-    const uri = await captureImage();
+  const captureAndSaveToLibrary = async (includeBlurBackground: boolean = true): Promise<string | null> => {
+    const uri = await captureImage(includeBlurBackground);
     if (!uri) return null;
 
     const { status } = await MediaLibrary.requestPermissionsAsync();
@@ -161,323 +334,43 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({
 
   const handleTwitterShare = async () => {
     setIsGenerating(true);
+    setCaptureBlurBackground(true);
     try {
-      const uri = await captureAndSaveToLibrary();
+      // Blur 背景が反映されるまで待つ
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const uri = await captureAndSaveToLibrary(true);
       if (!uri) {
+        setCaptureBlurBackground(false);
         setIsGenerating(false);
         return;
       }
 
       const result = await Share.share({
         url: uri,
-        message: `${record.liveName || ''} - ${record.artist || ''}`,
+        message: `${record.date || ''} ${record.artist || ''} - ${record.liveName || ''} \n #Tickemo`,
         title: 'Tickemo',
       });
       if (result.action === Share.sharedAction) {
         onClose();
       }
     } catch (error) {
-      console.error('Share error:', error);
       Alert.alert('エラー', '共有に失敗しました');
     } finally {
+      setCaptureBlurBackground(false);
       setIsGenerating(false);
     }
   };
 
-  const handleShareOther = async () => {
-    setIsGenerating(true);
-    const uri = await captureImage();
-    if (uri) {
-      try {
-        await Share.share({
-          url: uri,
-          message: `${record.liveName || ''} - ${record.artist || ''}`,
-        });
-        onClose();
-      } catch (error) {
-        console.error('Share error:', error);
-        Alert.alert('エラー', '共有に失敗しました');
-      }
-    }
-    setIsGenerating(false);
-  };
-
-  const renderPreview = () => {
-    const width = outputWidth;
-    const height = outputHeight;
-    const ticketWidth = width;
-    const ticketHeight = height;
-    const imageSize = ticketHeight * 0.33;
-    const qrSize = imageSize * 0.3;
-
-    return (
-      <View style={{ width, height, backgroundColor: 'transparent', justifyContent: 'center', alignItems: 'flex-start' }}>
-        {/* Ticket Card */}
-        <View style={{ width: ticketWidth, height: ticketHeight }}>
-          {/* SVG Background */}
-          <Svg width={ticketWidth} height={ticketHeight} viewBox="0 0 362 187" style={{ position: 'relative'}}>
-            <Defs>
-            </Defs>
-            <Path
-              d="M139.417 20C140.189 21.7657 141.95 23 144 23C146.05 23 147.811 21.7657 148.583 20H322C322 30.9759 330.842 39.885 341.791 39.9971V147.002C330.842 147.114 322 156.024 322 167H148.899C148.436 164.718 146.419 163 144 163C141.581 163 139.564 164.718 139.101 167H40C40 155.954 31.0457 147 20 147V41.7754C20.9786 41.9226 21.9803 42 23 42C34.0457 42 43 33.0457 43 22C43 21.325 42.9657 20.6578 42.9004 20H139.417ZM144 148C141.239 148 139 150.239 139 153C139 155.761 141.239 158 144 158C146.761 158 149 155.761 149 153C149 150.239 146.761 148 144 148ZM144 133C141.239 133 139 135.239 139 138C139 140.761 141.239 143 144 143C146.761 143 149 140.761 149 138C149 135.239 146.761 133 144 133ZM144 118C141.239 118 139 120.239 139 123C139 125.761 141.239 128 144 128C146.761 128 149 125.761 149 123C149 120.239 146.761 118 144 118ZM144 103C141.239 103 139 105.239 139 108C139 110.761 141.239 113 144 113C146.761 113 149 110.761 149 108C149 105.239 146.761 103 144 103ZM144 88C141.239 88 139 90.2386 139 93C139 95.7614 141.239 98 144 98C146.761 98 149 95.7614 149 93C149 90.2386 146.761 88 144 88ZM144 73C141.239 73 139 75.2386 139 78C139 80.7614 141.239 83 144 83C146.761 83 149 80.7614 149 78C149 75.2386 146.761 73 144 73ZM144 58C141.239 58 139 60.2386 139 63C139 65.7614 141.239 68 144 68C146.761 68 149 65.7614 149 63C149 60.2386 146.761 58 144 58ZM144 43C141.239 43 139 45.2386 139 48C139 50.7614 141.239 53 144 53C146.761 53 149 50.7614 149 48C149 45.2386 146.761 43 144 43ZM144 28C141.239 28 139 30.2386 139 33C139 35.7614 141.239 38 144 38C146.761 38 149 35.7614 149 33C149 30.2386 146.761 28 144 28Z"
-              fill="white"
-            />
-          </Svg>
-
-          {/* Content Container */}
-          <View
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              width: ticketWidth,
-              height: ticketHeight,
-            }}
-          >
-            {/* Jacket Image */}
-            <View
-              style={{
-                position: 'absolute',
-                left: ticketWidth * 0.09,
-                top: ticketHeight * 0.50 - imageSize / 2,
-                width: imageSize,
-                height: imageSize,
-                borderRadius: 40,
-                overflow: 'hidden',
-                backgroundColor: '#f0f0f0',
-                justifyContent: 'center',
-                alignItems: 'center',
-                shadowColor: '#000',
-                shadowOffset: { width: 10, height: 10 },
-                shadowOpacity: 0.3,
-                shadowRadius: 12,
-                elevation: 8,
-              }}
-            >
-              <Image
-                source={{ uri: coverUri ?? NO_IMAGE_URI }}
-                style={{ width: '100%', height: '100%' }}
-                contentFit="cover"
-              />
-            </View>
-
-            {/* Live Name */}
-            {(record.liveName || '-').length <= 8 ? (
-              <Text
-                style={{
-                  position: 'absolute',
-                  left: ticketWidth * 0.10 + imageSize + ticketWidth * 0.08,
-                  right: ticketWidth * 0.13,
-                  top: ticketHeight * 0.32,
-                  fontSize: ticketHeight * 0.060,
-                  fontWeight: '900',
-                  color: '#000',
-                }}
-                numberOfLines={1}
-              >
-                {record.liveName || '-'}
-              </Text>
-            ) : (
-              <Text
-                style={{
-                  position: 'absolute',
-                  left: ticketWidth * 0.10 + imageSize + ticketWidth * 0.08,
-                  right: ticketWidth * 0.13,
-                  top: ticketHeight * 0.31,
-                  fontSize: ticketHeight * 0.040,
-                  fontWeight: '900',
-                  color: '#000',
-                  lineHeight: ticketHeight * 0.055,
-                }}
-                numberOfLines={2}
-              >
-                {record.liveName || '-'}
-              </Text>
-            )}
-
-            {/* Artist */}
-            <Text
-              style={{
-                position: 'absolute',
-                left: ticketWidth * 0.10 + imageSize + ticketWidth * 0.08,
-                top: (record.liveName || '-').length <= 8 ? ticketHeight * 0.42 : ticketHeight * 0.455,
-                fontSize: ticketHeight * 0.035,
-                fontWeight: '800',
-                color: '#666',
-              }}
-              numberOfLines={1}
-            >
-              {record.artist || '-'}
-            </Text>
-
-            {/* DATE */}
-            <View
-              style={{
-                position: 'absolute',
-                left: ticketWidth * 0.10 + imageSize + ticketWidth * 0.08,
-                top: ticketHeight * 0.52,
-                flexDirection: 'row',
-                alignItems: 'center',
-              }}
-            >
-              <Text
-                style={{
-                  fontSize: ticketHeight * 0.045,
-                  color: '#999',
-                  fontWeight: '600',
-                  marginRight: ticketWidth * 0.02,
-                  minWidth: ticketWidth * 0.1,
-                }}
-              >
-                DATE
-              </Text>
-              <Text
-                style={{
-                  fontSize: ticketHeight * 0.045,
-                  color: '#000',
-                  fontWeight: '800',
-                }}
-              >
-                {record.date || '-'}
-              </Text>
-            </View>
-
-            {/* VENUE */}
-            <View
-              style={{
-                position: 'absolute',
-                left: ticketWidth * 0.10 + imageSize + ticketWidth * 0.08,
-                right: ticketWidth * 0.25,
-                top: ticketHeight * 0.59,
-                flexDirection: 'row',
-                alignItems: 'center',
-              }}
-            >
-              <Text
-                style={{
-                  fontSize: ticketHeight * 0.045,
-                  color: '#999',
-                  fontWeight: '600',
-                  marginRight: ticketWidth * 0.02,
-                  minWidth: ticketWidth * 0.1,
-                }}
-              >
-                VENUE
-              </Text>
-              <Text
-                style={{
-                  fontSize: ticketHeight * 0.045,
-                  color: '#000',
-                  fontWeight: '800',
-                  flex: 1,
-                }}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.5}
-              >
-                {record.venue || '-'}
-              </Text>
-            </View>
-
-            {/* START */}
-            <View
-              style={{
-                position: 'absolute',
-                left: ticketWidth * 0.10 + imageSize + ticketWidth * 0.08,
-                top: ticketHeight * 0.66,
-                flexDirection: 'row',
-                alignItems: 'center',
-              }}
-            >
-              <Text
-                style={{
-                  fontSize: ticketHeight * 0.045,
-                  color: '#999',
-                  fontWeight: '600',
-                  marginRight: ticketWidth * 0.02,
-                  minWidth: ticketWidth * 0.1,
-                }}
-              >
-                START
-              </Text>
-              <Text
-                style={{
-                  fontSize: ticketHeight * 0.045,
-                  color: '#000',
-                  fontWeight: '800',
-                }}
-              >
-                {record.startTime || '18:00'}
-              </Text>
-            </View>
-
-            {/* QR Code */}
-            <View
-              style={{
-                position: 'absolute',
-                right: ticketWidth * 0.13,
-                bottom: ticketHeight * 0.26,
-                width: qrSize + qrSize * 0.10,
-                backgroundColor: 'white',
-                padding: qrSize * 0.12,
-                borderRadius: 4,
-              }}
-            >
-              {record.qrCode ? (
-                <QRCode value={record.qrCode} size={qrSize} />
-              ) : (
-                <FallbackQRCode width={qrSize} height={qrSize} />
-              )}
-            </View>
-
-            {/*ウォーターマーク*/}
-            <View
-              style={{
-                position: 'absolute',
-                bottom: ticketHeight * 0.27,
-                left: ticketWidth * 0.14,
-                opacity: 0.3,
-              }}>
-                <Text style={{ fontWeight: '800', fontSize: ticketHeight * 0.02 }}>TICKEMO</Text>
-            </View>
-          </View>
-
-          
-
-          {/* Participated Stamp Overlay */}
-          {showParticipatedStamp && (
-            <View
-              style={{
-                position: 'absolute',
-                right: ticketWidth * 0.08,
-                top: ticketHeight * 0.34,
-                width: ticketHeight * 0.25,
-                height: ticketHeight * 0.25,
-                transform: [{ rotate: '-10deg' }],
-                opacity: 0.8,
-              }}
-            >
-              <Image
-                source={require('../assets/participated.png')}
-                style={{ width: '100%', height: '100%' }}
-                contentFit="contain"
-              />
-            </View>
-          )}
-        </View>
-      </View>
-    );
-  };
-
   return (
+    <>
     <Modal
       visible={visible}
       animationType="none"
       presentationStyle="overFullScreen"
       transparent
-      onRequestClose={onClose}
+      onRequestClose={() => {
+        onClose();
+      }}
       onShow={() => {
         Animated.timing(translateY, {
           toValue: 0,
@@ -517,49 +410,162 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({
               <Text style={styles.headerTitle}>プレビュー</Text>
             </View>
 
-            {/* チケットカード */}
-            <View style={styles.ticketCardContainer}>
-              <View
-                style={{
-                  width: outputWidth * displayScale,
-                  height: outputHeight * displayScale,
-                  alignSelf: 'center',
-                  overflow: 'hidden',
-                  borderRadius: 12,
-                  shadowColor: '#000',
-                  shadowOffset: { width: 0, height: 8 },
-                  shadowOpacity: 0.15,
-                  shadowRadius: 24,
-                  elevation: 10,
-                }}
+            <EditableTicketPreview
+              record={record}
+              coverUri={coverUri}
+              captureBlurBackground={captureBlurBackground}
+              outputWidth={outputWidth}
+              outputHeight={outputHeight}
+              displayScale={displayScale}
+              selectedSticker={selectedSticker}
+              showParticipatedStamp={showParticipatedStamp}
+              backgroundColor={ticketBgColor}
+              selectedFilterId={'normal'}
+              captureViewRef={viewRef}
+            />
+
+            {isPickerVisible && (
+              <Animated.View 
+                style={[
+                  showColorPalette
+                    ? styles.paletteContainer
+                    : styles.stickerPaletteContainer,
+                  {
+                    opacity: paletteOpacity,
+                    transform: [{ translateY: paletteTranslateY }],
+                  },
+                ]}
               >
-                <View
-                  ref={viewRef}
-                  collapsable={false}
-                  style={{
-                    width: outputWidth,
-                    height: outputHeight,
-                    transform: [{ scale: displayScale }],
-                    transformOrigin: 'top left',
-                  }}
-                >
-                  {renderPreview()}
+                {showColorPalette ? (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.paletteScrollContent}>
+                    {PRESET_COLORS.map((color) => {
+                      const selected = color.toUpperCase() === ticketBgColor.toUpperCase();
+                      return (
+                        <TouchableOpacity
+                          key={color}
+                          activeOpacity={0.85}
+                          style={[styles.paletteSwatchOuter, selected && styles.paletteSwatchOuterSelected]}
+                          onPress={() => handleSelectPresetColor(color)}
+                        >
+                          <View style={[styles.paletteSwatchInner, { backgroundColor: color }]}>
+                            {selected && <Ionicons name="checkmark" size={12} color={color === '#FFFFFF' ? '#111111' : '#FFFFFF'} />}
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                ) : (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.stickerScrollContent}>
+                    {stickerOptions.map((sticker) => {
+                      const selected = sticker.id === selectedSticker;
+                      return (
+                        <TouchableOpacity
+                          key={sticker.id}
+                          activeOpacity={0.85}
+                          style={[styles.stickerItem, selected && styles.stickerItemSelected]}
+                          onPress={() => handleSelectSticker(sticker.id as StickerType)}
+                        >
+                          <Image source={sticker.source} style={styles.stickerThumbImage} contentFit="contain" />
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                )}
+              </Animated.View>
+            )}
+
+            <View style={styles.dynamicIslandContainer}>
+              <View style={styles.dynamicIslandShell}>
+                <View style={styles.dynamicIsland}>
+                  <TouchableOpacity style={styles.dynamicItem} activeOpacity={0.8} onPress={handleToggleColorPalette} disabled={!isPremium}>
+                    <Svg width={34} height={34} viewBox="0 0 36 36">
+                      <Defs>
+                        <LinearGradient id="rainbowGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                          <Stop offset="0%" stopColor="#FF0000" />
+                          <Stop offset="16%" stopColor="#FF7F00" />
+                          <Stop offset="33%" stopColor="#FFFF00" />
+                          <Stop offset="50%" stopColor="#00FF00" />
+                          <Stop offset="66%" stopColor="#0000FF" />
+                          <Stop offset="83%" stopColor="#9400D3" />
+                          <Stop offset="100%" stopColor="#FF0000" />
+                        </LinearGradient>
+                      </Defs>
+                      {/* Rainbow outer ring stroke */}
+                      <Circle cx="18" cy="18" r="15" fill="none" stroke="url(#rainbowGradient)" strokeWidth="3" />
+                      {/* White ring */}
+                      <Circle cx="18" cy="18" r="12" fill="#FFFFFF" />
+                      {/* Center circle with selected color */}
+                      <Circle cx="18" cy="18" r="11" fill={ticketBgColor} />
+                    </Svg>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.dynamicItem} activeOpacity={0.8} onPress={handleCycleSticker} disabled={!isPremium}>
+                    <Svg width={DYNAMIC_ICON_SIZE} height={DYNAMIC_ICON_SIZE} viewBox="0 0 24 24" fill="none">
+                      <Path
+                        d="M21 9a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 15 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2z"
+                        stroke="#222"
+                        strokeWidth={2}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      <Path
+                        d="M15 3v5a1 1 0 0 0 1 1h5"
+                        stroke="#222"
+                        strokeWidth={2}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      <Path d="M8 13h.01" stroke="#222" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+                      <Path d="M16 13h.01" stroke="#222" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+                      <Path
+                        d="M10 16s.8 1 2 1c1.3 0 2-1 2-1"
+                        stroke="#222"
+                        strokeWidth={2}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </Svg>
+                    <Text style={styles.dynamicItemLabel}>ステッカー</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.dynamicItem} activeOpacity={0.8} onPress={handleToggleParticipatedStamp} disabled={!isPremium}>
+                    <Svg width={DYNAMIC_ICON_SIZE} height={DYNAMIC_ICON_SIZE} viewBox="0 0 24 24" fill="none">
+                      <Path
+                        d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"
+                        stroke={showParticipatedStamp ? '#34C759' : '#222'}
+                        strokeWidth={2}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      <Path
+                        d="m9 12 2 2 4-4"
+                        stroke={showParticipatedStamp ? '#34C759' : '#222'}
+                        strokeWidth={2}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </Svg>
+                    <Text style={styles.dynamicItemLabel}>参戦済み</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.dynamicItem} activeOpacity={0.8} onPress={handleResetOperations} disabled={!isPremium}>
+                    <MaterialCommunityIcons name="backup-restore" size={DYNAMIC_ICON_SIZE} color="#222" />
+                    <Text style={styles.dynamicItemLabel}>リセット</Text>
+                  </TouchableOpacity>
                 </View>
+
+                {!isPremium && (
+                  <TouchableOpacity style={styles.lockOverlay} activeOpacity={0.9} onPress={handleOpenPaywallFromLock}>
+                    <BlurView intensity={12} tint="light" style={StyleSheet.absoluteFillObject} />
+                    <View style={styles.lockBadge}>
+                      <Ionicons name="lock-closed" size={14} color="#111111" />
+                      <Text style={styles.lockBadgeText}>Plusで解放</Text>
+                    </View>
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
 
-            {/* 参戦済みトグル */}
-            <View style={styles.toggleContainer}>
-              <Switch
-                trackColor={{ false: '#767577', true: '#34C759' }}
-                thumbColor="#FFF"
-                ios_backgroundColor="#767577"
-                onValueChange={setShowParticipatedStamp}
-                value={showParticipatedStamp}
-                style={styles.switch}
-              />
-              <Text style={styles.toggleLabel}>参戦済み</Text>
-            </View>
           </View>
 
           {/* アクションボタン群 */}
@@ -605,20 +611,11 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({
               <Text style={styles.actionButtonLabel}>X (Twitter)</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.actionButtonWrapper}
-              onPress={handleShareOther}
-              disabled={isGenerating}
-            >
-              <View style={styles.actionButtonCircle}>
-                <Ionicons name="ellipsis-horizontal" size={24} color="#333" />
-              </View>
-              <Text style={styles.actionButtonLabel}>その他</Text>
-            </TouchableOpacity>
           </View>
         </Animated.View>
       </View>
     </Modal>
+    </>
   );
 };
 
@@ -629,8 +626,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.6)',
   },
   container: {
-    height: '70%',
-    backgroundColor: '#FFFFFF',
+    height: '85%',
+    backgroundColor: '#ffffff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     overflow: 'hidden',
@@ -650,7 +647,7 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: 24,
     paddingTop: 12,
-    paddingBottom: 16,
+    paddingBottom: 2,
   },
   headerTitle: {
     fontSize: 24,
@@ -660,26 +657,163 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
-  ticketCardContainer: {
-    paddingHorizontal: 20,
-    flex: 1,
-    justifyContent: 'center',
+  dynamicIslandContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 6,
+    marginBottom: 10,
+    marginTop: 15,
   },
-  toggleContainer: {
+  dynamicIslandShell: {
+    borderRadius: 40,
+    overflow: 'hidden',
+    position: 'relative',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 15,
+  },
+  dynamicIsland: {
+    minHeight: 72,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#f9f9f9',
+  },
+  dynamicItem: {
+    flex: 1,
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 3,
-    marginBottom: 1,
+    gap: 4,
   },
-  toggleLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#666',
-    marginLeft: 12,
+  dynamicItemLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#333',
+    textAlign: 'center',
   },
-  switch: {
-    transform: [{ scaleX: 0.9 }, { scaleY: 0.9 }],
+  lockOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    zIndex: 5,
+  },
+  lockBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.08)',
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  lockBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#111111',
+  },
+  colorSwatch: {
+    marginTop: 2,
+    width: 36,
+    height: 36,
+  },
+  paletteContainer: {
+    paddingHorizontal: 14,
+    marginTop: -2,
+    marginBottom: 10,
+  },
+  stickerPaletteContainer: {
+    paddingHorizontal: 14,
+    marginTop: -2,
+    marginBottom: 10,
+  },
+  filterPaletteContainer: {
+    paddingHorizontal: 14,
+    marginTop: -2,
+    marginBottom: 10,
+  },
+  paletteScrollContent: {
+    paddingHorizontal: 2,
+    paddingVertical: 4,
+    gap: 8,
+  },
+  stickerScrollContent: {
+    paddingHorizontal: 2,
+    paddingVertical: 2,
+    gap: 14,
+    alignItems: 'center',
+  },
+  filterScrollContent: {
+    paddingHorizontal: 2,
+    paddingVertical: 4,
+    gap: 10,
+    alignItems: 'center',
+  },
+  filterChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.08)',
+  },
+  filterChipSelected: {
+    backgroundColor: '#111111',
+    borderColor: '#111111',
+  },
+  filterChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#333333',
+  },
+  filterChipTextSelected: {
+    color: '#FFFFFF',
+  },
+  paletteSwatchOuter: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.08)',
+    backgroundColor: '#F3F4F6',
+  },
+  paletteSwatchOuterSelected: {
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  paletteSwatchInner: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.12)',
+  },
+  stickerItem: {
+    width: 58,
+    height: 58,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stickerItemSelected: {
+    transform: [{ scale: 1.08 }],
+  },
+  stickerThumbImage: {
+    width: 58,
+    height: 58,
   },
   actionBar: {
     flexDirection: 'row',

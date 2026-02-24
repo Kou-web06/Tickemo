@@ -73,9 +73,14 @@ export const RecordsProvider: React.FC<{ children: ReactNode }> = ({ children })
   }, []);
 
   useEffect(() => {
-    scheduleLiveReminders(records).catch((error) => {
-      console.log('[RecordsContext] Failed to schedule reminders:', error);
-    });
+    // デバウンスで通知スケジューリングの重複実行を防ぐ
+    const timer = setTimeout(() => {
+      scheduleLiveReminders(records).catch((error) => {
+        console.log('[RecordsContext] Failed to schedule reminders:', error);
+      });
+    }, 500);
+
+    return () => clearTimeout(timer);
   }, [records]);
 
   const addRecord = async (record: ChekiRecord) => {

@@ -13,8 +13,11 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { Image as ExpoImage } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAppStore } from '../store/useAppStore';
+import { normalizeStoredImageUri, resolveLocalImageUri } from '../lib/imageUpload';
+import { pushImageToCloud } from '../lib/icloudImageSync';
 
 export default function ProfileEditScreen({ navigation }: any) {
   const insets = useSafeAreaInsets();
@@ -22,6 +25,7 @@ export default function ProfileEditScreen({ navigation }: any) {
   const [username, setUsername] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
   const [joinedAt, setJoinedAt] = useState('');
+  const [firstLaunchAt, setFirstLaunchAt] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [displayNameError, setDisplayNameError] = useState('');
@@ -32,11 +36,13 @@ export default function ProfileEditScreen({ navigation }: any) {
     loadProfile();
   }, []);
 
+  const resolvedAvatarUri = useMemo(() => resolveLocalImageUri(avatarUrl), [avatarUrl]);
+
   useEffect(() => {
-    if (avatarUrl) {
-      ExpoImage.prefetch(avatarUrl, 'memory-disk').catch(() => {});
+    if (resolvedAvatarUri) {
+      ExpoImage.prefetch(resolvedAvatarUri, 'memory-disk').catch(() => {});
     }
-  }, [avatarUrl]);
+  }, [resolvedAvatarUri]);
 
   const loadProfile = async () => {
     try {
@@ -44,12 +50,18 @@ export default function ProfileEditScreen({ navigation }: any) {
       const display = userProfile?.name || 'User';
       const rawUsername = userProfile?.username || 'user';
       const avatar = userProfile?.avatarUri || '';
-      const joined = userProfile?.joinedAt || '';
+      const storedFirstLaunch = await AsyncStorage.getItem('@has_launched');
+      const firstLaunchValue = storedFirstLaunch && !Number.isNaN(Date.parse(storedFirstLaunch))
+        ? storedFirstLaunch
+        : '';
+      const joined = userProfile?.joinedAt || firstLaunchValue || '';
 
       setDisplayName(display);
       setUsername(rawUsername.startsWith('@') ? rawUsername.slice(1) : rawUsername);
-      setAvatarUrl(avatar);
+      const normalizedAvatar = normalizeStoredImageUri(avatar) || avatar;
+      setAvatarUrl(normalizedAvatar);
       setJoinedAt(joined);
+      setFirstLaunchAt(firstLaunchValue);
     } catch (error) {
       console.log('Failed to load profile:', error);
     } finally {
@@ -80,11 +92,23 @@ export default function ProfileEditScreen({ navigation }: any) {
       setIsSaving(true);
       setDisplayNameError('');
       setUsernameError('');
+
+      // プロフィール画像をiCloudに同期
+      if (avatarUrl && avatarUrl.startsWith('Tickemo/profile/')) {
+        try {
+          await pushImageToCloud(avatarUrl);
+          console.log('[ProfileEdit] Pushed avatar to iCloud');
+        } catch (error) {
+          console.log('[ProfileEdit] Failed to push avatar:', error);
+        }
+      }
+
+      const storedAvatarUri = normalizeStoredImageUri(avatarUrl) || avatarUrl;
       useAppStore.getState().setProfile({
         name: trimmedName,
         username: normalizedUsername,
-        avatarUri: avatarUrl || undefined,
-        joinedAt: joinedAt || new Date().toISOString(),
+        avatarUri: storedAvatarUri || undefined,
+        joinedAt: joinedAt || firstLaunchAt || new Date().toISOString(),
       });
       navigation.goBack();
     } catch (error) {
@@ -123,22 +147,28 @@ export default function ProfileEditScreen({ navigation }: any) {
 
       if (!result.canceled) {
         const sourceUri = result.assets[0].uri;
-        const baseDir = (FileSystem as any).documentDirectory || (FileSystem as any).cacheDirectory;
+        const baseDir = FileSystem.documentDirectory;
         
-        // FileSystemが利用できない場合は画像URIをそのまま使用
         if (!baseDir) {
-          console.warn('FileSystem not available, using image URI directly');
-          setAvatarUrl(sourceUri);
+          console.warn('[ProfileEdit] FileSystem not available');
+          Alert.alert('エラー', 'ファイルシステムが利用できません');
           return;
         }
-        const dir = `${baseDir}profile/`;
+
+        // 相対パスで保存: Tickemo/profile/avatar-{timestamp}.jpg
+        const dir = `${baseDir}Tickemo/profile/`;
         await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
-        const targetUri = `${dir}avatar-${Date.now()}.jpg`;
+        const filename = `avatar-${Date.now()}.jpg`;
+        const targetUri = `${dir}${filename}`;
         await FileSystem.copyAsync({ from: sourceUri, to: targetUri });
-        setAvatarUrl(targetUri);
+        
+        // 相対パスで保存
+        const relativePath = `Tickemo/profile/${filename}`;
+        setAvatarUrl(relativePath);
       }
     } catch (error) {
-      console.log('Failed to pick avatar:', error);
+      console.log('[ProfileEdit] Failed to pick avatar:', error);
+      Alert.alert('エラー', `画像の保存に失敗しました\n${(error as Error).message || '不明なエラー'}`);
     }
   };
 
@@ -165,9 +195,9 @@ export default function ProfileEditScreen({ navigation }: any) {
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.profileCard}>
           <View style={styles.avatarWrap}>
-            {avatarUrl ? (
+            {resolvedAvatarUri ? (
               <ExpoImage
-                source={{ uri: avatarUrl }}
+                source={{ uri: resolvedAvatarUri }}
                 style={styles.avatarImage}
                 contentFit="cover"
                 cachePolicy="memory-disk"
@@ -305,7 +335,7 @@ const styles = StyleSheet.create({
   avatarWrap: {
     width: 72,
     height: 72,
-    borderRadius: 24,
+    borderRadius: 71,
     backgroundColor: '#111111',
     alignItems: 'center',
     justifyContent: 'center',
@@ -313,12 +343,12 @@ const styles = StyleSheet.create({
   avatarImage: {
     width: 72,
     height: 72,
-    borderRadius: 24,
+    borderRadius: 71,
   },
   avatarFallback: {
     width: 72,
     height: 72,
-    borderRadius: 24,
+    borderRadius: 71,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#1F1F1F',

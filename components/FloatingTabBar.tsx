@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { View, TouchableOpacity, StyleSheet, Platform, Text } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { Animated, View, TouchableOpacity, StyleSheet, Platform, Text } from 'react-native';
 import { BlurView } from 'expo-blur';
-import { Octicons, Ionicons, MaterialIcons, MaterialCommunityIcons, FontAwesome6 } from '@expo/vector-icons';
+import { Octicons, Ionicons, MaterialIcons, MaterialCommunityIcons, FontAwesome6, Entypo } from '@expo/vector-icons';
 import { theme } from '../theme';
 
 interface TabBarProps {
@@ -12,6 +12,14 @@ interface TabBarProps {
 
 export const FloatingTabBar: React.FC<TabBarProps> = ({ state, descriptors, navigation }) => {
   const [pressedTab, setPressedTab] = useState<string | null>(null);
+  const rotateValuesRef = useRef<Record<string, Animated.Value>>({});
+
+  const getRotateValue = (routeKey: string) => {
+    if (!rotateValuesRef.current[routeKey]) {
+      rotateValuesRef.current[routeKey] = new Animated.Value(0);
+    }
+    return rotateValuesRef.current[routeKey];
+  };
   
   // Check if any focused route wants to hide the tab bar
   const focusedRoute = state.routes[state.index];
@@ -27,9 +35,11 @@ export const FloatingTabBar: React.FC<TabBarProps> = ({ state, descriptors, navi
       case 'Home':
         return { IconComponent: Ionicons, name: 'albums' };
       case 'Countdown':
-        return { IconComponent: Octicons, name: 'home-fill' };
+        return { IconComponent: Entypo, name: 'modern-mic' };
       case 'Statistics':
         return { IconComponent: Ionicons, name: 'stats-chart' };
+      case 'Settings':
+        return { IconComponent: Ionicons, name: 'settings-sharp' };
       default:
         return { IconComponent: Octicons, name: 'circle' };
     }
@@ -53,6 +63,15 @@ export const FloatingTabBar: React.FC<TabBarProps> = ({ state, descriptors, navi
             });
 
             if (!isFocused && !event.defaultPrevented) {
+              if (route.name === 'Settings') {
+                const rotateValue = getRotateValue(route.key);
+                rotateValue.setValue(0);
+                Animated.timing(rotateValue, {
+                  toValue: 1,
+                  duration: 500,
+                  useNativeDriver: true,
+                }).start();
+              }
               navigation.navigate(route.name);
             }
             setPressedTab(null);
@@ -68,6 +87,20 @@ export const FloatingTabBar: React.FC<TabBarProps> = ({ state, descriptors, navi
 
           const { IconComponent, name: iconName } = getIconInfo(route.name);
 
+          const rotateValue = getRotateValue(route.key);
+          const rotateStyle = route.name === 'Settings'
+            ? {
+              transform: [
+                {
+                  rotate: rotateValue.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: ['0deg', '360deg'],
+                  }),
+                },
+              ],
+            }
+            : null;
+
           return (
             <TouchableOpacity
               key={route.key}
@@ -81,11 +114,13 @@ export const FloatingTabBar: React.FC<TabBarProps> = ({ state, descriptors, navi
               style={styles.tab}
               activeOpacity={0.7}
             >
-              <IconComponent
-                name={iconName}
-                size={theme.tabBar.iconSize}
-                color={(isFocused || isPressed) ? theme.colors.tabBar.activeIcon : theme.colors.tabBar.inactiveIcon}
-              />
+              <Animated.View style={rotateStyle ?? undefined}>
+                <IconComponent
+                  name={iconName}
+                  size={theme.tabBar.iconSize}
+                  color={(isFocused || isPressed) ? theme.colors.tabBar.activeIcon : theme.colors.tabBar.inactiveIcon}
+                />
+              </Animated.View>
             </TouchableOpacity>
           ); })}
           </View>
@@ -127,10 +162,10 @@ const styles = StyleSheet.create({
     borderRadius: theme.tabBar.borderRadius,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     paddingVertical: theme.tabBar.padding,
-    paddingHorizontal: theme.spacing.md,
+    paddingHorizontal: theme.spacing.xxl,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: theme.spacing.xxl,
+    gap: theme.spacing.lg,
   },
   tab: {
     alignItems: 'center',

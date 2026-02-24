@@ -67,6 +67,21 @@ const StatisticsScreen: React.FC = () => {
   const [mainValueDisplay, setMainValueDisplay] = useState(0);
   const mainValueFrame = useRef<number | null>(null);
 
+  // 年次レポート通知からの遷移処理
+  useEffect(() => {
+    const { getGlobalNotification } = require('../contexts/NotificationContext');
+    const notification = getGlobalNotification();
+    if (notification && notification.kind === 'yearly_report') {
+      console.log('[StatisticsScreen] Opening yearly report tab');
+      setActiveTab('history');
+      // 最新の年度を選択
+      const latestYear = yearlyReport[yearlyReport.length - 1]?.year ?? null;
+      if (latestYear) {
+        setSelectedYear(latestYear);
+      }
+    }
+  }, [yearlyReport]);
+
   const chartMaxValue = useMemo(() => {
     if (yearlyReport.length === 0) return 12;
     const maxValue = yearlyReport.reduce((max, item) => Math.max(max, item.totalLives), 0);
@@ -84,9 +99,12 @@ const StatisticsScreen: React.FC = () => {
     .filter((value) => value >= 0);
   const uniquePercents = Array.from(new Set(rankPercents)).sort((a, b) => b - a);
 
-  const getDisplayRank = (value?: number) => {
+  const getDisplayRank = (value?: number): 1 | 2 | 3 => {
     if (typeof value !== 'number' || value < 0) return 3;
-    return uniquePercents.indexOf(value) + 1;
+    const index = uniquePercents.indexOf(value) + 1;
+    if (index === 1) return 1;
+    if (index === 2) return 2;
+    return 3;
   };
 
   const rankTwoDisplayRank = getDisplayRank(rankTwo?.percentage);
@@ -301,30 +319,36 @@ const StatisticsScreen: React.FC = () => {
               </View>
 
               <View style={styles.podiumRow}>
-                <PodiumBar
-                  rank={rankTwoDisplayRank}
-                  artist={rankTwo?.name}
-                  percentage={rankTwo?.percentage ?? 0}
-                  imageUrl={rankTwo?.name ? artistImages[rankTwo.name] : ''}
-                  highlight={rankTwoDisplayRank === 1}
-                  delay={120}
-                />
-                <PodiumBar
-                  rank={1}
-                  artist={rankOne?.name}
-                  percentage={rankOne?.percentage ?? 0}
-                  imageUrl={rankOne?.name ? artistImages[rankOne.name] : ''}
-                  highlight
-                  delay={0}
-                />
-                <PodiumBar
-                  rank={rankThreeDisplayRank}
-                  artist={rankThree?.name}
-                  percentage={rankThree?.percentage ?? 0}
-                  imageUrl={rankThree?.name ? artistImages[rankThree.name] : ''}
-                  highlight={rankThreeDisplayRank === 1}
-                  delay={220}
-                />
+                <View style={[styles.podiumSideSlot, styles.podiumSideSlotLeft]}>
+                  <PodiumBar
+                    rank={rankTwoDisplayRank}
+                    artist={rankTwo?.name}
+                    percentage={rankTwo?.percentage ?? 0}
+                    imageUrl={rankTwo?.name ? artistImages[rankTwo.name] : ''}
+                    highlight={rankTwoDisplayRank === 1}
+                    delay={120}
+                  />
+                </View>
+                <View style={styles.podiumCenterSlot}>
+                  <PodiumBar
+                    rank={1}
+                    artist={rankOne?.name}
+                    percentage={rankOne?.percentage ?? 0}
+                    imageUrl={rankOne?.name ? artistImages[rankOne.name] : ''}
+                    highlight
+                    delay={0}
+                  />
+                </View>
+                <View style={[styles.podiumSideSlot, styles.podiumSideSlotRight]}>
+                  <PodiumBar
+                    rank={rankThreeDisplayRank}
+                    artist={rankThree?.name}
+                    percentage={rankThree?.percentage ?? 0}
+                    imageUrl={rankThree?.name ? artistImages[rankThree.name] : ''}
+                    highlight={rankThreeDisplayRank === 1}
+                    delay={220}
+                  />
+                </View>
               </View>
 
               <Text style={styles.allArtistsTitle}>all artists</Text>
@@ -1014,10 +1038,26 @@ const styles = StyleSheet.create({
   },
   podiumRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     alignItems: 'flex-end',
     gap: PODIUM_GAP,
     paddingHorizontal: theme.spacing.sm,
+    width: podiumWidth,
+    alignSelf: 'center',
+    position: 'relative',
+  },
+  podiumSideSlot: {
+    position: 'absolute',
+    bottom: 0,
+  },
+  podiumSideSlotLeft: {
+    left: 0,
+  },
+  podiumSideSlotRight: {
+    right: 0,
+  },
+  podiumCenterSlot: {
+    alignItems: 'center',
   },
   podiumSlot: {
     width: (podiumWidth - PODIUM_GAP * 2) / 3,

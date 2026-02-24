@@ -1,13 +1,14 @@
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, StatusBar, Modal, Dimensions, Animated, Pressable, Linking, Share, Alert, TextInput, ScrollView, Image as RNImage, ActivityIndicator } from 'react-native';
 import Svg, { Path, SvgXml, SvgUri } from 'react-native-svg';
 import QRCode from 'react-native-qrcode-svg';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Image } from 'expo-image';
 import { Asset } from 'expo-asset';
+import * as FileSystem from 'expo-file-system';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons, MaterialCommunityIcons, MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Anton_400Regular } from '@expo-google-fonts/anton';
 import * as Crypto from 'expo-crypto';
 import TextTicker from 'react-native-text-ticker';
@@ -16,10 +17,11 @@ import { theme } from '../theme';
 import LiveEditScreen from './LiveEditScreen';
 import SettingsScreen from './SettingsScreen';
 import ProfileEditScreen from './ProfileEditScreen';
+import PaywallScreen from './PaywallScreen';
 import { useRecords, ChekiRecord } from '../contexts/RecordsContext';
 import ShareImageGenerator from '../components/ShareImageGenerator';
 import TodaySong from '../components/TodaySong';
-import { buildLiveAlbumName, uploadMultipleImages, deleteImage, normalizeStoredImageUri } from '../lib/imageUpload';
+import { buildLiveAlbumName, uploadMultipleImages, uploadImage, deleteImage, normalizeStoredImageUri, resolveLocalImageUri, getTickemoRootDir } from '../lib/imageUpload';
 import { saveSetlist, getSetlist } from '../lib/setlistDb';
 import type { SetlistItem } from '../types/setlist';
 import { isTestflightMode } from '../utils/appMode';
@@ -38,9 +40,34 @@ const EMPTY_TICKET_SVG = `
 </svg>
 `;
 
+const EXCHANGE_ICON_SVG = `
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+<g clip-path="url(#clip0_4418_3483)">
+<path d="M5.52979 15.9804C5.69979 17.7704 6.63978 18.5004 8.68978 18.5004H11.4198C13.6998 18.5004 14.6098 17.5904 14.6098 15.3104V12.5804C14.6098 10.3104 13.6998 9.40039 11.4198 9.40039H8.68978C6.61978 9.40039 5.67979 10.1504 5.52979 12.0004" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+<path d="M18.4999 8.68V11.41C18.4999 13.69 17.5899 14.6 15.3099 14.6H14.5999V12.58C14.5999 10.31 13.6899 9.4 11.4099 9.4H9.3999V8.68C9.3999 6.4 10.3099 5.5 12.5899 5.5H15.3199C17.5899 5.5 18.4999 6.41 18.4999 8.68Z" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+<path d="M22 15C22 18.87 18.87 22 15 22L16.05 20.25" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+<path d="M2 9C2 5.13 5.13 2 9 2L7.95 3.75" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+</g>
+<defs>
+<clipPath id="clip0_4418_3483">
+<rect width="24" height="24" fill="white"/>
+</clipPath>
+</defs>
+</svg>
+`;
+
+const LIVE_TYPES = ['ワンマン', '対バン', 'フェス', 'FC限定'] as const;
+const LIVE_TYPE_ICON_MAP: Record<(typeof LIVE_TYPES)[number], keyof typeof MaterialCommunityIcons.glyphMap> = {
+  ワンマン: 'account',
+  対バン: 'account-multiple',
+  フェス: 'account-group',
+  FC限定: 'account-star',
+};
+
 interface LiveInfo {
   name: string;
   artist: string;
+  liveType?: string;
   artistImageUrl?: string;
   date: Date;
   venue: string;
@@ -63,11 +90,15 @@ function CountdownMain({ navigation }: any) {
   const screenHeight = Dimensions.get('window').height;
   const [showEditScreen, setShowEditScreen] = useState(false);
   const [isLoading, setIsLoading] = useState(false); // ローディング状態
+  const [resolvedImageUrls, setResolvedImageUrls] = useState<string[]>([]);
   const [isJacketMoved, setIsJacketMoved] = useState(false);
   const [showShareImage, setShowShareImage] = useState(false);
   const [isAccordionOpen, setIsAccordionOpen] = useState(false);
   const [selectedLiveId, setSelectedLiveId] = useState<string | null>(null);
   const [setlistSongs, setSetlistSongs] = useState<SetlistItem[]>([]);
+  const [currentBackground, setCurrentBackground] = useState<string | null>(null);
+  const [previousBackground, setPreviousBackground] = useState<string | null>(null);
+  const backgroundFade = useRef(new Animated.Value(1)).current;
   const jacketAnimX = useRef(new Animated.Value(0)).current;
   const jacketAnimRotate = useRef(new Animated.Value(0)).current;
   const accordionHeight = useSharedValue(0);
@@ -152,6 +183,16 @@ function CountdownMain({ navigation }: any) {
   const nextRecord = selectedRecord ?? futureLives[0] ?? null;
   const accordionMaxHeight = Math.min(futureLives.length * 66 + 24, screenHeight * 0.5);
 
+  // 編集画面を開く際にnextRecord.imageUrlsを相対パス→file://パスに変換
+  useEffect(() => {
+    if (!nextRecord || !nextRecord.id || isCreatingNewLive || !showEditScreen) {
+      setResolvedImageUrls([]);
+      return;
+    }
+    const resolved = (nextRecord.imageUrls || []).map((url: string) => resolveLocalImageUri(url));
+    setResolvedImageUrls(resolved);
+  }, [showEditScreen, nextRecord?.id, isCreatingNewLive]);
+
   useEffect(() => {
     const targetHeight = isAccordionOpen ? accordionMaxHeight : 0;
     const targetOpacity = isAccordionOpen ? 1 : 0;
@@ -169,6 +210,29 @@ function CountdownMain({ navigation }: any) {
 
   const coverUri = useResolvedImageUri(nextRecord?.imageUrls?.[0], nextRecord?.imageAssetIds?.[0]);
   const backgroundUri = nextRecord ? (coverUri ?? NO_IMAGE_URI) : null;
+
+  useEffect(() => {
+    if (!backgroundUri) {
+      setCurrentBackground(null);
+      setPreviousBackground(null);
+      return;
+    }
+
+    if (backgroundUri === currentBackground) {
+      return;
+    }
+
+    setPreviousBackground(currentBackground);
+    setCurrentBackground(backgroundUri);
+    backgroundFade.setValue(0);
+    Animated.timing(backgroundFade, {
+      toValue: 1,
+      duration: 260,
+      useNativeDriver: true,
+    }).start(() => {
+      setPreviousBackground(null);
+    });
+  }, [backgroundUri, currentBackground, backgroundFade]);
 
   useEffect(() => {
     const preloadCountdownImages = async () => {
@@ -310,9 +374,32 @@ function CountdownMain({ navigation }: any) {
     setIsAccordionOpen(false);
   };
 
-  const handleSharePress = async () => {
+  const handleSharePress = () => {
     if (!nextRecord) return;
     setShowShareImage(true);
+  };
+
+  const handleShareModalClose = useCallback(() => {
+    setShowShareImage(false);
+  }, []);
+
+  const dedupeImageEntries = (
+    urls: string[],
+    assetIds: Array<string | null>
+  ): { urls: string[]; assetIds: Array<string | null> } => {
+    const seen = new Set<string>();
+    const nextUrls: string[] = [];
+    const nextAssetIds: Array<string | null> = [];
+
+    urls.forEach((url, index) => {
+      const key = normalizeStoredImageUri(url) || url;
+      if (seen.has(key)) return;
+      seen.add(key);
+      nextUrls.push(url);
+      nextAssetIds.push(assetIds[index] ?? null);
+    });
+
+    return { urls: nextUrls, assetIds: nextAssetIds };
   };
 
   const handleSaveLiveInfo = async (info: LiveInfo) => {
@@ -326,46 +413,51 @@ function CountdownMain({ navigation }: any) {
 
       // console.log('[CountdownScreen] ユーザーID:', userId);
 
-      // 複数画像をアップロード（file:// で始まる新規選択画像のみ）
+      // ジャケット画像（1枚のみ）を保存
       let uploadedImageUrls: string[] = [];
       let uploadedImageAssetIds: Array<string | null> = [];
-      if (info.imageUrls?.length) {
-        // 既存URL（file:// で始まらないもの）を先に追加（最初の画像がジャケットになる）
-        const existingAssetIdsByUrl = new Map(
-          (nextRecord?.imageUrls || []).map((url, index) => [normalizeStoredImageUri(url), nextRecord?.imageAssetIds?.[index] ?? null])
-        );
-        const normalizedUrls = info.imageUrls.map((uri: string) => normalizeStoredImageUri(uri));
-        const existingUrls = normalizedUrls.filter((uri: string) => !uri.startsWith('file://'));
-        uploadedImageUrls.push(...existingUrls);
-        uploadedImageAssetIds.push(...existingUrls.map((uri) => existingAssetIdsByUrl.get(uri) ?? null));
-        
-        // 新しくアップロードされた画像を後に追加
-        const fileUris = normalizedUrls.filter((uri: string) => uri.startsWith('file://'));
-        if (fileUris.length > 0) {
-          // console.log('[CountdownScreen] 複数画像アップロード中:', fileUris.length);
-          // liveIdを決定: 新規作成なら新規ID、編集なら既存レコードのID
-          const liveId = !nextRecord || isCreatingNewLive 
-            ? Crypto.randomUUID() 
-            : nextRecord.id;
-          const albumName = buildLiveAlbumName(info.date, info.name);
-          const totalImageCount = info.imageUrls?.length ?? 0;
-          const previousImageCount = (!nextRecord || isCreatingNewLive)
-            ? 0
-            : (nextRecord.imageUrls?.length ?? 0);
-          const uploadResult = await uploadMultipleImages(
-            fileUris,
-            userId,
-            liveId,
-            albumName,
-            previousImageCount,
-            totalImageCount
-          );
-          uploadedImageUrls.push(...uploadResult.imageUrls);
-          uploadedImageAssetIds.push(...uploadResult.assetIds);
-          // console.log('[CountdownScreen] 複数画像アップロード完了:', uploadedImageUrls);
-          // アップロード後、URLがアクセス可能になるまで少し待機
-          await new Promise(resolve => setTimeout(resolve, 1200));
+
+      // レコードIDの決定
+      const liveId = (!nextRecord || isCreatingNewLive)
+        ? Crypto.randomUUID()
+        : nextRecord.id;
+
+      if (info.imageUrls && info.imageUrls.length > 0) {
+        const rawUri = info.imageUrls[0]; // 先頭の1枚のみ対象
+        if (rawUri) {
+          const normalizedUri = normalizeStoredImageUri(rawUri) || rawUri;
+          
+          if (normalizedUri.startsWith('file://')) {
+            // 新規選択画像をユニーク名で保存
+            const newBaseName = `cover-${Date.now()}`;
+            const uploaded = await uploadImage(normalizedUri, userId, liveId, newBaseName);
+            if (uploaded) {
+              // 古い画像の削除（既存レコード更新時）
+              if (!isCreatingNewLive && nextRecord?.imageUrls?.[0]) {
+                 try {
+                   await deleteImage(nextRecord.imageUrls[0]);
+                 } catch (e) {
+                   console.warn('[CountdownScreen] Old image delete failed:', e);
+                 }
+              }
+
+              uploadedImageUrls = [uploaded];
+              uploadedImageAssetIds = [null];
+            }
+          } else {
+             // 既存のURL（例: 編集時に変更なし）
+             uploadedImageUrls = [normalizedUri];
+             // 既存のassetIdを引き継ぎ（元々0番目にあった場合などを考慮）
+             const originalIndex = (nextRecord?.imageUrls || []).indexOf(rawUri);
+             const originalAssetId = originalIndex !== -1 ? (nextRecord?.imageAssetIds?.[originalIndex] ?? null) : null;
+             uploadedImageAssetIds = [originalAssetId];
+          }
         }
+      }
+      
+      // アップロード完了待ち（念のため）
+      if (uploadedImageUrls.length > 0 && uploadedImageUrls[0].startsWith('file://')) {
+          await new Promise(resolve => setTimeout(resolve, 500));
       }
 
       if (!nextRecord || isCreatingNewLive) {
@@ -377,6 +469,7 @@ function CountdownMain({ navigation }: any) {
           artist: info.artist,
           artistImageUrl: info.artistImageUrl || '',
           liveName: info.name,
+          liveType: info.liveType || 'ワンマン',
           date: formatDate(info.date),
           venue: info.venue,
           seat: info.seat || '',
@@ -426,6 +519,7 @@ function CountdownMain({ navigation }: any) {
           artist: info.artist,
           artistImageUrl: info.artistImageUrl || nextRecord.artistImageUrl || '',
           liveName: info.name,
+          liveType: info.liveType || nextRecord.liveType || 'ワンマン',
           date: formatDate(info.date),
           venue: info.venue,
           seat: info.seat || nextRecord.seat || '',
@@ -471,14 +565,6 @@ function CountdownMain({ navigation }: any) {
       <View
         style={[styles.gradient, { backgroundColor: '#000' }]}
       >
-        <TouchableOpacity
-          style={styles.settingsButton}
-          onPress={() => navigation.navigate('Settings')}
-        >
-          <BlurView intensity={20} tint="dark" style={styles.settingsButtonBlur}>
-            <MaterialIcons name="settings" size={24} color="#FFF" />
-          </BlurView>
-        </TouchableOpacity>
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyTitle}>次のライブを{"\n"}設定しよう</Text>
           <Text style={styles.emptySubtitle}>ライブまでの時間をカウントダウンできます</Text>
@@ -517,6 +603,10 @@ function CountdownMain({ navigation }: any) {
   const renderCountdown = () => {
     if (!nextRecord) return null;
     const record = nextRecord;
+    const liveTypeLabel = (record.liveType && LIVE_TYPES.includes(record.liveType as (typeof LIVE_TYPES)[number]))
+      ? (record.liveType as (typeof LIVE_TYPES)[number])
+      : 'ワンマン';
+    const liveTypeIconName = LIVE_TYPE_ICON_MAP[liveTypeLabel];
     const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
     const cardWidth = Math.min(280, screenWidth - 40);
     const cardHeight = Math.min(760, cardWidth * 2.85);
@@ -526,15 +616,30 @@ function CountdownMain({ navigation }: any) {
       <View style={styles.container}>
         <StatusBar barStyle="light-content" />
         {/* Dynamic Blur Background */}
-        {backgroundUri ? (
+        {currentBackground ? (
           <>
-            <Image
-              source={{ uri: backgroundUri }}
-              style={styles.backgroundImage}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-              transition={0}
-            />
+            {previousBackground ? (
+              <Animated.View
+                style={[styles.backgroundImage, { opacity: Animated.subtract(1, backgroundFade) }]}
+              >
+                <Image
+                  source={{ uri: previousBackground }}
+                  style={styles.backgroundImage}
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                  transition={0}
+                />
+              </Animated.View>
+            ) : null}
+            <Animated.View style={[styles.backgroundImage, { opacity: backgroundFade }]}>
+              <Image
+                source={{ uri: currentBackground }}
+                style={styles.backgroundImage}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                transition={0}
+              />
+            </Animated.View>
             <BlurView intensity={50} tint="dark" style={styles.blurOverlay} />
           </>
         ) : (
@@ -568,18 +673,7 @@ function CountdownMain({ navigation }: any) {
               style={styles.headerButton}
               onPress={() => setIsAccordionOpen((prev) => !prev)}
             >
-              <FontAwesome5 name="exchange-alt" size={22} color="#FFF" />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.headerButton}
-              onPress={() => navigation.navigate('Settings')}
-            >
-              <Svg width={24} height={24} viewBox="0 0 24 24" fill="#fff">
-                <Path
-                  d="M20.1 9.21945C18.29 9.21945 17.55 7.93945 18.45 6.36945C18.97 5.45945 18.66 4.29945 17.75 3.77945L16.02 2.78945C15.23 2.31945 14.21 2.59945 13.74 3.38945L13.63 3.57945C12.73 5.14945 11.25 5.14945 10.34 3.57945L10.23 3.38945C9.78 2.59945 8.76 2.31945 7.97 2.78945L6.24 3.77945C5.33 4.29945 5.02 5.46945 5.54 6.37945C6.45 7.93945 5.71 9.21945 3.9 9.21945C2.86 9.21945 2 10.0694 2 11.1194V12.8794C2 13.9194 2.85 14.7794 3.9 14.7794C5.71 14.7794 6.45 16.0594 5.54 17.6294C5.02 18.5394 5.33 19.6994 6.24 20.2194L7.97 21.2094C8.76 21.6794 9.78 21.3995 10.25 20.6094L10.36 20.4194C11.26 18.8494 12.74 18.8494 13.65 20.4194L13.76 20.6094C14.23 21.3995 15.25 21.6794 16.04 21.2094L17.77 20.2194C18.68 19.6994 18.99 18.5294 18.47 17.6294C17.56 16.0594 18.3 14.7794 20.11 14.7794C21.15 14.7794 22.01 13.9294 22.01 12.8794V11.1194C22 10.0794 21.15 9.21945 20.1 9.21945ZM12 15.2494C10.21 15.2494 8.75 13.7894 8.75 11.9994C8.75 10.2094 10.21 8.74945 12 8.74945C13.79 8.74945 15.25 10.2094 15.25 11.9994C15.25 13.7894 13.79 15.2494 12 15.2494Z"
-                  fill="white"
-                />
-              </Svg>
+              <SvgXml xml={EXCHANGE_ICON_SVG} width={27} height={27} />
             </TouchableOpacity>
           </BlurView>
         </View>
@@ -648,6 +742,8 @@ function CountdownMain({ navigation }: any) {
         <View style={styles.countdownDisplayContainer}>
           {liveStatus === 'during' ? (
             <Text style={styles.enjoyText}>Enjoy Your Live !!</Text>
+          ) : liveStatus === 'after' ? (
+            <Text style={styles.enjoyText}>See You Next Live !!</Text>
           ) : (
             <View style={styles.countdownRow}>
               <View style={styles.countdownNumber}>
@@ -760,7 +856,13 @@ function CountdownMain({ navigation }: any) {
                     {record.liveName || '-'}
                   </Text>
                 )}
-                <Text style={styles.ticketArtist}>{record.artist || '-'}</Text>
+                <View style={styles.ticketArtistRow}>
+                  <Text style={styles.ticketArtist}>{record.artist || '-'}</Text>
+                  <View style={styles.ticketLiveTypeRow}>
+                    <MaterialCommunityIcons name={liveTypeIconName} size={13} color="#6A6A6A" />
+                    <Text style={styles.ticketLiveType}>{liveTypeLabel}</Text>
+                  </View>
+                </View>
                 <View style={[styles.info, { flexDirection: 'column', gap: 6, marginTop: 40 }]}>
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                     <Text style={[styles.infoLabel, { width: 100, textAlign: 'right' }]}>DATE</Text>
@@ -799,13 +901,14 @@ function CountdownMain({ navigation }: any) {
           initialData={!isCreatingNewLive && nextRecord ? {
             name: nextRecord.liveName,
             artist: nextRecord.artist,
+            liveType: nextRecord.liveType,
             artistImageUrl: nextRecord.artistImageUrl,
             date: parseRecordDate(nextRecord.date) || new Date(),
             venue: nextRecord.venue || '',
             seat: nextRecord.seat || '',
             startTime: nextRecord.startTime || '18:00',
             endTime: nextRecord.endTime || '20:00',
-            imageUrls: nextRecord.imageUrls,
+            imageUrls: resolvedImageUrls.length > 0 ? resolvedImageUrls : nextRecord.imageUrls,
             qrCode: nextRecord.qrCode,
             memo: nextRecord.memo,
             detail: nextRecord.detail,
@@ -813,7 +916,6 @@ function CountdownMain({ navigation }: any) {
           } : null}
           onSave={handleSaveLiveInfo}
           onCancel={() => { setShowEditScreen(false); setIsCreatingNewLive(false); }}
-          isLoading={isLoading}
         />
       </Modal>
 
@@ -821,7 +923,7 @@ function CountdownMain({ navigation }: any) {
         <ShareImageGenerator
           record={nextRecord}
           visible={showShareImage}
-          onClose={() => setShowShareImage(false)}
+          onClose={handleShareModalClose}
         />
       )}
     </>
@@ -857,6 +959,19 @@ export default function CountdownScreen() {
         options={{
           animation: 'slide_from_right',
           presentation: 'card',
+          gestureEnabled: false,
+          fullScreenGestureEnabled: false,
+        }}
+      />
+      <Stack.Screen
+        name="Paywall"
+        component={PaywallScreen}
+        options={{
+          animation: 'fade',
+          presentation: 'transparentModal',
+          contentStyle: {
+            backgroundColor: 'transparent',
+          },
           gestureEnabled: false,
           fullScreenGestureEnabled: false,
         }}
@@ -905,7 +1020,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 65,
     left: '10%',
-    right: '2%',
+    right: '6%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -1061,7 +1176,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Anton_400Regular',
     color: '#FFF',
     textAlign: 'center',
-    letterSpacing: 2,
+    letterSpacing: 0.9,
     textShadowColor: 'rgba(0, 0, 0, 0.2)',
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 8,
@@ -1157,14 +1272,28 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#000',
   },
-  ticketArtist: {
+  ticketArtistRow: {
     position: 'absolute',
     top: 30,
     left: 35,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 18,
+  },
+  ticketArtist: {
     fontSize: 12,
     fontWeight: '600',
     color: '#555',
-    textAlign: 'center',
+  },
+  ticketLiveTypeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  ticketLiveType: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#6A6A6A',
   },
   info: {
     position: 'absolute',
@@ -1212,18 +1341,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
     marginTop: 8,
-  },
-  settingsButton: {
-    position: 'absolute',
-    top: 60,
-    right: 20,
-    zIndex: 10,
-    borderRadius: 20,
-    overflow: 'hidden',
-  },
-  settingsButtonBlur: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
   },
   emptyContainer: {
     flex: 1,

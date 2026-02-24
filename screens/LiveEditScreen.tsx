@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -14,22 +14,25 @@ import {
 } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { Image } from 'expo-image';
-import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import { SvgXml } from 'react-native-svg';
+import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
 import PagerView from 'react-native-pager-view';
 import LottieView from 'lottie-react-native';
+import { useIsFocused } from '@react-navigation/native';
 import { theme } from '../theme';
 import DateInputField from '../components/DateInputField';
 import ArtistInput from '../components/ArtistInput';
 import SetlistEditor from '../components/SetlistEditor';
-import { OverlayLoading } from '../components/OverlayLoading';
+import { useResolvedImageUris } from '../hooks/useResolvedImageUri';
 import type { SetlistItem } from '../types/setlist';
 
 interface LiveInfo {
   name: string;
   artist: string;
+  liveType?: string;
   artistImageUrl?: string; // アーティスト画像URL
   date: Date;
   venue: string;
@@ -47,11 +50,50 @@ interface Props {
   initialData: LiveInfo | null;
   onSave: (info: LiveInfo) => Promise<void>;
   onCancel: () => void;
-  isLoading?: boolean; // ローディング状態を親から受け取る
-  focusMemo?: boolean; // メモ入力欄にオートフォーカスするかどうか
+  focusMemo?: boolean;
+  successHoldDuration?: number; // Success表示後の待機時間（デフォルト1500ms）
 }
 
-export default function LiveEditScreen({ initialData, onSave, onCancel, isLoading = false, focusMemo = false }: Props) {
+const MEMO_PROMPTS = [
+  "今日の推しのビジュ、一言で言うと？",
+  "一番鳥肌が立った瞬間はどこ？",
+  "MCで心に残った言葉はあった？",
+  "席からの景色はどうだった？（近かった？遠かった？）",
+  "会場の熱気や、照明の演出はどうだった？",
+  "思い出に残ってる曲とかあった？？"
+];
+
+const LIVE_TYPES = ['ワンマン', '対バン', 'フェス', 'FC限定'] as const;
+const LIVE_TYPE_ICON_MAP: Record<(typeof LIVE_TYPES)[number], keyof typeof MaterialCommunityIcons.glyphMap> = {
+  ワンマン: 'account',
+  対バン: 'account-multiple',
+  フェス: 'account-group',
+  FC限定: 'account-star',
+};
+
+const ADD_PHOTO_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+<g clip-path="url(#clip0_4418_9255)">
+<path d="M9 10C10.1046 10 11 9.10457 11 8C11 6.89543 10.1046 6 9 6C7.89543 6 7 6.89543 7 8C7 9.10457 7.89543 10 9 10Z" stroke="#8c8c8c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+<path d="M13 2H9C4 2 2 4 2 9V15C2 20 4 22 9 22H15C20 22 22 20 22 15V10" stroke="#8c8c8c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+<path d="M15.75 5H21.25" stroke="#8c8c8c" stroke-width="2" stroke-linecap="round" />
+<path d="M18.5 7.75V2.25" stroke="#8c8c8c" stroke-width="2" stroke-linecap="round" />
+<path d="M2.67004 18.9496L7.60004 15.6396C8.39004 15.1096 9.53004 15.1696 10.24 15.7796L10.57 16.0696C11.35 16.7396 12.61 16.7396 13.39 16.0696L17.55 12.4996C18.33 11.8296 19.59 11.8296 20.37 12.4996L22 13.8996" stroke="#8c8c8c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+</g>
+<defs>
+<clipPath id="clip0_4418_9255">
+<rect width="24" height="24" fill="white"/>
+</clipPath>
+</defs>
+</svg>`;
+
+export default function LiveEditScreen({ initialData, onSave, onCancel, focusMemo = false, successHoldDuration = 1500 }: Props) {
+  const MAX_VENUE_LENGTH = 12;
+
+  // ランダムなプレースホルダーを決定（マウント時に1回だけ計算）
+  const randomPlaceholder = useMemo(() => {
+    return MEMO_PROMPTS[Math.floor(Math.random() * MEMO_PROMPTS.length)];
+  }, []);
+
   const parseTime = (timeStr?: string, defaultTime: string = '18:00'): string => {
     if (!timeStr || typeof timeStr !== 'string') {
       return defaultTime;
@@ -70,13 +112,24 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, isLoadin
 
   const [name, setName] = useState(initialData?.name || '');
   const [artist, setArtist] = useState(initialData?.artist || '');
+  const [liveType, setLiveType] = useState(
+    initialData?.liveType && LIVE_TYPES.includes(initialData.liveType as (typeof LIVE_TYPES)[number])
+      ? initialData.liveType
+      : LIVE_TYPES[0]
+  );
   const [artistImageUrl, setArtistImageUrl] = useState(initialData?.artistImageUrl || '');
   const [date, setDate] = useState(initialData?.date || new Date());
   const [venue, setVenue] = useState(initialData?.venue || '');
   const [seat, setSeat] = useState(initialData?.seat || '');
   const [startTime, setStartTime] = useState(parseTime(initialData?.startTime, '18:00'));
   const [endTime, setEndTime] = useState(parseTime(initialData?.endTime, '20:00'));
-  const [imageUrls, setImageUrls] = useState<string[]>(initialData?.imageUrls || []);
+  
+  // 初期データの画像を解決（TicketDetailと同じフックを使用）
+  const resolvedInitialImages = useResolvedImageUris(initialData?.imageUrls);
+  
+  const [imageUrls, setImageUrls] = useState<string[]>([]);
+  const [imageUpdateKeys, setImageUpdateKeys] = useState<Record<number, number>>({});
+  
   const [qrCode, setQrCode] = useState(initialData?.qrCode || '');
   const [memo, setMemo] = useState(initialData?.memo || '');
   const [detail, setDetail] = useState(initialData?.detail || '');
@@ -88,54 +141,35 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, isLoadin
   const pagerRef = useRef<PagerView>(null);
   const memoInputRef = useRef<TextInput>(null);
   const [currentPage, setCurrentPage] = useState(0);
-  const [showChecked, setShowChecked] = useState(false);
-  const [pendingShowChecked, setPendingShowChecked] = useState(false);
-  const [checkedOverlayKey, setCheckedOverlayKey] = useState(0);
-  const checkedRef = useRef<LottieView>(null);
-  const checkedCloseReady = useRef(false);
-  const checkedAnimationFinished = useRef(false);
-  const checkedCloseTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const checkedStartTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [successOverlayKey, setSuccessOverlayKey] = useState(0);
+  const successCloseReady = useRef(false);
+  const successAnimationFinished = useRef(false);
+  const successCloseTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isSubmittingRef = useRef(false);
+  const isFocused = useIsFocused();
+  const hasUserEditedImages = useRef(false);
 
   useEffect(() => {
-    if (pendingShowChecked && !isLoading && !showChecked) {
-      if (checkedStartTimeout.current) {
-        clearTimeout(checkedStartTimeout.current);
+    if (showSuccess) {
+      successCloseReady.current = false;
+      successAnimationFinished.current = false;
+      if (successCloseTimeout.current) {
+        clearTimeout(successCloseTimeout.current);
       }
-      checkedStartTimeout.current = setTimeout(() => {
-        setPendingShowChecked(false);
-        setCheckedOverlayKey((prev) => prev + 1);
-        setShowChecked(true);
-      }, 250);
+      // アニメーション完了後に余韻を持たせる
+      successCloseTimeout.current = setTimeout(() => {
+        successCloseReady.current = true;
+        setShowSuccess(false);
+        onCancel();
+      }, successHoldDuration);
     }
-  }, [pendingShowChecked, isLoading]);
-
-  useEffect(() => {
-    if (showChecked) {
-      checkedRef.current?.play(0);
-      checkedCloseReady.current = false;
-      checkedAnimationFinished.current = false;
-      if (checkedCloseTimeout.current) {
-        clearTimeout(checkedCloseTimeout.current);
-      }
-      checkedCloseTimeout.current = setTimeout(() => {
-        checkedCloseReady.current = true;
-        if (checkedAnimationFinished.current) {
-          setShowChecked(false);
-          onCancel();
-        }
-      }, 900);
-    }
-  }, [showChecked, checkedOverlayKey, onCancel]);
+  }, [showSuccess, successOverlayKey, onCancel]);
 
   useEffect(() => {
     return () => {
-      if (checkedCloseTimeout.current) {
-        clearTimeout(checkedCloseTimeout.current);
-      }
-      if (checkedStartTimeout.current) {
-        clearTimeout(checkedStartTimeout.current);
+      if (successCloseTimeout.current) {
+        clearTimeout(successCloseTimeout.current);
       }
     };
   }, []);
@@ -143,7 +177,8 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, isLoadin
   useEffect(() => {
     if (focusMemo) {
       // Memories ページ（index 2）に遷移
-      goToPage(2);
+      pagerRef.current?.setPage(2);
+      setCurrentPage(2);
       // 少し時間をおいてからメモ入力欄をフォーカス
       const timer = setTimeout(() => {
         memoInputRef.current?.focus();
@@ -152,11 +187,49 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, isLoadin
     }
   }, [focusMemo]);
 
+  useEffect(() => {
+    hasUserEditedImages.current = false;
+  }, [initialData]);
+
+  // useResolvedImageUris で解決された画像パスを反映
+  // 編集中の変更を上書きしないよう、ユーザー操作後は反映しない
+  useEffect(() => {
+    // データがない場合はスキップ
+    if (!initialData) return;
+
+    if (hasUserEditedImages.current) return;
+
+    // 画像がない場合（空配列）で初期化
+    if (!initialData.imageUrls || initialData.imageUrls.length === 0) {
+      if (imageUrls.length > 0) { 
+         setImageUrls([]);
+         setImageUpdateKeys({});
+      }
+      return;
+    }
+
+    // 解決された画像がある場合
+    if (resolvedInitialImages && resolvedInitialImages.length > 0) {
+      // 初期ロード時またはデータ変更時のみ反映する
+      setImageUrls(resolvedInitialImages);
+        
+      // imageUpdateKeysも再初期化
+      const newKeys: Record<number, number> = {};
+      const timestamp = Date.now();
+      resolvedInitialImages.forEach((_, index) => {
+        newKeys[index] = timestamp + index;
+      });
+      setImageUpdateKeys(newKeys);
+    }
+  }, [resolvedInitialImages, initialData]);
+
   const isBasicValid =
     name.trim().length > 0 &&
     artist.trim().length > 0 &&
     venue.trim().length > 0 &&
     Boolean(date);
+
+  const isVenueAtLimit = venue.length >= MAX_VENUE_LENGTH;
 
   const goToPage = (index: number) => {
     pagerRef.current?.setPage(index);
@@ -202,12 +275,24 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, isLoadin
     onSelect: (time: string) => void;
     onClose: () => void;
   }) => {
+    const scrollRef = useRef<ScrollView>(null);
+    const timeOptionHeight = 48;
     // 30分刻みの時刻リストを生成 (00:00, 00:30, 01:00, ..., 23:30)
     const timeOptions: string[] = [];
     for (let hour = 0; hour < 24; hour++) {
       timeOptions.push(`${String(hour).padStart(2, '0')}:00`);
       timeOptions.push(`${String(hour).padStart(2, '0')}:30`);
     }
+
+    useEffect(() => {
+      if (!visible) return;
+      const index = Math.max(0, timeOptions.indexOf(selectedTime));
+      const targetOffset = index * timeOptionHeight;
+      const timer = setTimeout(() => {
+        scrollRef.current?.scrollTo({ y: targetOffset, animated: false });
+      }, 0);
+      return () => clearTimeout(timer);
+    }, [visible, selectedTime, timeOptions]);
 
     return (
       <Modal
@@ -228,7 +313,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, isLoadin
               </TouchableOpacity>
             </View>
             
-            <ScrollView style={{ maxHeight: 300 }}>
+            <ScrollView ref={scrollRef} style={{ maxHeight: 300 }}>
               {timeOptions.map((time) => (
                 <TouchableOpacity
                   key={time}
@@ -259,49 +344,48 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, isLoadin
   };
 
   const handlePickImage = async () => {
-    if (imageUrls.length >= 6) {
-      Alert.alert('画像は6枚まで', '最大6枚まで登録できます');
-      return;
-    }
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('権限が必要です', 'カバーアートを選択するにはフォトライブラリへのアクセスが必要です。');
+        return;
+      }
+      // 既存の制限などを無視して、常に1枚を選択して置換する
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        allowsMultipleSelection: false,
+        aspect: [1, 1], // 正方形
+        base64: false,
+        quality: 1,
+      });
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      base64: true,
-      quality: 1,
-    });
-
-    if (!result.canceled) {
-      const asset = result.assets[0];
-      const resolvedUri = await resolvePickedImageUri(asset);
-      setImageUrls([...imageUrls, resolvedUri]);
-    }
-  };
-
-  const handleReplaceImage = async (index: number) => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      base64: true,
-      quality: 1,
-    });
-
-    if (!result.canceled) {
-      const asset = result.assets[0];
-      const resolvedUri = await resolvePickedImageUri(asset);
-      const newUrls = [...imageUrls];
-      newUrls[index] = resolvedUri;
-      setImageUrls(newUrls);
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        const resolvedUri = await resolvePickedImageUri(asset);
+        if (!resolvedUri) {
+          Alert.alert('エラー', '画像の読み込みに失敗しました。もう一度お試しください。');
+          return;
+        }
+        // ジャケット画像として1枚だけ保存（配列を置換）
+        hasUserEditedImages.current = true;
+        setImageUrls([resolvedUri]);
+        setImageUpdateKeys({ 0: Date.now() });
+      }
+    } catch (error) {
+      console.log('[LiveEditScreen] Image pick failed:', error);
+      Alert.alert('エラー', '画像の選択中に問題が発生しました。');
     }
   };
 
-  const handleRemoveImage = (index: number) => {
-    setImageUrls(imageUrls.filter((_, i) => i !== index));
-  };
+  // 既存のhandleReplaceImageは不要になるが、コードの整合性のため削除してもよい
+  // ここではhandleRemoveImageを引数なしの単純なクリア関数に変更
 
-  const handleArtistChange = (name: string, imageUrl?: string) => {
+  const handleRemoveImage = () => {
+    hasUserEditedImages.current = true;
+    setImageUrls([]);
+    setImageUpdateKeys({});
+  };  const handleArtistChange = (name: string, imageUrl?: string) => {
     setArtist(name);
     setArtistImageUrl(imageUrl || '');
   };
@@ -342,12 +426,17 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, isLoadin
       return;
     }
 
-    if (imageUrls.length === 0) {
-      Alert.alert('エラー', '少なくとも1枚の画像を選択してください');
+    if (venue.trim().length > MAX_VENUE_LENGTH) {
+      Alert.alert('エラー', '会場名は12文字以内で入力してください');
       return;
     }
 
-    if (isLoading || isSubmittingRef.current) {
+    if (imageUrls.length === 0) {
+      Alert.alert('エラー', 'カバーアートを選択してください');
+      return;
+    }
+
+    if (isSubmittingRef.current) {
       return;
     }
 
@@ -357,6 +446,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, isLoadin
       await onSave({
         name,
         artist,
+        liveType,
         artistImageUrl,
         date,
         venue,
@@ -369,12 +459,23 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, isLoadin
         detail: detail || '',
         setlistSongs,
       });
+
+      // アニメーション完了前に画面が閉じないようにする
+      setSuccessOverlayKey((prev) => prev + 1);
+      setShowSuccess(true);
     } catch (error) {
       isSubmittingRef.current = false;
       return;
     }
+  };
 
-    setPendingShowChecked(true);
+  const handleVenueChange = (value: string) => {
+    if (value.length > MAX_VENUE_LENGTH) {
+      Alert.alert('入力エラー', '会場名は12文字以内で入力してください');
+      setVenue(value.slice(0, MAX_VENUE_LENGTH));
+      return;
+    }
+    setVenue(value);
   };
 
   return (
@@ -386,8 +487,8 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, isLoadin
 
       {/* ヘッダー */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={onCancel} style={styles.headerButton} disabled={isLoading}>
-          <Ionicons name="close" size={28} color={isLoading ? '#ccc' : '#000'} />
+        <TouchableOpacity onPress={onCancel} style={styles.headerButton}>
+          <Ionicons name="close" size={28} color="#000" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>ライブ情報の設定</Text>
         <View style={styles.headerSpacer} />
@@ -397,7 +498,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, isLoadin
         <View style={styles.stepHeaderRow}>
           <Text style={styles.stepHeaderLabel}>Step {currentPage + 1}/3</Text>
           <Text style={styles.stepHeaderTitle}>
-            {currentPage === 0 ? '基本情報' : currentPage === 1 ? 'セットリスト作成' : '思い出・メモ'}
+            {currentPage === 0 ? '基本情報' : currentPage === 1 ? 'セットリスト作成' : 'その他'}
           </Text>
         </View>
         <View style={styles.progressTrack}>
@@ -433,6 +534,34 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, isLoadin
                     placeholderTextColor="#CCCCCC"
                   />
                 </View>
+              </View>
+
+              <View style={styles.liveTypeWrap}>
+                <Text style={styles.liveTypeLabel}>ライブの種類</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.liveTypeScrollContent}
+                >
+                  {LIVE_TYPES.map((type) => {
+                    const selected = liveType === type;
+                    return (
+                      <TouchableOpacity
+                        key={type}
+                        activeOpacity={0.85}
+                        style={[styles.liveTypeChip, selected && styles.liveTypeChipSelected]}
+                        onPress={() => setLiveType(type)}
+                      >
+                        <MaterialCommunityIcons
+                          name={LIVE_TYPE_ICON_MAP[type]}
+                          size={14}
+                          color={selected ? '#FFFFFF' : '#B6B6B6'}
+                        />
+                        <Text style={[styles.liveTypeChipText, selected && styles.liveTypeChipTextSelected]}>{type}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
               </View>
             </View>
 
@@ -500,12 +629,19 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, isLoadin
                   <TextInput
                     style={styles.input}
                     value={venue}
-                    onChangeText={setVenue}
+                    onChangeText={handleVenueChange}
                     placeholder="例: 東京ドーム"
                     placeholderTextColor="#CCCCCC"
+                    maxLength={MAX_VENUE_LENGTH}
                   />
                 </View>
               </View>
+              {isVenueAtLimit && (
+                <View style={styles.warningContainer}>
+                  <MaterialIcons name="error-outline" size={14} color="#FF453A" />
+                  <Text style={styles.warningText}>会場名は12文字以内で入力してください</Text>
+                </View>
+              )}
             </View>
 
             {/* 座席 */}
@@ -574,38 +710,44 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, isLoadin
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            {/* 画像（最大6枚） */}
+            {/* ジャケット画像（1枚） */}
             <View style={styles.section}>
-              <Text style={styles.sectionLabel}>ライブの思い出</Text>
-              <Text style={styles.caption}>最大6枚まで選択できます（1枚目がジャケット写真になります）</Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ gap: 14, paddingVertical: 6 }}
-              >
-                {imageUrls.map((url, index) => (
-                  <View key={index} style={styles.imageCard}>
-                    <Image source={{ uri: url }} style={styles.imagePreview} contentFit="cover" />
-                    {index === 0 && (
-                      <View style={styles.jacketBadge}>
-                        <MaterialIcons name="art-track" size={18} color="#ffffff" />
-                      </View>
-                    )}
-                    <TouchableOpacity
-                      style={styles.removeButtonOverlay}
-                      onPress={() => handleRemoveImage(index)}
-                    >
-                      <Ionicons name="close" size={16} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
-                ))}
-                {imageUrls.length < 6 && (
-                  <TouchableOpacity style={styles.addImageCard} onPress={handlePickImage}>
-                    <MaterialIcons name="add-a-photo" size={40} color="#999" />
-                    <Text style={styles.addImageSub}>{imageUrls.length}/6</Text>
+              <Text style={styles.sectionLabel}>カバーアート（表紙）</Text>
+              
+              {imageUrls.length > 0 ? (
+                <View style={styles.jacketContainer}>
+                  <Image
+                    key={`jacket-${imageUpdateKeys[0] || '0'}`}
+                    source={{ uri: imageUrls[0] }}
+                    style={styles.jacketImage}
+                    contentFit="cover"
+                    cachePolicy="none"
+                  />
+                  <TouchableOpacity
+                    style={styles.jacketRemoveButton}
+                    onPress={handleRemoveImage}
+                  >
+                    <Ionicons name="close-circle" size={30} color="#ff4444" />
                   </TouchableOpacity>
-                )}
-              </ScrollView>
+                </View>
+              ) : (
+                <TouchableOpacity 
+                  style={styles.emptyJacketContainer} 
+                  onPress={handlePickImage}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.emptyJacketContent}>
+                    <SvgXml xml={ADD_PHOTO_ICON_SVG} width={48} height={48} />
+                    <Text style={styles.emptyJacketTitle}>
+                      このライブの『表紙』を選択
+                    </Text>
+                    <Text style={styles.emptyJacketSubtitle}>
+                      カメラロールにある数百枚の中から、{'\n'}
+                      『最高の1枚』を選ぼう！
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              )}
             </View>
 
             {/* QRコード */}
@@ -636,7 +778,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, isLoadin
                     style={[styles.input, styles.multilineInput]}
                     value={memo}
                     onChangeText={setMemo}
-                    placeholder="思い出をメモに残す..."
+                    placeholder={randomPlaceholder}
                     placeholderTextColor="#CCCCCC"
                     multiline
                     numberOfLines={5}
@@ -677,7 +819,6 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, isLoadin
             <TouchableOpacity
               style={[styles.navButton, styles.navButtonPrimary]}
               onPress={handleSave}
-              disabled={isLoading}
             >
               <Text style={styles.navButtonPrimaryText}>保存</Text>
             </TouchableOpacity>
@@ -685,20 +826,18 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, isLoadin
         </View>
       </View>
 
-      <OverlayLoading visible={isLoading} message="アップロード中..." />
-      {showChecked && (
+      {showSuccess && (
         <View style={styles.checkedOverlay} pointerEvents="none">
           <LottieView
-            key={checkedOverlayKey}
-            ref={checkedRef}
-            source={require('../assets/animations/Checked.json')}
+            key={successOverlayKey}
+            source={require('../assets/animations/Success.json')}
             autoPlay
             loop={false}
             speed={1.5}
             onAnimationFinish={() => {
-              checkedAnimationFinished.current = true;
-              if (checkedCloseReady.current) {
-                setShowChecked(false);
+              successAnimationFinished.current = true;
+              if (successCloseReady.current) {
+                setShowSuccess(false);
                 onCancel();
               }
             }}
@@ -832,6 +971,44 @@ const styles = StyleSheet.create({
   },
   section: {
     marginBottom: 28,
+  },
+  liveTypeWrap: {
+    marginTop: 12,
+  },
+  liveTypeLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#888888',
+    marginLeft: 4,
+    marginBottom: 8,
+  },
+  liveTypeScrollContent: {
+    paddingHorizontal: 2,
+    gap: 8,
+  },
+  liveTypeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#d4d4d4',
+  },
+  liveTypeChipSelected: {
+    borderRadius: 30,    
+    backgroundColor: '#111111',
+    borderColor: '#111111',
+  },
+  liveTypeChipText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#B6B6B6',
+  },
+  liveTypeChipTextSelected: {
+    color: '#FFFFFF',
   },
   sectionLabel: {
     fontSize: 14,
@@ -1047,5 +1224,64 @@ const styles = StyleSheet.create({
   checkedAnimation: {
     width: 300,
     height: 300,
+  },
+  // Jacket Image Styles
+  jacketContainer: {
+    width: '100%',
+    aspectRatio: 1,
+    borderRadius: 16,
+    overflow: 'hidden',
+    position: 'relative',
+    backgroundColor: '#F7F7F7',
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  jacketImage: {
+    width: '100%',
+    height: '100%',
+  },
+  jacketRemoveButton: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  emptyJacketContainer: {
+    width: '100%',
+    aspectRatio: 1,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: '#CCC',
+    backgroundColor: '#FAFAFA',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyJacketContent: {
+    alignItems: 'center',
+    padding: 24,
+  },
+  emptyJacketTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#333',
+    textAlign: 'center',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyJacketSubtitle: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });

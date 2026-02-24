@@ -4,6 +4,7 @@ export interface ChekiRecord {
   artist: string;
   artistImageUrl?: string; // アーティストの画像URL（Apple Music等から取得）
   liveName: string;    // DBカラム: live_name
+  liveType?: string;   // ライブ種別（ワンマン/対バン/フェス/FC限定）
   date: string;        // DBカラム: event_date (YYYY-MM-DD)
   venue?: string;
   seat?: string;

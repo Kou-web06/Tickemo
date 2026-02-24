@@ -1,20 +1,19 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TouchableWithoutFeedback, Animated, Alert, Modal } from 'react-native';
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import { Image } from 'expo-image';
-import { FontAwesome, Ionicons, Octicons, MaterialIcons } from '@expo/vector-icons';
+import { FontAwesome, Ionicons, Octicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import Svg, { Path, Rect, Defs, Pattern, Use, Image as SvgImage } from 'react-native-svg';
 import QRCode from 'react-native-qrcode-svg';
 import TextTicker from 'react-native-text-ticker';
 import { ChekiRecord, useRecords } from '../contexts/RecordsContext';
 import LiveEditScreen from '../screens/LiveEditScreen';
-import { buildLiveAlbumName, deleteImage, normalizeStoredImageUri, uploadMultipleImages } from '../lib/imageUpload';
+import { buildLiveAlbumName, deleteImage, normalizeStoredImageUri, uploadImage, resolveLocalImageUri } from '../lib/imageUpload';
 import { saveSetlist, getSetlist } from '../lib/setlistDb';
 import ShareImageGenerator from './ShareImageGenerator';
-import { PhotoStack } from './PhotoStack';
 import type { SetlistItem } from '../types/setlist';
-import { NO_IMAGE_URI, useResolvedImageUri } from '../hooks/useResolvedImageUri';
+import { NO_IMAGE_URI } from '../hooks/useResolvedImageUri';
 
 interface TicketDetailProps {
   record: ChekiRecord;
@@ -24,6 +23,7 @@ interface TicketDetailProps {
 interface LiveInfo {
   name: string;
   artist: string;
+  liveType?: string;
   artistImageUrl?: string;
   date: Date;
   venue: string;
@@ -38,19 +38,48 @@ interface LiveInfo {
   setlistSongs?: SetlistItem[];
 }
 
+const LIVE_TYPE_ICON_MAP: Record<string, keyof typeof MaterialCommunityIcons.glyphMap> = {
+  ワンマン: 'account',
+  対バン: 'account-multiple',
+  フェス: 'account-group',
+  FC限定: 'account-star',
+};
+
 export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) => {
   const { updateRecord, deleteRecord } = useRecords();
   const [showEditScreen, setShowEditScreen] = useState(false);
   const [showShareGenerator, setShowShareGenerator] = useState(false);
   const [setlistSongs, setSetlistSongs] = useState<SetlistItem[]>([]);
   const pendingCloseAfterSave = useRef(false);
+  const renderCountRef = useRef(0);
+  const recordIdRef = useRef(record.id);
+  const prevShowShareRef = useRef(showShareGenerator);
+  
+  renderCountRef.current++;
+  
+  // showShareGenerator が変わったか即座に検出
+  if (prevShowShareRef.current !== showShareGenerator) {
+    prevShowShareRef.current = showShareGenerator;
+  }
+  
+  // render の時間を記録（毎フレーム何秒ごとに来ているか追跡）
+  const prevRenderTimeRef = useRef<number>(performance.now());
+  const timeSinceLastRender = performance.now() - prevRenderTimeRef.current;
+  prevRenderTimeRef.current = performance.now();
+  
+  // シェアボタン押下：モーダルを即座に開く（UIブロッキングなし）
+  const handleSharePress = useCallback(() => {
+    setShowShareGenerator(true); // ← ユーザータップ時に即座に開始
+  }, [showShareGenerator]);
   const width = 330;
   const height = 852;
   const qrSize = 155;
   const titleTickerWidth = width - 90;
   const liveName = record.liveName || '-';
   const isLongName = liveName.length >= 8;
-  const coverUri = useResolvedImageUri(record.imageUrls?.[0], record.imageAssetIds?.[0]);
+  const liveTypeLabel = record.liveType || 'ワンマン';
+  const liveTypeIconName = LIVE_TYPE_ICON_MAP[record.liveType || ''] ?? 'account';
+  const coverUri = resolveLocalImageUri(record.imageUrls?.[0] ?? record.imagePath ?? '');
 
   const translateY = useRef(new Animated.Value(1000)).current;
   // jacketTranslateXはtranslateYからinterpolateで算出
@@ -97,15 +126,23 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
       const songs = await getSetlist(record.id);
       setSetlistSongs(songs);
     } catch (error) {
-      console.error('[TicketDetail] セットリスト読み込みエラー:', error);
       setSetlistSongs([]);
     }
     setShowEditScreen(true);
   };
 
-  const handleSharePress = () => {
-    setShowShareGenerator(true);
-  };
+  const handleShareModalClose = useCallback(() => {
+    setShowShareGenerator(false);
+  }, [showShareGenerator]);
+
+  const handleBeforeOpenPaywall = useCallback(() => {
+    setShowShareGenerator(false);
+    if (onBack) {
+      onBack();
+    }
+  }, [onBack]);
+
+
 
   const handleSaveLiveInfo = async (info: LiveInfo) => {
     try {
@@ -119,75 +156,58 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
       // ユーザーIDを取得
       const userId = 'local-user';
 
-      // 新しい画像をアップロード（file:// で始まる新規選択画像のみ）
+      // 新しい画像をアップロード（ジャケット画像の置換）
       let uploadedImageUrls: string[] = [];
       let uploadedImageAssetIds: Array<string | null> = [];
-      if (info.imageUrls && info.imageUrls.length > 0) {
-        // 既存 imageAssetIds をサイズに合わせて確保（不足分は null でパディング）
-        const recordAssetIds = record.imageAssetIds || [];
-        const recordAssetIdsWithPadding = Array.from({ length: record.imageUrls?.length || 0 }, 
-          (_, i) => recordAssetIds[i] ?? null
-        );
-        
-        const existingAssetIdsByUrl = new Map(
-          (record.imageUrls || []).map((url, index) => [normalizeStoredImageUri(url), recordAssetIdsWithPadding[index]])
-        );
-        const normalizedUrls = info.imageUrls.map((uri: string) => normalizeStoredImageUri(uri));
-        const existingUrls = normalizedUrls.filter((uri: string) => !uri.startsWith('file://'));
-        uploadedImageUrls.push(...existingUrls);
-        uploadedImageAssetIds.push(...existingUrls.map((uri) => existingAssetIdsByUrl.get(uri) ?? null));
-        
-        // 新しくアップロードされた画像を後に追加
-        const newImageFileUris = normalizedUrls.filter((uri: string) => uri.startsWith('file://'));
-        if (newImageFileUris.length > 0) {
-          // console.log('[TicketDetail] 複数画像をアップロード中');
-          const albumName = buildLiveAlbumName(info.date, info.name);
-          const totalImageCount = info.imageUrls?.length ?? record.imageUrls?.length ?? 0;
-          const previousImageCount = record.imageUrls?.length ?? 0;
-          const uploadResult = await uploadMultipleImages(
-            newImageFileUris,
-            userId,
-            record.id,
-            albumName,
-            previousImageCount,
-            totalImageCount
-          );
-          uploadedImageUrls.push(...uploadResult.imageUrls);
-          uploadedImageAssetIds.push(...uploadResult.assetIds);
-          // console.log('[TicketDetail] アップロード完了:', uploadedImageUrls);
-          // アップロード後、URLがアクセス可能になるまで少し待機
-          await new Promise(resolve => setTimeout(resolve, 1200));
-        }
-      }
 
-      // 新しくアップロードされた画像があるかを確認
-      const newlyUploadedImages = uploadedImageUrls.filter((uri: string) => !uri.startsWith('file://'));
-      
-      // 古い画像をStorageから削除（新しいアップロードがある場合のみ）
-      if (newlyUploadedImages.length > 0 && record.imageUrls?.length) {
-        // console.log('[TicketDetail] 古い画像を削除中');
-        for (const oldImageUrl of record.imageUrls) {
-          try {
-            await deleteImage(oldImageUrl);
-          } catch (error) {
-            // console.warn('[TicketDetail] 画像削除エラー:', error);
-            // 削除失敗しても続行
+      if (info.imageUrls && info.imageUrls.length > 0) {
+        const rawUri = info.imageUrls[0];
+        if (rawUri) {
+          const normalizedUri = normalizeStoredImageUri(rawUri) || rawUri;
+          
+          if (normalizedUri.startsWith('file://')) {
+            // 新規画像をアップロード
+            // キャッシュ回避のためユニークな名前を使用
+            const newBaseName = `cover-${Date.now()}`;
+            const uploaded = await uploadImage(normalizedUri, userId, record.id, newBaseName);
+            if (uploaded) {
+              // 古い画像を削除
+              if (record.imageUrls && record.imageUrls.length > 0) {
+                try {
+                   await deleteImage(record.imageUrls[0]);
+                } catch (e) {
+                   console.warn('[TicketDetail] Old image delete failed:', e);
+                }
+              }
+              uploadedImageUrls = [uploaded];
+              uploadedImageAssetIds = [null];
+            }
+          } else {
+             // 既存のURL
+            uploadedImageUrls = [normalizedUri];
+            // 既存のアセットIDを探す
+            const originalIndex = (record.imageUrls || []).indexOf(rawUri);
+            const originalAssetId = originalIndex !== -1 ? (record.imageAssetIds?.[originalIndex] ?? null) : null;
+            uploadedImageAssetIds = [originalAssetId];
           }
         }
-        // console.log('[TicketDetail] 古い画像削除完了');
       }
 
-      // imageUrls と imageAssetIds のサイズを確保（同じ長さにする）
-      const finalImageUrls = uploadedImageUrls.length > 0 ? uploadedImageUrls : (info.imageUrls || record.imageUrls || []);
-      const finalImageAssetIds = Array.from({ length: finalImageUrls.length }, 
-        (_, i) => uploadedImageAssetIds[i] ?? null
-      );
+      // アップロード完了待ち（一応）
+      if (uploadedImageUrls.length > 0 && uploadedImageUrls[0].startsWith('file://')) {
+        await new Promise(resolve => setTimeout(resolve, 800));
+      }
+
+      // imageUrls と imageAssetIds のサイズを確保
+      const finalImageUrls = uploadedImageUrls;
+      const finalImageAssetIds = uploadedImageUrls.length > 0 ? uploadedImageAssetIds : [];
 
       const updatedRecord: ChekiRecord = {
         ...record,
         artist: info.artist,
         artistImageUrl: info.artistImageUrl || record.artistImageUrl,
         liveName: info.name,
+        liveType: info.liveType || record.liveType || 'ワンマン',
         date: formatDate(info.date),
         venue: info.venue,
         seat: info.seat,
@@ -205,16 +225,13 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
       if (info.setlistSongs) {
         try {
           await saveSetlist(record.id, info.setlistSongs);
-          console.log('[TicketDetail] setlist 保存完了');
         } catch (setlistError) {
-          console.error('[TicketDetail] setlist保存エラー（スキップ）:', setlistError);
           // セットリストの保存に失敗してもレコードは更新済みなので続行
         }
       }
 
       pendingCloseAfterSave.current = true;
     } catch (error) {
-      console.error('[TicketDetail] ライブ情報保存エラー:', error);
       Alert.alert('エラー', 'ライブ情報の保存に失敗しました。もう一度お試しください。');
       throw error;
     }
@@ -269,10 +286,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
     <>
       <TouchableWithoutFeedback onPress={handleClose}>
         <View style={{ flex: 1 }}>
-          {/* PhotoStack: 写真の山 */}
-          {record.imageUrls && record.imageUrls.length > 0 && (
-            <PhotoStack photos={record.imageUrls} assetIds={record.imageAssetIds} translateY={translateY} />
-          )}
+          {/* PhotoStack Removed */}
 
           {/* トップバー（ダイナミックアイランド風） */}
           <Animated.View 
@@ -417,9 +431,11 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
                         </Text>
                       </View>
                     )}
-                    <Text style={[styles.artistName, (record.liveName || '').length >= 12 && {top: 75}]}>
-                      {record.artist || '-'} 
-                    </Text>
+                    <View style={[styles.liveTypeIconRow, { top: 55 }]}>
+                      <MaterialCommunityIcons name={liveTypeIconName} size={18} color="#A1A1A1" />
+                      <Text style={styles.liveTypeText}>{liveTypeLabel}</Text>
+                    </View>
+                    <Text style={[styles.artistName, { top: 75 }]}>{record.artist || '-'}</Text>
 
                     <View style={[styles.info, { flexDirection: 'column', gap: 12, marginTop: 40 }]}>
                       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -435,6 +451,10 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
                         <Text style={[styles.infoValue, { flex: 1, textAlign: 'left'}, (record.venue || '').length > 6 && {fontSize: 18}]}>
                           {record.venue || '-'}
                         </Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Text style={[styles.infoLabel, { width: 100, textAlign: 'right' }]}>SEAT</Text>
+                        <Text style={[styles.infoValue, { flex: 1, textAlign: 'left' }]}>{record.seat || '-'}</Text>
                       </View>
                     </View>
                   </View>
@@ -456,6 +476,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
             name: record.liveName,
             artist: record.artist,
             artistImageUrl: record.artistImageUrl,
+            liveType: record.liveType,
             date: new Date(record.date.replace(/\./g, '-')),
             venue: record.venue || '',
             seat: record.seat,
@@ -483,7 +504,8 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
       <ShareImageGenerator
         record={record}
         visible={showShareGenerator}
-        onClose={() => setShowShareGenerator(false)}
+        onClose={handleShareModalClose}
+        onBeforeOpenPaywall={handleBeforeOpenPaywall}
       />
     </>
   );
@@ -505,7 +527,9 @@ export const TicketDetailOld: React.FC<TicketDetailProps> = ({ record, onBack })
   const width = 330;
   const height = 852;
   const qrSize = 155;
-  const coverUri = useResolvedImageUri(record.imageUrls?.[0], record.imageAssetIds?.[0]);
+  const liveTypeLabel = record.liveType || 'ワンマン';
+  const liveTypeIconName = LIVE_TYPE_ICON_MAP[record.liveType || ''] ?? 'account';
+  const coverUri = resolveLocalImageUri(record.imageUrls?.[0] ?? record.imagePath ?? '');
 
   const translateY = useRef(new Animated.Value(1000)).current;
   // jacketTranslateXはtranslateYからinterpolateで算出
@@ -628,7 +652,11 @@ export const TicketDetailOld: React.FC<TicketDetailProps> = ({ record, onBack })
                   <Text style={[styles.mainTitle, (record.liveName || '').length >= 12 && {fontSize: 22}]}>
                     {(record.liveName || '').length >= 12 ? `${record.liveName?.substring(0, 10)}\n${record.liveName?.substring(10)}` : (record.liveName || '-')}
                   </Text>
-                  <Text style={[styles.artistName, (record.liveName || '').length >= 12 && {top: 75}]}>
+                  <View style={[styles.liveTypeIconRow, (record.liveName || '').length >= 12 && { top: 55 }]}> 
+                    <MaterialCommunityIcons name={liveTypeIconName} size={18} color="#A1A1A1" />
+                    <Text style={styles.liveTypeText}>{liveTypeLabel}</Text>
+                  </View>
+                  <Text style={[styles.artistName, (record.liveName || '').length >= 12 && { top: 75 }]}> 
                     {record.artist || '-'} 
                   </Text>
 
@@ -648,9 +676,6 @@ export const TicketDetailOld: React.FC<TicketDetailProps> = ({ record, onBack })
                       </Text>
                     </View>
                   </View>
-                  <View style={{ height: 40 }}>
-                    <Text>{record.memo || '-'}</Text>
-                  </View>
                 </View>
               </ScrollView>
             </View>
@@ -668,7 +693,7 @@ const styles = StyleSheet.create({
   },
   topBar: {
     position: 'absolute',
-    top: 80,
+    top: 90,
     left: 180,
     right: -3,
     flexDirection: 'row',
@@ -772,6 +797,19 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#000',
   },
+  liveTypeIconRow: {
+    position: 'absolute',
+    top: 30,
+    left: 70,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  liveTypeText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#A1A1A1',
+  },
   artistName: {
     position: 'absolute',
     top: 50,
@@ -779,7 +817,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     color: '#A1A1A1',
-    marginBottom: 16,
   },
   info: {
     position: 'absolute',
@@ -791,14 +828,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   infoLabel: {
-    fontSize: 26,
+    fontSize: 24,
     fontWeight: '800',
     color: '#A1A1A1',
     textTransform: 'uppercase',
-    marginRight: 15,
+    marginRight: 16,
   },
   infoValue: {
-    fontSize: 26,
+    fontSize: 24,
     fontWeight: '800',
     color: '#000',
   },

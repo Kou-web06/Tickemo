@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { View, FlatList, Dimensions, TouchableOpacity, Alert, StyleSheet, Text, TextInput, ScrollView, Modal, Animated, ActivityIndicator } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
@@ -9,21 +9,23 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as Crypto from 'expo-crypto';
+import * as FileSystem from 'expo-file-system';
 import { TicketCard } from '../components/TicketCard';
 import { TicketDetail } from '../components/TicketDetail';
 import { AddCardButton } from '../components/AddCardButton';
 import SettingsScreen from './SettingsScreen';
 import ProfileEditScreen from './ProfileEditScreen';
 import LiveEditScreen from './LiveEditScreen';
+import PaywallScreen from './PaywallScreen';
 import { theme } from '../theme';
 import { useRecords, ChekiRecord } from '../contexts/RecordsContext';
-import { buildLiveAlbumName, uploadMultipleImages, normalizeStoredImageUri } from '../lib/imageUpload';
+import { useAppStore } from '../store/useAppStore';
+import { uploadImage, normalizeStoredImageUri, resolveLocalImageUri, deleteImage } from '../lib/imageUpload';
 import { saveSetlist } from '../lib/setlistDb';
-import { useRewardAd } from '../hooks/useRewardAd';
-import { isTestflightMode } from '../utils/appMode';
 import { NO_IMAGE_URI, useResolvedImageUri } from '../hooks/useResolvedImageUri';
 
 const Stack = createNativeStackNavigator();
+const FREE_TICKET_LIMIT = 5;
 
 const styles = StyleSheet.create({
   listContainer: {
@@ -495,59 +497,6 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
   },
-  adConfirmModal: {
-    backgroundColor: '#fff',
-    borderRadius: 24,
-    width: '85%',
-    paddingTop: theme.spacing.xxl,
-    paddingBottom: theme.spacing.xl,
-    paddingHorizontal: theme.spacing.xl,
-    ...theme.shadows.lg,
-    alignItems: 'center',
-  },
-  adConfirmTitle: {
-    fontSize: 22,
-    fontWeight: 700,
-    color: '#000',
-    textAlign: 'center',
-    marginTop: theme.spacing.xs,
-    marginBottom: theme.spacing.sm,
-  },
-  adConfirmMessage: {
-    fontSize: 13,
-    color: '#999',
-    textAlign: 'center',
-    marginBottom: theme.spacing.xs,
-    lineHeight: 18,
-  },
-  adConfirmGraphic: {
-    width: '90%',
-    aspectRatio: 1.2,
-    marginBottom: 0,
-  },
-  adConfirmMainButton: {
-    width: '100%',
-    paddingVertical: 14,
-    borderRadius: 16,
-    alignItems: 'center',
-    backgroundColor: '#333',
-    marginTop: theme.spacing.xl,
-    ...theme.shadows.md,
-  },
-  adConfirmMainButtonText: {
-    fontSize: 15,
-    fontWeight: theme.typography.fontWeight.bold,
-    color: '#FFF',
-  },
-  adConfirmCloseButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: theme.spacing.lg,
-    ...theme.shadows.md,
-  },
   filterDropdownOverlay: {
     flex: 1,
     backgroundColor: 'transparent',
@@ -611,20 +560,24 @@ const styles = StyleSheet.create({
   },
 });
 
-const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[] }> = ({ navigation, records }) => {
+const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewRecord: (record: ChekiRecord) => Promise<void>; deleteRecord: (id: string) => Promise<void>; isPremium: boolean }> = ({ navigation, records, addNewRecord, deleteRecord, isPremium }) => {
   const [selectedRecord, setSelectedRecord] = useState<ChekiRecord | null>(null);
   const [animatingCardId, setAnimatingCardId] = useState<string | null>(null);
   const [closingRecordId, setClosingRecordId] = useState<string | null>(null);
   const [showAfterAnimId, setShowAfterAnimId] = useState<string | null>(null);
-  const [pendingAddAfterAd, setPendingAddAfterAd] = useState(false);
-  const [adShown, setAdShown] = useState(false);
-  const [showAdConfirmModal, setShowAdConfirmModal] = useState(false);
   const [filterType, setFilterType] = useState<'all' | 'upcoming' | 'past'>('all');
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [isListAnimating, setIsListAnimating] = useState(false);
+  const [currentBackground, setCurrentBackground] = useState<string | null>(null);
+  const [previousBackground, setPreviousBackground] = useState<string | null>(null);
   const itemAnimations = useRef(new Map<string, Animated.Value>()).current;
-
-  const rewardAd = useRewardAd();
+  const didInitialListAnimation = useRef(false);
+  const prevFilterType = useRef(filterType);
+  const prevRecordCount = useRef(records.length);
+  const backgroundFade = useRef(new Animated.Value(1)).current;
+  const renderCountRef = useRef(0);
+  
+  renderCountRef.current++;
 
   useEffect(() => {
     const preloadCollectionImages = async () => {
@@ -645,36 +598,12 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[] }> = ({ nav
         const assets = Array.from(uris).map((uri) => Asset.fromURI(uri));
         await Promise.all(assets.map((asset) => asset.downloadAsync()));
       } catch (error) {
-        console.log('Failed to preload collection images:', error);
+        // Image preload failed, continue
       }
     };
 
     preloadCollectionImages();
   }, [records]);
-
-  // 広告ロード完了後に表示
-  React.useEffect(() => {
-    if (pendingAddAfterAd && rewardAd.isLoaded && !adShown) {
-      setAdShown(true);
-      rewardAd.show();
-    }
-  }, [pendingAddAfterAd, rewardAd.isLoaded, adShown]);
-
-  // 広告が閉じられたら → Add画面へ遷移（報酬獲得の有無に関わらず）
-  React.useEffect(() => {
-    if (adShown && rewardAd.isClosed) {
-      // 広告が閉じられたので少し待ってから遷移
-      const timer = setTimeout(() => {
-        setPendingAddAfterAd(false);
-        setAdShown(false);
-        rewardAd.resetEarned();
-        rewardAd.resetClosed();
-        navigation.navigate('Add');
-      }, 300);
-      
-      return () => clearTimeout(timer);
-    }
-  }, [adShown, rewardAd.isClosed, navigation, rewardAd]);
 
   const screenWidth = Dimensions.get('window').width;
   const PADDING = theme.spacing.xxl;
@@ -695,58 +624,83 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[] }> = ({ nav
   const handleCloseModal = () => {
     if (selectedRecord) {
       const recordId = selectedRecord.id;
-      // まず closingRecordId を設定（これにより animationDirection が 'in' になる）
+      // まず closingRecordId を設定（これによりカードを確実に非表示にする）
       setClosingRecordId(recordId);
+      // モーダルを閉じる
       setSelectedRecord(null);
-      // モーダルのフェードアウトアニメーション（300ms）が完了してから
-      // カードのスライドインアニメーションを開始する
-      // これにより、モーダルが完全に消えてからカードが表示される
+      // モーダルのfadeアニメーション完了を待ってからスライドインを開始（チラつき防止）
       setTimeout(() => {
         setAnimatingCardId(recordId);
-      }, 300);
+      }, 200);
     }
   };
 
   const handleAddPress = () => {
-    const hasEnoughTickets = records.length >= 2;
-    const testflightMax = 5;
-
-    // TestFlight: 上限チェック
-    if (records.length >= testflightMax) {
-      Alert.alert(
-        '上限に達しました',
-        'β版では5枚まで追加可能です。正式リリースをお待ちください！🐿️'
-      );
+    if (!isPremium && records.length >= FREE_TICKET_LIMIT) {
+      navigation.navigate('Paywall');
       return;
     }
     navigation.navigate('Add');
-    return;
+  };
 
-    /* 本番環境のみ（TestFlight ではコメントアウト）
-    if (!hasEnoughTickets) {
-      navigation.navigate('Add');
+  const handleDuplicateRecord = async (record: ChekiRecord) => {
+    if (!isPremium && records.length >= FREE_TICKET_LIMIT) {
+      navigation.navigate('Paywall');
       return;
     }
 
-    // 2枚以上の場合は確認モーダルを表示
-    setShowAdConfirmModal(true);
-    */
+    const newRecord: ChekiRecord = {
+      ...record,
+      id: Crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      imageUrls: record.imageUrls ? [...record.imageUrls] : [],
+      imageAssetIds: record.imageAssetIds ? [...record.imageAssetIds] : [],
+    };
+    await addNewRecord(newRecord);
+    setSelectedRecord(newRecord);
   };
 
-  const handleConfirmAd = () => {
-    setShowAdConfirmModal(false);
-    
-    // 広告表示フロー開始
-    setPendingAddAfterAd(true);
-    setAdShown(false);
-
-    if (!rewardAd.isLoaded) {
-      rewardAd.load();
+  const handleDeleteRecord = async (record: ChekiRecord) => {
+    await deleteRecord(record.id);
+    if (selectedRecord?.id === record.id) {
+      setSelectedRecord(null);
     }
   };
 
-  const handleCancelAd = () => {
-    setShowAdConfirmModal(false);
+  const handleLongPress = (record: ChekiRecord) => {
+    Alert.alert(
+      'チケット操作',
+      '操作を選んでください',
+      [
+        {
+          text: '複製',
+          onPress: () => {
+            void handleDuplicateRecord(record);
+          },
+        },
+        {
+          text: '削除',
+          style: 'destructive',
+          onPress: () => {
+            Alert.alert(
+              '本当に削除しますか？',
+              'この操作は取り消せません。',
+              [
+                { text: 'キャンセル', style: 'cancel' },
+                {
+                  text: '削除',
+                  style: 'destructive',
+                  onPress: () => {
+                    void handleDeleteRecord(record);
+                  },
+                },
+              ]
+            );
+          },
+        },
+        { text: 'キャンセル', style: 'cancel' },
+      ]
+    );
   };
 
   // 日付で新しい順にソート（最新のライブが先頭）
@@ -795,6 +749,29 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[] }> = ({ nav
   );
   const backgroundImageUrl = filteredRecords.length > 0 ? (backgroundImageUri ?? NO_IMAGE_URI) : null;
 
+  useEffect(() => {
+    if (!backgroundImageUrl) {
+      setCurrentBackground(null);
+      setPreviousBackground(null);
+      return;
+    }
+
+    if (backgroundImageUrl === currentBackground) {
+      return;
+    }
+
+    setPreviousBackground(currentBackground);
+    setCurrentBackground(backgroundImageUrl);
+    backgroundFade.setValue(0);
+    Animated.timing(backgroundFade, {
+      toValue: 1,
+      duration: 260,
+      useNativeDriver: true,
+    }).start(() => {
+      setPreviousBackground(null);
+    });
+  }, [backgroundImageUrl, currentBackground, backgroundFade]);
+
   const getItemAnimation = (id: string) => {
     const existing = itemAnimations.get(id);
     if (existing) return existing;
@@ -816,6 +793,21 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[] }> = ({ nav
       return;
     }
 
+    const filterChanged = prevFilterType.current !== filterType;
+    const recordCountChanged = prevRecordCount.current !== records.length;
+    prevFilterType.current = filterType;
+    prevRecordCount.current = records.length;
+
+    const shouldAnimate = !didInitialListAnimation.current || (!filterChanged && recordCountChanged);
+    if (!shouldAnimate) {
+      setIsListAnimating(false);
+      displayData.forEach((item) => {
+        getItemAnimation(item.id).setValue(1);
+      });
+      return;
+    }
+
+    didInitialListAnimation.current = true;
     setIsListAnimating(true);
 
     displayData.forEach((item) => {
@@ -833,20 +825,36 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[] }> = ({ nav
     Animated.stagger(70, animations).start(() => {
       setIsListAnimating(false);
     });
-  }, [displayData, itemAnimations]);
+  }, [displayData, itemAnimations, filterType, records.length]);
 
   return (
     <View style={styles.listContainer}>
       {/* Dynamic Blur Background */}
-      {backgroundImageUrl ? (
+      {currentBackground ? (
         <>
-          <Image
-            source={{ uri: backgroundImageUrl }}
-            style={styles.backgroundImage}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-            transition={0}
-          />
+          {previousBackground ? (
+            <Animated.View
+              style={[styles.backgroundImage, { opacity: Animated.subtract(1, backgroundFade) }]}
+            >
+              <Image
+                source={{ uri: previousBackground }}
+                style={styles.backgroundImage}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                transition={0}
+              />
+            </Animated.View>
+          ) : null}
+          <Animated.View style={[styles.backgroundImage, { opacity: backgroundFade }]}
+            >
+            <Image
+              source={{ uri: currentBackground }}
+              style={styles.backgroundImage}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              transition={0}
+            />
+          </Animated.View>
           <BlurView intensity={50} tint="dark" style={styles.blurOverlay} />
           
         </>
@@ -874,10 +882,11 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[] }> = ({ nav
         </View>
       </View>
       
-      <FlatList
-        data={displayData}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => {
+      <View style={{ flex: 1 }}>
+        <FlatList
+          data={displayData}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => {
           const itemAnim = getItemAnimation(item.id);
           const animatedStyle = {
             opacity: itemAnim,
@@ -936,19 +945,37 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[] }> = ({ nav
           const isSlideIn = isClosing && isAnimating;
           const animationDirection: 'out' | 'in' = isSlideIn ? 'in' : 'out';
 
-          // スライドイン中は必ず表示（opacity:1）、それ以外は透明
-          let opacity = 1;
-          let pointerEvents: 'auto' | 'none' = 'auto';
-          // モーダル表示中、またはスライドアウト中、または閉じる準備中（closingRecordId が設定されているがまだアニメーション開始前）は非表示
-          if (isModal || (isAnimating && !isSlideIn) || (isClosing && !isAnimating)) {
+          // opacity判定ロジック（優先順位を明確化してチラつきを防止）
+          let opacity = 0; // デフォルトは非表示
+          let pointerEvents: 'auto' | 'none' = 'none';
+          
+          // 1. closingRecordIdが設定されている場合は常に非表示（モーダル閉じる処理中）
+          if (isClosing && !isAnimating) {
             opacity = 0;
             pointerEvents = 'none';
-          } else if (isSlideIn && isAnimating) {
-            // スライドイン中は表示するがタップ不可
+          }
+          // 2. モーダル表示中は非表示
+          else if (isModal) {
+            opacity = 0;
+            pointerEvents = 'none';
+          }
+          // 3. スライドアウト中は非表示
+          else if (isAnimating && !isSlideIn) {
+            opacity = 0;
+            pointerEvents = 'none';
+          }
+          // 4. スライドイン中は表示（タップ不可）
+          else if (isSlideIn && isAnimating) {
             opacity = 1;
             pointerEvents = 'none';
-          } else if (showAfterAnimId === item.id) {
-            // アニメーション終了後のみ表示
+          }
+          // 5. アニメーション終了後は表示（タップ可能）
+          else if (showAfterAnimId === item.id) {
+            opacity = 1;
+            pointerEvents = 'auto';
+          }
+          // 6. それ以外（通常状態）は表示
+          else {
             opacity = 1;
             pointerEvents = 'auto';
           }
@@ -974,6 +1001,7 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[] }> = ({ nav
                 <TouchableOpacity
                   style={{ marginBottom: 12, alignSelf: 'center' }}
                   onPress={() => handleCardPress(item as ChekiRecord)}
+                  onLongPress={() => handleLongPress(item as ChekiRecord)}
                   activeOpacity={0.9}
                   disabled={pointerEvents === 'none'}
                 >
@@ -993,6 +1021,7 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[] }> = ({ nav
             <TouchableOpacity
               style={{ marginBottom: 12, alignSelf: 'center', opacity }}
               onPress={() => handleCardPress(item as ChekiRecord)}
+              onLongPress={() => handleLongPress(item as ChekiRecord)}
               activeOpacity={0.9}
               disabled={pointerEvents === 'none'}
             >
@@ -1006,10 +1035,11 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[] }> = ({ nav
             </TouchableOpacity>
           );
         }}
-        scrollEnabled
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingTop: theme.spacing.xl, paddingBottom: 120 }}
-      />
+          scrollEnabled
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingTop: theme.spacing.xl, paddingBottom: 120 }}
+        />
+      </View>
 
       {selectedRecord && (
         <Modal
@@ -1023,50 +1053,6 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[] }> = ({ nav
           </View>
         </Modal>
       )}
-
-      {/* 広告確認モーダル - 本番環境のみ（TestFlight ではコメントアウト）
-      {!isTestflightMode && showAdConfirmModal && (
-        <Modal
-          animationType="fade"
-          transparent={true}
-          visible={true}
-          onRequestClose={handleCancelAd}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.adConfirmModal}>
-              <Text style={styles.adConfirmTitle}>チケット枠を追加</Text>
-              <Text style={styles.adConfirmMessage}>
-                動画広告を見ると、{'\n'}チケットを1枚追加できます。
-              </Text>
-              <Image
-                source={require('../assets/addTickets.png')}
-                style={styles.adConfirmGraphic}
-                contentFit="contain"
-                cachePolicy="memory-disk"
-                transition={0}
-              />
-              <TouchableOpacity
-              style={styles.adConfirmMainButton}
-              onPress={handleConfirmAd}
-              activeOpacity={0.8}
-              >
-                <Text style={styles.adConfirmMainButtonText}>
-                  動画を見て追加
-                </Text>
-              </TouchableOpacity>
-            </View>
-            
-            <TouchableOpacity
-              style={styles.adConfirmCloseButton}
-              onPress={handleCancelAd}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="close-circle-outline" size={32} color="#FFF" />
-            </TouchableOpacity>
-          </View>
-        </Modal>
-      )}
-      */}
 
       {/* フィルターモーダル */}
       {showFilterModal && (
@@ -1157,7 +1143,27 @@ const DetailScreen: React.FC<{ route: any; navigation: any }> = ({
 };
 
 const AddScreen: React.FC<{ navigation: any; addNewRecord: (record: ChekiRecord) => Promise<void> }> = ({ navigation, addNewRecord }) => {
-  const [isLoading, setIsLoading] = useState(false);
+  const { records } = useRecords();
+  const isPremium = useAppStore((state) => state.isPremium);
+
+  const dedupeImageEntries = (
+    urls: string[],
+    assetIds: Array<string | null>
+  ): { urls: string[]; assetIds: Array<string | null> } => {
+    const seen = new Set<string>();
+    const nextUrls: string[] = [];
+    const nextAssetIds: Array<string | null> = [];
+
+    urls.forEach((url, index) => {
+      const key = normalizeStoredImageUri(url) || url;
+      if (seen.has(key)) return;
+      seen.add(key);
+      nextUrls.push(url);
+      nextAssetIds.push(assetIds[index] ?? null);
+    });
+
+    return { urls: nextUrls, assetIds: nextAssetIds };
+  };
 
   const formatDate = (date: Date) => {
     const year = date.getFullYear();
@@ -1167,58 +1173,50 @@ const AddScreen: React.FC<{ navigation: any; addNewRecord: (record: ChekiRecord)
   };
 
   const handleSave = async (info: any) => {
+    if (!isPremium && records.length >= FREE_TICKET_LIMIT) {
+      navigation.navigate('Paywall');
+      return;
+    }
+
+    const minLoadingMs = 700;
+    const loadingStart = Date.now();
+    let caughtError: unknown;
     try {
-      // ローディング開始
-      setIsLoading(true);
-      
-      // console.log('[AddScreen] 保存開始:', { 
-      //   artist: info.artist, 
-      //   name: info.name, 
-      //   imageUrl: info.imageUrl,
-      //   imageUrlsCount: info.imageUrls?.length || 0 
-      // });
       
       const userId = 'local-user';
 
-      // console.log('[AddScreen] ユーザーID:', userId);
-
-      // 複数画像をアップロード
-      let uploadedImageUrls: string[] = [];
-      let uploadedImageAssetIds: Array<string | null> = [];
+      // 画像の保存処理（1枚目のジャケットのみ）
+      const uploadedImageUrls: string[] = [];
+      const uploadedImageAssetIds: Array<string | null> = [];
       // 新規レコードのIDを先に生成（liveIdとして使用）
       const newRecordId = Crypto.randomUUID();
-      if (info.imageUrls && Array.isArray(info.imageUrls)) {
-        // 既存URL（file:// で始まらないもの）を先に追加（最初の画像がジャケットになる）
-        const existingUrls = info.imageUrls.filter((uri: string) => !uri.startsWith('file://'));
-        uploadedImageUrls.push(...existingUrls);
-        uploadedImageAssetIds.push(...existingUrls.map(() => null));
-        
-        // 新しくアップロードされた画像を後に追加
-        const fileUris = info.imageUrls.filter((uri: string) => uri.startsWith('file://'));
-        if (fileUris.length > 0) {
-          // console.log('[AddScreen] 複数画像アップロード中:', fileUris.length);
-          const albumName = buildLiveAlbumName(info.date, info.name);
-          const totalImageCount = info.imageUrls.length;
-          const uploadResult = await uploadMultipleImages(
-            fileUris,
-            userId,
-            newRecordId,
-            albumName,
-            0,
-            totalImageCount
-          );
-          uploadedImageUrls.push(...uploadResult.imageUrls);
-          uploadedImageAssetIds.push(...uploadResult.assetIds);
-          // console.log('[AddScreen] 複数画像アップロード完了:', uploadedImageUrls);
-          // アップロード後、URLがアクセス可能になるまで少し待機
-          await new Promise(resolve => setTimeout(resolve, 1200));
+
+      if (info.imageUrls && info.imageUrls.length > 0) {
+        // 先頭の1枚だけを取得
+        const rawUri = info.imageUrls[0];
+        if (rawUri) {
+          const normalizedUri = normalizeStoredImageUri(rawUri) || rawUri;
+          if (normalizedUri.startsWith('file://')) {
+            // 新しい画像アップロード
+            // キャッシュ回避のためにユニークなファイル名を使用
+            const newBaseName = `cover-${Date.now()}`;
+            const uploaded = await uploadImage(normalizedUri, userId, newRecordId, newBaseName);
+            if (uploaded) {
+              uploadedImageUrls.push(uploaded);
+              uploadedImageAssetIds.push(null);
+            }
+          } else {
+            // 既存のURL（編集画面などから回ってきた場合）
+            uploadedImageUrls.push(normalizedUri);
+            uploadedImageAssetIds.push(null);
+          }
         }
       }
 
-      // imageUrls と imageAssetIds のサイズを確保（同じ長さにする）
-      const finalImageAssetIds = Array.from({ length: uploadedImageUrls.length }, 
-        (_, i) => uploadedImageAssetIds[i] ?? null
-      );
+      // dedupeは不要だが、配列形式を維持するための整合性処理
+      // （もし何らかの理由で重複してたら排除するが、1枚なら関係ない）
+
+      const finalImageAssetIds = uploadedImageUrls.length > 0 ? [null] : [];
 
       const newRecord: ChekiRecord = {
         id: newRecordId,
@@ -1226,42 +1224,43 @@ const AddScreen: React.FC<{ navigation: any; addNewRecord: (record: ChekiRecord)
         artist: info.artist,
         artistImageUrl: info.artistImageUrl || '',
         liveName: info.name,
+        liveType: info.liveType || 'ワンマン',
         date: formatDate(info.date),
         venue: info.venue,
         seat: info.seat || '',
         startTime: info.startTime || '',
         endTime: info.endTime || '',
-        imageUrls: uploadedImageUrls,
+        imageUrls: uploadedImageUrls, // [url] or []
         imageAssetIds: finalImageAssetIds,
         memo: info.memo || '',
         detail: info.detail || '',
         qrCode: info.qrCode || '',
         createdAt: new Date().toISOString(),
       };
-
-      console.log('[AddScreen] レコード作成:', newRecord);
       
       // レコードを保存
       await addNewRecord(newRecord);
-      console.log('[AddScreen] addNewRecord 完了');
       
       // セットリストを保存
       if (info.setlistSongs && info.setlistSongs.length > 0) {
         try {
           await saveSetlist(newRecord.id, info.setlistSongs);
-          console.log('[AddScreen] setlist 保存完了');
         } catch (setlistError) {
-          console.error('[AddScreen] setlist保存エラー（スキップ）:', setlistError);
           // セットリストの保存に失敗してもレコードは保存済みなので続行
         }
       }
 
-      setIsLoading(false);
     } catch (error) {
-      console.error('[AddScreen] Error saving record:', error);
       Alert.alert('エラー', '記録の保存に失敗しました');
-      setIsLoading(false);
-      throw error;
+      caughtError = error;
+    } finally {
+      const elapsed = Date.now() - loadingStart;
+      if (elapsed < minLoadingMs) {
+        await new Promise(resolve => setTimeout(resolve, minLoadingMs - elapsed));
+      }
+    }
+    if (caughtError) {
+      throw caughtError;
     }
   };
 
@@ -1270,72 +1269,88 @@ const AddScreen: React.FC<{ navigation: any; addNewRecord: (record: ChekiRecord)
       initialData={null}
       onSave={handleSave}
       onCancel={() => navigation.navigate('List')}
-      isLoading={isLoading}
+      successHoldDuration={1200}
     />
   );
 };
 
-const EditScreen: React.FC<{ route: any; navigation: any; records: ChekiRecord[]; addNewRecord: (record: ChekiRecord) => Promise<void> }> = ({ route, navigation, records, addNewRecord }) => {
+const EditScreen: React.FC<{ route: any; navigation: any; records: ChekiRecord[]; updateRecord: (id: string, record: ChekiRecord) => Promise<void> }> = ({ route, navigation, records, updateRecord }) => {
   const { record, focusMemo = false } = route.params || {};
-  const [isLoading, setIsLoading] = useState(false);
+  
+  // record.imageUrlsを相対パス→file://パスに変換（memo化して参照を安定させる）
+  const resolvedImageUrls = useMemo(() => {
+    return (record?.imageUrls || []).map((url: string) => resolveLocalImageUri(url));
+  }, [record?.id]);
+  
+  const dedupeImageEntries = useCallback(
+    (urls: string[], assetIds: Array<string | null>): { urls: string[]; assetIds: Array<string | null> } => {
+      const seen = new Set<string>();
+      const nextUrls: string[] = [];
+      const nextAssetIds: Array<string | null> = [];
+
+      urls.forEach((url, index) => {
+        const key = normalizeStoredImageUri(url) || url;
+        if (seen.has(key)) return;
+        seen.add(key);
+        nextUrls.push(url);
+        nextAssetIds.push(assetIds[index] ?? null);
+      });
+
+      return { urls: nextUrls, assetIds: nextAssetIds };
+    },
+    []
+  );
 
   if (!record) {
     return null;
   }
 
-  const formatDate = (date: Date) => {
+  const formatDate = useCallback((date: Date) => {
     const year = date.getFullYear();
     const month = `${date.getMonth() + 1}`.padStart(2, '0');
     const day = `${date.getDate()}`.padStart(2, '0');
     return `${year}.${month}.${day}`;
-  };
+  }, []);
 
-  const handleSave = async (info: any) => {
+  const handleSave = useCallback(async (info: any) => {
     try {
-      setIsLoading(true);
-
       const userId = 'local-user';
-      let uploadedImageUrls = [...(record?.imageUrls || [])];
-      let uploadedImageAssetIds = [...(record?.imageAssetIds || [])];
+      let uploadedImageUrls: string[] = [];
+      let uploadedImageAssetIds: Array<string | null> = [];
 
-      // 新規画像をアップロード
-      if (info.imageUrls && Array.isArray(info.imageUrls)) {
-        // 既存 imageAssetIds をサイズに合わせて確保（不足分は null でパディング）
-        const recordAssetIds = record.imageAssetIds || [];
-        const recordAssetIdsWithPadding = Array.from({ length: record.imageUrls?.length || 0 }, 
-          (_, i) => recordAssetIds[i] ?? null
-        );
-        
-        const existingAssetIdsByUrl = new Map(
-          (record.imageUrls || []).map((url: string, index: number) => [normalizeStoredImageUri(url), recordAssetIdsWithPadding[index]])
-        );
-        const normalizedUrls = info.imageUrls.map((uri: string) => normalizeStoredImageUri(uri));
-        const existingUrls = normalizedUrls.filter((uri: string) => !uri.startsWith('file://'));
-        uploadedImageUrls = existingUrls;
-        uploadedImageAssetIds = existingUrls.map((uri: string) => existingAssetIdsByUrl.get(uri) ?? null);
+      // ジャケット画像の更新（1枚のみ）
+      if (info.imageUrls && info.imageUrls.length > 0) {
+        const rawUri = info.imageUrls[0];
+        if (rawUri) {
+          const normalizedUri = normalizeStoredImageUri(rawUri) || rawUri;
+          
+          if (normalizedUri.startsWith('file://')) {
+            // 新規画像のアップロード
+            const newBaseName = `cover-${Date.now()}`;
+            const uploaded = await uploadImage(normalizedUri, userId, record.id, newBaseName);
+            if (uploaded) {
+              // 古い画像があれば削除
+              if (record.imageUrls && record.imageUrls.length > 0) {
+                 const oldUri = record.imageUrls[0];
+                 try {
+                   await deleteImage(oldUri);
+                 } catch (e) {
+                   // Old image deletion failed, continue
+                 }
+              }
 
-        const fileUris = normalizedUrls.filter((uri: string) => uri.startsWith('file://'));
-        if (fileUris.length > 0) {
-          const albumName = buildLiveAlbumName(info.date, info.name);
-          const totalImageCount = info.imageUrls.length;
-          const previousImageCount = record.imageUrls?.length ?? 0;
-          const uploadResult = await uploadMultipleImages(
-            fileUris,
-            userId,
-            record.id,
-            albumName,
-            previousImageCount,
-            totalImageCount
-          );
-          uploadedImageUrls.push(...uploadResult.imageUrls);
-          uploadedImageAssetIds.push(...uploadResult.assetIds);
-          await new Promise(resolve => setTimeout(resolve, 1200));
+              uploadedImageUrls = [uploaded];
+              uploadedImageAssetIds = [null];
+            }
+          } else {
+            // 既存画像の維持
+            uploadedImageUrls = [normalizedUri];
+            const originalIndex = (record.imageUrls || []).indexOf(rawUri);
+            const originalAssetId = originalIndex !== -1 ? (record.imageAssetIds?.[originalIndex] ?? null) : null;
+            uploadedImageAssetIds = [originalAssetId];
+          }
         }
       }
-
-      const finalUpdatedImageAssetIds = Array.from({ length: uploadedImageUrls.length }, 
-        (_, i) => uploadedImageAssetIds[i] ?? null
-      );
 
       const updatedRecord: ChekiRecord = {
         ...record,
@@ -1343,66 +1358,66 @@ const EditScreen: React.FC<{ route: any; navigation: any; records: ChekiRecord[]
         artist: info.artist,
         artistImageUrl: info.artistImageUrl || '',
         liveName: info.name,
+        liveType: info.liveType || record.liveType || 'ワンマン',
         date: formatDate(info.date),
         venue: info.venue,
         seat: info.seat || '',
         startTime: info.startTime || '',
         endTime: info.endTime || '',
         imageUrls: uploadedImageUrls,
-        imageAssetIds: uploadedImageUrls.length > 0 ? finalUpdatedImageAssetIds : [],
+        imageAssetIds: uploadedImageUrls.length > 0 ? uploadedImageAssetIds : [],
         memo: info.memo || '',
         detail: info.detail || '',
         qrCode: info.qrCode || '',
       };
 
-      console.log('[EditScreen] レコード更新:', updatedRecord);
-
-      await addNewRecord(updatedRecord);
+      await updateRecord(record.id, updatedRecord);
 
       if (info.setlistSongs && info.setlistSongs.length > 0) {
         try {
           await saveSetlist(record.id, info.setlistSongs);
-          console.log('[EditScreen] setlist 保存完了');
         } catch (setlistError) {
-          console.error('[EditScreen] setlist保存エラー（スキップ）:', setlistError);
+          // Setlist save failed, continue
         }
       }
 
-      setIsLoading(false);
       navigation.navigate('List');
     } catch (error) {
-      console.error('[EditScreen] Error saving record:', error);
       Alert.alert('エラー', '記録の保存に失敗しました');
-      setIsLoading(false);
     }
-  };
+  }, [record, formatDate, updateRecord, navigation]);
+
+  // initialData をメモ化して、parent re-render 時に不要な re-render を防ぐ
+  const initialData = useMemo(() => ({
+    name: record.liveName,
+    artist: record.artist,
+    liveType: record.liveType,
+    artistImageUrl: record.artistImageUrl,
+    date: new Date(record.date.replace(/\./g, '-')),
+    venue: record.venue,
+    seat: record.seat,
+    startTime: record.startTime,
+    endTime: record.endTime,
+    imageUrls: resolvedImageUrls,
+    memo: record.memo,
+    detail: record.detail,
+    qrCode: record.qrCode,
+  }), [record.liveName, record.artist, record.liveType, record.artistImageUrl, record.date, record.venue, record.seat, record.startTime, record.endTime, resolvedImageUrls, record.memo, record.detail, record.qrCode]);
 
   return (
     <LiveEditScreen
-      initialData={{
-        name: record.liveName,
-        artist: record.artist,
-        artistImageUrl: record.artistImageUrl,
-        date: new Date(record.date.replace(/\./g, '-')),
-        venue: record.venue,
-        seat: record.seat,
-        startTime: record.startTime,
-        endTime: record.endTime,
-        imageUrls: record.imageUrls,
-        memo: record.memo,
-        detail: record.detail,
-        qrCode: record.qrCode,
-      }}
+      initialData={initialData}
       onSave={handleSave}
       onCancel={() => navigation.navigate('List')}
-      isLoading={isLoading}
       focusMemo={focusMemo}
     />
   );
 };
 
 // Collection Stack Navigator
-const CollectionStack = ({ records, addNewRecord, navigation }: { records: ChekiRecord[]; addNewRecord: (record: ChekiRecord) => Promise<void>; navigation: any }) => {
+const CollectionStack = ({ records, addNewRecord, updateRecord, deleteRecord, navigation }: { records: ChekiRecord[]; addNewRecord: (record: ChekiRecord) => Promise<void>; updateRecord: (id: string, record: ChekiRecord) => Promise<void>; deleteRecord: (id: string) => Promise<void>; navigation: any }) => {
+  const isPremium = useAppStore((state) => state.isPremium);
+
   return (
     <Stack.Navigator
       screenOptions={{
@@ -1416,7 +1431,7 @@ const CollectionStack = ({ records, addNewRecord, navigation }: { records: Cheki
       }}
     >
       <Stack.Screen name="List">
-        {(props) => <ListScreen {...props} records={records} />}
+        {(props) => <ListScreen {...props} records={records} addNewRecord={addNewRecord} deleteRecord={deleteRecord} isPremium={isPremium} />}
       </Stack.Screen>
       <Stack.Screen
         name="Settings"
@@ -1475,14 +1490,14 @@ const CollectionStack = ({ records, addNewRecord, navigation }: { records: Cheki
           fullScreenGestureEnabled: false,
         }}
       >
-        {(props) => <EditScreen {...props} records={records} addNewRecord={addNewRecord} />}
+        {(props) => <EditScreen {...props} records={records} updateRecord={updateRecord} />}
       </Stack.Screen>
     </Stack.Navigator>
   );
 };
 
 export default function CollectionScreen() {
-  const { records, addRecord, isLoading } = useRecords();
+  const { records, addRecord, updateRecord, deleteRecord, isLoading } = useRecords();
   const navigation = useRef<any>(null);
 
   useEffect(() => {
@@ -1492,7 +1507,6 @@ export default function CollectionScreen() {
       if (notification && navigation.current) {
         const record = records.find((r) => r.id === notification.recordId);
         if (record) {
-          console.log('[CollectionScreen] Navigating to Edit with record:', record.id);
           // Stack Navigator に直接アクセスするため、リスナーを使う別のアプローチ
           // ここでは notificationData を state で管理する
         }
@@ -1505,7 +1519,7 @@ export default function CollectionScreen() {
 
   return (
     <>
-      <CollectionStackWrapper records={records} addNewRecord={addRecord} />
+      <CollectionStackWrapper records={records} addNewRecord={addRecord} updateRecord={updateRecord} deleteRecord={deleteRecord} />
     </>
   );
 }
@@ -1513,10 +1527,13 @@ export default function CollectionScreen() {
 interface CollectionStackWrapperProps {
   records: ChekiRecord[];
   addNewRecord: (record: ChekiRecord) => Promise<void>;
+  updateRecord: (id: string, record: ChekiRecord) => Promise<void>;
+  deleteRecord: (id: string) => Promise<void>;
 }
 
-function CollectionStackWrapper({ records, addNewRecord }: CollectionStackWrapperProps) {
+function CollectionStackWrapper({ records, addNewRecord, updateRecord, deleteRecord }: CollectionStackWrapperProps) {
   const navigation = useNavigation<any>();
+  const isPremium = useAppStore((state) => state.isPremium);
   const [pendingNotification, setPendingNotification] = useState<{ recordId: string; kind: string } | null>(null);
 
   useEffect(() => {
@@ -1528,14 +1545,21 @@ function CollectionStackWrapper({ records, addNewRecord }: CollectionStackWrappe
   }, []);
 
   useEffect(() => {
-    if (pendingNotification) {
+    if (pendingNotification && pendingNotification.recordId) {
       const record = records.find((r) => r.id === pendingNotification.recordId);
       if (record) {
-        console.log('[CollectionStackWrapper] Navigating to Edit:', record.id);
-        navigation.navigate('Edit', {
-          record,
-          focusMemo: true,
-        });
+        // タイムカプセル通知の場合は詳細画面へ（閲覧のみ）
+        if (pendingNotification.kind === 'timecapsule') {
+          navigation.navigate('Detail', { record });
+        }
+        // after_show通知の場合は編集画面へ（メモ入力促進）
+        else if (pendingNotification.kind === 'after_show') {
+          navigation.navigate('Edit', {
+            record,
+            focusMemo: true,
+          });
+        }
+        
         setPendingNotification(null);
       }
     }
@@ -1554,7 +1578,7 @@ function CollectionStackWrapper({ records, addNewRecord }: CollectionStackWrappe
       }}
     >
       <Stack.Screen name="List">
-        {(props) => <ListScreen {...props} records={records} />}
+        {(props) => <ListScreen {...props} records={records} addNewRecord={addNewRecord} deleteRecord={deleteRecord} isPremium={isPremium} />}
       </Stack.Screen>
       <Stack.Screen
         name="Settings"
@@ -1593,6 +1617,19 @@ function CollectionStackWrapper({ records, addNewRecord }: CollectionStackWrappe
         {(props) => <AddScreen {...props} addNewRecord={addNewRecord} />}
       </Stack.Screen>
       <Stack.Screen
+        name="Paywall"
+        component={PaywallScreen}
+        options={{
+          animation: 'fade',
+          presentation: 'transparentModal',
+          contentStyle: {
+            backgroundColor: 'transparent',
+          },
+          gestureEnabled: false,
+          fullScreenGestureEnabled: false,
+        }}
+      />
+      <Stack.Screen
         name="Detail"
         component={DetailScreen}
         options={{
@@ -1613,7 +1650,7 @@ function CollectionStackWrapper({ records, addNewRecord }: CollectionStackWrappe
           fullScreenGestureEnabled: false,
         }}
       >
-        {(props) => <EditScreen {...props} records={records} addNewRecord={addNewRecord} />}
+        {(props) => <EditScreen {...props} records={records} updateRecord={updateRecord} />}
       </Stack.Screen>
     </Stack.Navigator>
   );

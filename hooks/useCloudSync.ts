@@ -21,9 +21,10 @@ const useDebounce = (value: any, delay: number) => {
 };
 
 export const useCloudSync = () => {
-  const { lives, setlists, userProfile, hasOnboarded, importData } = useAppStore();
+  const { lives, setlists, userProfile, hasOnboarded, importData, hasHydrated } = useAppStore();
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
+  const [initialPullDone, setInitialPullDone] = useState(false);
 
   const lastImportedData = useRef<string | null>(null);
   const pushedImagesRef = useRef<Set<string>>(new Set());
@@ -153,15 +154,31 @@ export const useCloudSync = () => {
 
   // CloudStorage を初期化
   useEffect(() => {
-    // CloudStorage は app.json のエンタイトルメント設定で自動的にiCloudにアクセス可能
-    // 初期化後に最初の pull を実行
-    pullFromCloudRef.current?.();
-  }, []);
+    if (!hasHydrated) return;
+
+    let isActive = true;
+    const runInitialPull = async () => {
+      await pullFromCloudRef.current?.();
+      if (isActive) {
+        setInitialPullDone(true);
+      }
+    };
+
+    runInitialPull();
+
+    return () => {
+      isActive = false;
+    };
+  }, [hasHydrated]);
 
   // データ変更時にプッシュ（変更検知）
   // 初回ロード完了後にのみ有効にしたい（無限ループ防止）
   const isMounted = useRef(false);
   useEffect(() => {
+    if (!hasHydrated || !initialPullDone) {
+      return;
+    }
+
     if (!isMounted.current) {
       isMounted.current = true;
       prevLivesCount.current = debouncedData.lives.length;
@@ -172,13 +189,13 @@ export const useCloudSync = () => {
       pushToCloud(debouncedData);
     }
     prevLivesCount.current = debouncedData.lives.length;
-  }, [debouncedData, pushToCloud]);
+  }, [debouncedData, pushToCloud, hasHydrated, initialPullDone]);
 
   // AppState listener（アプリ復帰時のプル）
   // 空の dependencies でアプリのライフタイム全体で1回だけセットアップ
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState) => {
-      if (nextAppState === 'active') {
+      if (nextAppState === 'active' && hasHydrated) {
         console.log('[CloudSync] App active, pulling data...');
         pullFromCloudRef.current?.();
       }
@@ -187,7 +204,7 @@ export const useCloudSync = () => {
     return () => {
       subscription.remove();
     };
-  }, []);
+  }, [hasHydrated]);
 
   return {
     isSyncing,

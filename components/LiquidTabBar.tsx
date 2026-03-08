@@ -1,12 +1,13 @@
 import React, { useCallback } from 'react';
-import { View, StyleSheet, Platform, Dimensions } from 'react-native';
+import { View, StyleSheet, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { BlurView } from 'expo-blur';
 import { TouchableOpacity } from 'react-native-gesture-handler';
 import { Feather } from '@expo/vector-icons';
+import { getAppWidth } from '../utils/layout';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const SCREEN_WIDTH = getAppWidth();
 
 // グローバルなスクロールオフセット値を管理（単純なオブジェクトとして）
 export const tabBarScrollOffset = { value: 0 };

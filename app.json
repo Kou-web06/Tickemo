@@ -2,7 +2,7 @@
   "expo": {
     "name": "Tickemo",
     "slug": "Tickemo",
-    "version": "1.1.0",
+    "version": "1.2.3",
     "buildNumber": "19",
     "orientation": "portrait",
     "icon": "./assets/app-icon/icon1.png",
@@ -36,9 +36,16 @@
         ]
       },
       "entitlements": {
-        "com.apple.developer.icloud-services": ["CloudDocuments", "CloudKit"],
-        "com.apple.developer.icloud-container-identifiers": ["iCloud.com.anonymous.Tickemo"],
-        "com.apple.developer.ubiquity-container-identifiers": ["iCloud.com.anonymous.Tickemo"],
+        "com.apple.developer.icloud-services": [
+          "CloudDocuments",
+          "CloudKit"
+        ],
+        "com.apple.developer.icloud-container-identifiers": [
+          "iCloud.com.anonymous.Tickemo"
+        ],
+        "com.apple.developer.ubiquity-container-identifiers": [
+          "iCloud.com.anonymous.Tickemo"
+        ],
         "com.apple.developer.ubiquity-kvstore-identifier": "$(TeamIdentifierPrefix)com.anonymous.Tickemo"
       },
       "googleMobileAdsAppId": "ca-app-pub-2769977162057386~9124706504"
@@ -84,7 +91,8 @@
         "expo-build-properties",
         {
           "ios": {
-            "useFrameworks": "static"
+            "useFrameworks": "static",
+            "deploymentTarget": "16.0"
           }
         }
       ],
@@ -95,7 +103,8 @@
           "iosAppId": "ca-app-pub-2769977162057386~9124706504"
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      "expo-localization"
     ],
     "extra": {
       "eas": {

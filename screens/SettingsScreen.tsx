@@ -20,14 +20,15 @@ import {
   ImageSourcePropType,
   DeviceEventEmitter,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import * as WebBrowser from 'expo-web-browser';
 import { Asset } from 'expo-asset';
 import { useFocusEffect } from '@react-navigation/native';
 import { useFonts, Anton_400Regular } from '@expo-google-fonts/anton';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Feather, Ionicons, AntDesign, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Feather, AntDesign, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import Svg, { Path, Defs, Rect, RadialGradient, Stop } from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { captureRef } from 'react-native-view-shot';
@@ -35,6 +36,7 @@ import * as MediaLibrary from 'expo-media-library';
 import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
 import QRCode from 'react-native-qrcode-svg';
+import { useTranslation } from 'react-i18next';
 // import changeIcon from 'react-native-change-icon';
 import { theme } from '../theme';
 import { useRecords } from '../contexts/RecordsContext';
@@ -43,7 +45,6 @@ import { getShareCardSource } from '../utils/statusSvgs';
 import { isTestflightMode } from '../utils/appMode';
 import { normalizeStoredImageUri, resolveLocalImageUri, resolveStoredImageUri } from '../lib/imageUpload';
 import { pullImageFromCloud } from '../lib/icloudImageSync';
-import { getMembershipActionLabel, getMembershipLabel } from '../lib/membership';
 
 interface SettingItem {
   id: string;
@@ -91,65 +92,68 @@ interface MyPageShareModalProps {
 // SVGアセットルート
 // Note: statusSvgUrisをはcontent内のuseMemoで管理し、レンダリング時の总次訴がその時だけならうえで
 
-const SECTIONS: SettingSection[] = [
-  {
-    title: '一般',
-    data: [
-      { id: 'icloud-sync', label: 'iCloud同期' },
-    ],
-  },
-  {
-    title: '通知',
-    data: [
-      { id: 'notifications', label: '通知' },
-    ],
-  },
-  {
-    title: 'このアプリについて',
-    data: [
-      { id: 'apple-music', label: 'Data provided by Apple Music', value: '' },
-      { id: 'terms', label: '利用規約' },
-      { id: 'privacy', label: 'プライバシーポリシー' },
-    ],
-  },
-  {
-    title: 'サポート',
-    data: [
-      { id: 'review', label: '5つ星レビューをお願いします' },
-      { id: 'faq', label: 'よくある質問' },
-      { id: 'feedback', label: 'フィードバック' },
-      { id: 'sns', label: 'X' },
-    ],
-  },
-  {
-    title: 'アカウント',
-    data: [
-      { id: 'delete', label: 'すべてのデータを削除', destructive: true },
-    ],
-  },
-];
-
-const APP_ICONS = [
-  { id: 'icon1', image: require('../assets/app-icon/icon1.png') },
-  { id: 'icon2', image: require('../assets/app-icon/icon2.png') },
-  { id: 'icon3', image: require('../assets/app-icon/icon3.png') },
-  { id: 'icon4', image: require('../assets/app-icon/icon4.png') },
-];
-
 const APP_STORE_URL = 'https://apps.apple.com/ja/app/tickemo-%E3%83%A9%E3%82%A4%E3%83%96%E3%81%AE%E6%80%9D%E3%81%84%E5%87%BA%E3%82%92%E8%A8%98%E9%8C%B2/id6758604980';
 const APP_STORE_REVIEW_URL = `${APP_STORE_URL}?action=write-review`;
 
 export default function SettingsScreen({ navigation }: any) {
+  const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { records, clearRecords } = useRecords();
   const userProfile = useAppStore((state) => state.userProfile);
   const hasHydrated = useAppStore((state) => state.hasHydrated);
   const membershipType = useAppStore((state) => state.membershipType);
-  const [selectedIcon, setSelectedIcon] = useState<string>('icon1');
   const [shareModalVisible, setShareModalVisible] = useState(false);
   const [xHandle, setXHandle] = useState('');
   const [instagramHandle, setInstagramHandle] = useState('');
   const [firstLaunchAt, setFirstLaunchAt] = useState('');
   const [resolvedProfileAvatarUri, setResolvedProfileAvatarUri] = useState('');
+  const scrollViewRef = useRef<ScrollView>(null);
+
+  const sections: SettingSection[] = [
+    {
+      title: t('settings.sections.general'),
+      data: [
+        { id: 'icloud-sync', label: t('settings.items.icloudSync') },
+      ],
+    },
+    {
+      title: t('settings.sections.notifications'),
+      data: [{ id: 'notifications', label: t('settings.items.notifications') }],
+    },
+    {
+      title: t('settings.sections.aboutApp'),
+      data: [
+        { id: 'apple-music', label: t('settings.items.appleMusic'), value: '' },
+        { id: 'terms', label: t('settings.items.terms') },
+        { id: 'privacy', label: t('settings.items.privacy') },
+      ],
+    },
+    {
+      title: t('settings.sections.support'),
+      data: [
+        { id: 'review', label: t('settings.items.review') },
+        { id: 'faq', label: t('settings.items.faq') },
+        { id: 'feedback', label: t('settings.items.feedback') },
+      ],
+    },
+    {
+      title: t('settings.sections.account'),
+      data: [{ id: 'delete', label: t('settings.items.deleteAllData'), destructive: true }],
+    },
+  ];
+
+  const contentHorizontalPadding = Math.max(16, Math.min(28, windowWidth * 0.05));
+  const contentTopPadding = Math.max(24, Math.min(68, windowHeight * 0.015));
+  const contentBottomPadding = Math.max(insets.bottom + 60, Math.min(140, windowHeight * 0.14));
+  const titleFontSize = Math.max(26, Math.min(34, windowWidth * 0.08));
+  const shareButtonSize = Math.max(40, Math.min(48, windowWidth * 0.11));
+  const paywallBannerMinHeight = Math.max(110, Math.min(150, windowHeight * 0.16));
+  const paywallBannerImageWidth = Math.max(120, Math.min(170, windowWidth * 0.36));
+  const paywallBannerImageHeight = paywallBannerImageWidth * 0.8;
+  const sectionTopSpacing = Math.max(24, Math.min(30, windowHeight * 0.04));
+  const rowVerticalPadding = Math.max(16, Math.min(22, windowHeight * 0.022));
+  const footerTopMargin = Math.max(56, Math.min(100, windowHeight * 0.1));
 
   const resolveProfileAvatar = useCallback(async () => {
     if (!hasHydrated) return;
@@ -198,6 +202,16 @@ export default function SettingsScreen({ navigation }: any) {
       void resolveProfileAvatar();
     }, [resolveProfileAvatar])
   );
+
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener('settings:scrollToTop', () => {
+      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
 
   const profile = useMemo(() => {
     const displayName = userProfile?.name || 'User';
@@ -284,7 +298,7 @@ export default function SettingsScreen({ navigation }: any) {
     // アーティストごとの参戦回数を集計（参戦済みのみ）
     const artistCounts: { [key: string]: number } = {};
     pastRecords.forEach((record) => {
-      const artist = record.artist || '不明';
+      const artist = record.artist || t('settings.common.unknown');
       artistCounts[artist] = (artistCounts[artist] || 0) + 1;
     });
 
@@ -334,31 +348,11 @@ export default function SettingsScreen({ navigation }: any) {
   );
 
   const shareSummary = useMemo(
-    () => 'Tickemoでプロフィールカードを作成しました！\n趣味の合う方、仲良くしてください🙌\n#Tickemo',
-    []
+    () => t('settings.share.profileSummary'),
+    [t]
   );
 
-  const membershipLabel = useMemo(() => {
-    return getMembershipLabel(membershipType);
-  }, [membershipType]);
-
-  const handleMembershipButtonPress = useCallback(() => {
-    if (membershipType === 'lifetime') {
-      Share.share({
-        title: 'Tickemo',
-        message: APP_STORE_URL,
-        url: APP_STORE_URL,
-      }).catch(() => {
-        Alert.alert('エラー', '共有に失敗しました');
-      });
-      return;
-    }
-
-    navigation.navigate('Paywall');
-  }, [membershipType, navigation]);
-
   useEffect(() => {
-    loadSelectedIcon();
     loadSocialHandles();
     loadFirstLaunchDate();
   }, []);
@@ -377,18 +371,6 @@ export default function SettingsScreen({ navigation }: any) {
       ExpoImage.prefetch(profile.avatarUrl, 'memory-disk').catch(() => {});
     }
   }, [profile.avatarUrl]);
-
-
-  const loadSelectedIcon = async () => {
-    try {
-      const saved = await AsyncStorage.getItem('selectedAppIcon');
-      if (saved) {
-        setSelectedIcon(saved);
-      }
-    } catch (error) {
-      console.log('Failed to load icon:', error);
-    }
-  };
 
   const loadSocialHandles = async () => {
     try {
@@ -429,68 +411,20 @@ export default function SettingsScreen({ navigation }: any) {
     }
   };
 
-  const handleIconSelect = async (_iconId: string) => {
-    // TODO: アプリアイコン変更はリリース後に実装予定
-    // iOS のみで対応
-    // if (Platform.OS !== 'ios') {
-    //   Alert.alert(
-    //     'iOS のみ対応',
-    //     'この機能は現在 iOS でのみご利用いただけます。'
-    //   );
-    //   return;
-    // }
-
-    // try {
-    //   // iOSでアイコンを変更
-    //   if (iconId === 'icon1') {
-    //     // デフォルトアイコンに戻す場合
-    //     try {
-    //       (changeIcon as any).changeIcon(null);
-    //     } catch {
-    //       // reset がない場合はスキップ
-    //       // console.log('Default icon restore skipped');
-    //     }
-    //   } else {
-    //     // 代替アイコンに変更
-    //     const iconName = iconId; // 'icon2', 'icon3', 'icon4'
-    //     (changeIcon as any).changeIcon(iconName);
-    //   }
-    //   
-    //   // ローカル状態を更新
-    //   setSelectedIcon(iconId);
-
-    //   // ローカルに保存
-    //   await AsyncStorage.setItem('selectedAppIcon', iconId);
-    //   
-    //   Alert.alert(
-    //     '完了',
-    //     'アプリアイコンが変更されました',
-    //     [{ text: 'OK' }]
-    //   );
-    // } catch (error) {
-    //   // console.error('Failed to change icon:', error);
-    //   Alert.alert(
-    //     'エラー',
-    //     'アイコンの変更に失敗しました。この機能はiOSでのみ利用可能です。'
-    //   );
-    // }
-  };
-
   const handleAccountDelete = () => {
     Alert.alert(
-      'すべてのデータを削除しますか？',
-      'これまでの記録と設定がすべて削除されます。この操作は取り消せません。',
+      t('settings.alerts.deleteAllDataTitle'),
+      t('settings.alerts.deleteAllDataMessage'),
       [
-        { text: 'キャンセル', style: 'cancel' },
+        { text: t('settings.alerts.cancel'), style: 'cancel' },
         {
-          text: '削除する',
+          text: t('settings.alerts.delete'),
           style: 'destructive',
           onPress: async () => {
             try {
               await clearRecords();
               await AsyncStorage.multiRemove([
                 '@records',
-                'selectedAppIcon',
                 '@has_launched',
                 '@sns_x',
                 '@sns_instagram',
@@ -515,11 +449,29 @@ export default function SettingsScreen({ navigation }: any) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.content}>
-        <View style={styles.titleRow}>
-          <Text style={styles.title}>マイページ</Text>
+      <ScrollView
+        ref={scrollViewRef}
+        style={{ flex: 1 }}
+        contentContainerStyle={[
+          styles.content,
+          {
+            paddingHorizontal: contentHorizontalPadding,
+            paddingTop: contentTopPadding,
+            paddingBottom: contentBottomPadding,
+          },
+        ]}
+      >
+        <View style={[styles.titleRow, { marginBottom: Math.max(22, Math.min(34, windowHeight * 0.035)) }]}>
+          <Text style={[styles.title, { fontSize: titleFontSize }]}>{t('settings.title')}</Text>
           <TouchableOpacity
-            style={styles.shareButton}
+            style={[
+              styles.shareButton,
+              {
+                width: shareButtonSize,
+                height: shareButtonSize,
+                borderRadius: shareButtonSize / 2,
+              },
+            ]}
             activeOpacity={0.8}
             onPress={() => setShareModalVisible(true)}
           >
@@ -541,12 +493,6 @@ export default function SettingsScreen({ navigation }: any) {
         </View>
 
         <View style={styles.bentoCardContainer}>
-          <LinearGradient
-            colors={['#202020', '#111111']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.bentoCardBackground}
-          />
           <UserProfileHeader
             stats={stats}
             profile={profile}
@@ -556,56 +502,57 @@ export default function SettingsScreen({ navigation }: any) {
           />
         </View>
 
-        {/* アプリアイコン変更セクション - TODO: リリース後に有効化 */}
-        {/* {Platform.OS === 'ios' && (
-        <View style={styles.sectionWrapper}>
-          <Text style={styles.sectionLabel}>アプリアイコン</Text>
-          <View style={styles.iconCard}>
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.iconGrid}
+        {membershipType === 'free' && (
+          <TouchableOpacity
+            style={[
+              styles.paywallBannerTouchable,
+              {
+                marginTop: Math.max(18, Math.min(30, windowHeight * 0.03)),
+                marginBottom: Math.max(10, Math.min(16, windowHeight * 0.017)),
+              },
+            ]}
+            activeOpacity={0.9}
+            onPress={() => navigation.navigate('Paywall')}
+          >
+            <LinearGradient
+              colors={['#2B2B2B', '#121212']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={[
+                styles.paywallBanner,
+                {
+                  minHeight: paywallBannerMinHeight,
+                  paddingLeft: Math.max(14, Math.min(24, windowWidth * 0.045)),
+                  paddingRight: Math.max(10, Math.min(18, windowWidth * 0.035)),
+                  paddingVertical: Math.max(12, Math.min(18, windowHeight * 0.018)),
+                },
+              ]}
             >
-              {APP_ICONS.map((icon) => (
-                <TouchableOpacity
-                  key={icon.id}
-                  style={[
-                    styles.iconItem,
-                    selectedIcon === icon.id && styles.iconItemSelected,
-                  ]}
-                  onPress={() => handleIconSelect(icon.id)}
-                  activeOpacity={0.7}
-                >
-                  <Image source={icon.image} style={styles.iconImage} />
-                  {selectedIcon === icon.id && (
-                    <View style={styles.checkmarkContainer}>
-                      <Ionicons name="checkmark-circle" size={24} color="#171717" />
-                    </View>
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
-        )} */}
+              <View style={styles.paywallBannerTextBlock}>
+                <Text style={[styles.paywallBannerCaption, { fontSize: Math.max(11, Math.min(13, windowWidth * 0.03)) }]}>{t('settings.banner.caption')}</Text>
+                <Text style={[styles.paywallBannerTitle, { fontSize: Math.max(16, Math.min(20, windowWidth * 0.046)) }]}>
+                  {t('settings.banner.title')}
+                </Text>
+                <Text style={[styles.paywallBannerAction, { fontSize: Math.max(12, Math.min(14, windowWidth * 0.033)) }]}>{t('settings.banner.action')}</Text>
+              </View>
+              <Image
+                source={require('../assets/bannerPass.png')}
+                style={[
+                  styles.paywallBannerImage,
+                  {
+                    width: paywallBannerImageWidth,
+                    height: paywallBannerImageHeight,
+                    right: Math.max(0, Math.min(8, windowWidth * 0.02)),
+                  },
+                ]}
+                resizeMode="contain"
+              />
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
 
-        <View style={styles.sectionWrapper}>
-          <View style={styles.membershipCard}>
-            <Text style={styles.membershipText}>あなたは{membershipLabel}です</Text>
-            <TouchableOpacity
-              style={styles.membershipButton}
-              activeOpacity={0.8}
-              onPress={handleMembershipButtonPress}
-            >
-              <Text style={styles.membershipButtonText}>
-                {getMembershipActionLabel(membershipType)}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {SECTIONS.map((section) => (
-          <View key={section.title} style={styles.sectionWrapper}>
+        {sections.map((section) => (
+          <View key={section.title} style={[styles.sectionWrapper, { marginTop: sectionTopSpacing }]}>
             <Text style={styles.sectionLabel}>{section.title}</Text>
             <View style={styles.card}>
               {section.data.map((item, index) => {
@@ -613,7 +560,11 @@ export default function SettingsScreen({ navigation }: any) {
                 return (
                   <TouchableOpacity
                     key={item.id}
-                    style={[styles.row, isLast && styles.rowLast]}
+                    style={[
+                      styles.row,
+                      { paddingVertical: rowVerticalPadding },
+                      isLast && styles.rowLast,
+                    ]}
                     activeOpacity={0.7}
                     onPress={() => {
                       if (item.id === 'icloud-sync') {
@@ -622,44 +573,44 @@ export default function SettingsScreen({ navigation }: any) {
                         handleAccountDelete();
                       } else if (item.id === 'notifications') {
                         Linking.openSettings().catch(() => {
-                          Alert.alert('エラー', '設定を開けませんでした');
+                          Alert.alert(t('settings.common.errorTitle'), t('settings.alerts.openSettingsFailed'));
                         });
                       } else if (item.id === 'faq') {
                         navigation.navigate('FAQ');
                       } else if (item.id === 'review') {
                         Linking.openURL(APP_STORE_REVIEW_URL).catch(() => {
-                          Alert.alert('エラー', 'App Storeを開けませんでした');
+                          Alert.alert(t('settings.common.errorTitle'), t('settings.alerts.openAppStoreFailed'));
                         });
                       } else if (item.id === 'feedback') {
                         const feedbackUrl = isTestflightMode
                           ? 'https://testflight.apple.com/join/7stWmpEk'
                           : 'https://forms.gle/Z6fQZZUM79WprPSk8';
                         WebBrowser.openBrowserAsync(feedbackUrl).catch(() => {
-                          Alert.alert('エラー', 'URLを開けませんでした');
+                          Alert.alert(t('settings.common.errorTitle'), t('settings.common.openUrlFailed'));
                         });
                       } else if (item.id === 'sns') {
-                        Linking.openURL('https://x.com/tickemo_app').catch(() => {
-                          Alert.alert('エラー', 'URLを開けませんでした');
+                        Linking.openURL('https://www.instagram.com/tickemo_app/').catch(() => {
+                          Alert.alert(t('settings.common.errorTitle'), t('settings.common.openUrlFailed'));
                         });
                       } else if (item.id === 'about') {
                         Alert.alert(
-                          'Tickemoについて',
-                          'Tickemo（チケモ）は、あなたの推し活の記録を美しく残せるアプリです。\n\nライブの思い出をチケットのように保存し、推しアーティストとの時間を大切に。',
-                          [{ text: 'OK' }]
+                          t('settings.alerts.aboutTitle'),
+                          t('settings.alerts.aboutMessage'),
+                          [{ text: t('settings.common.ok') }]
                         );
                       } else if (item.id === 'apple-music') {
                         Alert.alert(
-                          'Apple Musicについて',
-                          'このアプリはApple Musicを通じて楽曲情報を提供しています。\n\nData provided by Apple Music',
-                          [{ text: 'OK' }]
+                          t('settings.alerts.aboutAppleMusicTitle'),
+                          t('settings.alerts.aboutAppleMusicMessage'),
+                          [{ text: t('settings.common.ok') }]
                         );
                       } else if (item.id === 'terms') {
                         WebBrowser.openBrowserAsync('https://traveling-fahrenheit-b9b.notion.site/Tickemo-Terms-of-Use-2f65fd5d3e2d80ba8abcda85615cde4a?source=copy_link').catch(() => {
-                          Alert.alert('エラー', 'URLを開けませんでした');
+                          Alert.alert(t('settings.common.errorTitle'), t('settings.common.openUrlFailed'));
                         });
                       } else if (item.id === 'privacy') {
                         WebBrowser.openBrowserAsync('https://traveling-fahrenheit-b9b.notion.site/Tickemo-Privacy-Policy-2f85fd5d3e2d809b912dfc4ec2a2ed6a?source=copy_link').catch(() => {
-                          Alert.alert('エラー', 'URLを開けませんでした');
+                          Alert.alert(t('settings.common.errorTitle'), t('settings.common.openUrlFailed'));
                         });
                       }
                     }}
@@ -688,11 +639,13 @@ export default function SettingsScreen({ navigation }: any) {
           </View>
         ))}
 
-        <View style={styles.footer}>
+        <View style={[styles.footer, { marginTop: footerTopMargin }]}>
           <Image source={require('../assets/logo.simple.png')} style={styles.footerLogo} />
           <View style={{ alignItems: 'flex-start' }}>
             <Text style={styles.version}>Tickemo</Text>
-            <Text style={styles.version}>バージョン{Constants.expoConfig?.version || '1.0.0'}</Text>
+            <Text style={styles.version}>
+              {t('settings.version', { version: Constants.expoConfig?.version || '1.0.0' })}
+            </Text>
           </View>
         </View>
       </ScrollView>
@@ -736,6 +689,9 @@ const MyPageShareModal: React.FC<MyPageShareModalProps> = ({
   onUpdateXHandle,
   onUpdateInstagramHandle,
 }) => {
+  const { t } = useTranslation();
+  const membershipType = useAppStore((state) => state.membershipType);
+  const isPremium = membershipType === 'plus' || membershipType === 'lifetime';
   const [fontsLoaded] = useFonts({
     Anton_400Regular,
   });
@@ -789,7 +745,7 @@ const MyPageShareModal: React.FC<MyPageShareModalProps> = ({
 
   const captureCard = async (): Promise<string | null> => {
     if (!viewRef.current) {
-      Alert.alert('エラー', 'プレビューの準備ができていません');
+      Alert.alert(t('settings.common.errorTitle'), t('settings.alerts.previewNotReady'));
       return null;
     }
 
@@ -813,7 +769,7 @@ const MyPageShareModal: React.FC<MyPageShareModalProps> = ({
       return uri;
     } catch (error) {
       console.error('Capture error:', error);
-      Alert.alert('エラー', '画像の生成に失敗しました');
+      Alert.alert(t('settings.common.errorTitle'), t('settings.alerts.imageGenerateFailed'));
       return null;
     }
   };
@@ -828,7 +784,7 @@ const MyPageShareModal: React.FC<MyPageShareModalProps> = ({
       await task();
     } catch (error) {
       console.error('Share modal error:', error);
-      Alert.alert('エラー', '処理に失敗しました');
+      Alert.alert(t('settings.common.errorTitle'), t('settings.alerts.processingFailed'));
     } finally {
       setIsProcessing(false);
       setSelectedAction(null);
@@ -841,7 +797,7 @@ const MyPageShareModal: React.FC<MyPageShareModalProps> = ({
       if (!uri) return;
 
       Clipboard.setString(uri);
-      Alert.alert('完了', '画像リンクをコピーしました');
+      Alert.alert(t('settings.common.doneTitle'), t('settings.alerts.copiedImageLink'));
     });
   };
 
@@ -852,12 +808,12 @@ const MyPageShareModal: React.FC<MyPageShareModalProps> = ({
 
       const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('エラー', 'ライブラリへのアクセス許可が必要です');
+        Alert.alert(t('settings.common.errorTitle'), t('settings.alerts.mediaPermissionRequired'));
         return;
       }
 
       await MediaLibrary.saveToLibraryAsync(uri);
-      Alert.alert('完了', '画像をカメラロールに保存しました');
+      Alert.alert(t('settings.common.doneTitle'), t('settings.alerts.savedToCameraRoll'));
       onClose();
     });
   };
@@ -868,7 +824,7 @@ const MyPageShareModal: React.FC<MyPageShareModalProps> = ({
 
     const { status } = await MediaLibrary.requestPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('エラー', 'ライブラリへのアクセス許可が必要です');
+      Alert.alert(t('settings.common.errorTitle'), t('settings.alerts.mediaPermissionRequired'));
       return null;
     }
 
@@ -968,7 +924,7 @@ const MyPageShareModal: React.FC<MyPageShareModalProps> = ({
 
           <View style={shareStyles.sheetContent}>
             <View style={shareStyles.sheetHeader}>
-              <Text style={shareStyles.sheetTitle}>プレビュー</Text>
+              <Text style={shareStyles.sheetTitle}>{t('settings.share.preview')}</Text>
             </View>
 
             <View style={shareStyles.previewArea}>
@@ -1046,27 +1002,53 @@ const MyPageShareModal: React.FC<MyPageShareModalProps> = ({
                       {stats.totalCheckIns}
                     </Text>
                     <View style={shareStyles.profileHeader}>
-                      <View
-                        style={[
-                          shareStyles.profileAvatarWrap,
-                          { borderColor: rankAccentColorMap[stats.fanLevel] },
-                        ]}
-                      >
-                        {profile.avatarUrl ? (
-                          <ExpoImage
-                            source={{ uri: profile.avatarUrl }}
-                            style={shareStyles.profileAvatar}
-                            contentFit="cover"
-                            cachePolicy="memory-disk"
-                          />
-                        ) : (
-                          <View style={shareStyles.profileAvatarFallback}>
-                            <Text style={shareStyles.profileAvatarInitials}>
-                              {profileInitials || 'U'}
-                            </Text>
+                      {isPremium ? (
+                        <LinearGradient
+                          colors={['#8FE58C', '#8872F8']}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 1 }}
+                          style={shareStyles.profileAvatarWrapPremium}
+                        >
+                          <View style={shareStyles.profileAvatarWrapInner}>
+                            {profile.avatarUrl ? (
+                              <ExpoImage
+                                source={{ uri: profile.avatarUrl }}
+                                style={shareStyles.profileAvatar}
+                                contentFit="cover"
+                                cachePolicy="memory-disk"
+                              />
+                            ) : (
+                              <View style={shareStyles.profileAvatarFallback}>
+                                <Text style={shareStyles.profileAvatarInitials}>
+                                  {profileInitials || 'U'}
+                                </Text>
+                              </View>
+                            )}
                           </View>
-                        )}
-                      </View>
+                        </LinearGradient>
+                      ) : (
+                        <View
+                          style={[
+                            shareStyles.profileAvatarWrap,
+                            { borderColor: rankAccentColorMap[stats.fanLevel] },
+                          ]}
+                        >
+                          {profile.avatarUrl ? (
+                            <ExpoImage
+                              source={{ uri: profile.avatarUrl }}
+                              style={shareStyles.profileAvatar}
+                              contentFit="cover"
+                              cachePolicy="memory-disk"
+                            />
+                          ) : (
+                            <View style={shareStyles.profileAvatarFallback}>
+                              <Text style={shareStyles.profileAvatarInitials}>
+                                {profileInitials || 'U'}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      )}
                       <View style={shareStyles.profileInfo}>
                         <Text style={shareStyles.profileName} numberOfLines={1}>
                           {profile.displayName || 'User'}
@@ -1116,13 +1098,13 @@ const MyPageShareModal: React.FC<MyPageShareModalProps> = ({
 
                     <View style={shareStyles.statusSection}>
                       <View style={shareStyles.statusItem}>
-                        <Text style={shareStyles.statusLabel}>LAST SEEN</Text>
+                          <Text style={shareStyles.statusLabel}>{t('settings.share.statusLastSeen')}</Text>
                         <Text style={shareStyles.statusValue} numberOfLines={1}>
                           {stats.lastSeenLiveName || '-'}
                         </Text>
                       </View>
                       <View style={shareStyles.statusItem}>
-                        <Text style={shareStyles.statusLabel}>MOST LOVED</Text>
+                          <Text style={shareStyles.statusLabel}>{t('settings.share.statusMostLoved')}</Text>
                         <Text style={shareStyles.statusValue} numberOfLines={1}>
                           {stats.topArtist || '-'}
                         </Text>
@@ -1147,7 +1129,7 @@ const MyPageShareModal: React.FC<MyPageShareModalProps> = ({
 
             <View style={shareStyles.socialSettingsContainer}>
               <View style={shareStyles.socialSettingsLeft}>
-                <Text style={shareStyles.socialSettingsTitle}>SOCIALS</Text>
+                <Text style={shareStyles.socialSettingsTitle}>{t('settings.share.socials')}</Text>
                 <Switch
                   value={socialsExpanded}
                   onValueChange={setSocialsExpanded}
@@ -1210,7 +1192,7 @@ const MyPageShareModal: React.FC<MyPageShareModalProps> = ({
                   <Feather name="download" size={24} color="#333" />
                 )}
               </View>
-              <Text style={shareStyles.actionButtonLabel}>画像を保存</Text>
+              <Text style={shareStyles.actionButtonLabel}>{t('settings.share.actionSaveImage')}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -1225,7 +1207,7 @@ const MyPageShareModal: React.FC<MyPageShareModalProps> = ({
                   <AntDesign name="link" size={24} color="#333" />
                 )}
               </View>
-              <Text style={shareStyles.actionButtonLabel}>画像リンクをコピー</Text>
+              <Text style={shareStyles.actionButtonLabel}>{t('settings.share.actionCopyImageLink')}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -1240,7 +1222,7 @@ const MyPageShareModal: React.FC<MyPageShareModalProps> = ({
                   <Image source={require('../assets/x.logo.white.png')} style={{ width: 18, height: 18 }} />
                 )}
               </View>
-              <Text style={shareStyles.actionButtonLabel}>X (Twitter)</Text>
+              <Text style={shareStyles.actionButtonLabel}>{t('settings.share.actionShareX')}</Text>
             </TouchableOpacity>
 
           </View>
@@ -1344,6 +1326,25 @@ const shareStyles = StyleSheet.create({
     backgroundColor: 'transparent',
     marginRight: 25,
     marginLeft: -20,
+  },
+  profileAvatarWrapPremium: {
+    width: 152,
+    height: 152,
+    borderRadius: 76,
+    padding: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 25,
+    marginLeft: -20,
+  },
+  profileAvatarWrapInner: {
+    width: 142,
+    height: 142,
+    borderRadius: 71,
+    padding: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
   },
   profileAvatar: {
     width: 140,
@@ -1597,7 +1598,31 @@ const UserProfileHeader: React.FC<{
     <View style={styles.bentoGrid}>
       <View style={styles.profileCard}>
         <View style={styles.profileLeft}>
-          {stats.fanLevel === 'LEGEND' ? (
+          {isPremium ? (
+            <LinearGradient
+              colors={['#8FE58C', '#8872F8']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.avatarRingLegend}
+            >
+              <View style={styles.avatarRingInner}>
+                {profile.avatarUrl ? (
+                  <ExpoImage
+                    source={{ uri: profile.avatarUrl }}
+                    style={styles.avatarImage}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                    priority="high"
+                    transition={0}
+                  />
+                ) : (
+                  <View style={styles.avatarFallback}>
+                    <Text style={styles.avatarInitials}>{initials || 'U'}</Text>
+                  </View>
+                )}
+              </View>
+            </LinearGradient>
+          ) : stats.fanLevel === 'LEGEND' ? (
             <LinearGradient
               colors={['#F5E097', '#8E8361']}
               start={{ x: 0, y: 0 }}
@@ -1641,7 +1666,7 @@ const UserProfileHeader: React.FC<{
             <View style={styles.nameRow}>
               <Text style={styles.displayName}>{displayName}</Text>
               <View style={[styles.rankDot, { backgroundColor: rankColor }]} />
-              {isPremium && (
+              {isPremium ? (
                 <LinearGradient
                   colors={['#8FE58C', '#8872F8']}
                   start={{ x: 0, y: 0 }}
@@ -1650,6 +1675,10 @@ const UserProfileHeader: React.FC<{
                 >
                   <Text style={styles.plusBadgeText}>Plus</Text>
                 </LinearGradient>
+              ) : (
+                <View style={styles.freeBadge}>
+                  <Text style={styles.freeBadgeText}>Free</Text>
+                </View>
               )}
             </View>
             <Text style={styles.userMeta}>{username} • Joined {joinedText}</Text>
@@ -1659,23 +1688,23 @@ const UserProfileHeader: React.FC<{
           <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
             <Path
               d="M11 2H9C4 2 2 4 2 9V15C2 20 4 22 9 22H15C20 22 22 20 22 15V13"
-              stroke="#fff"
-              strokeWidth={1.5}
+              stroke="#2F2F2F"
+              strokeWidth={2.5}
               strokeLinecap="round"
               strokeLinejoin="round"
             />
             <Path
               d="M16.04 3.01928L8.16 10.8993C7.86 11.1993 7.56 11.7893 7.5 12.2193L7.07 15.2293C6.91 16.3193 7.68 17.0793 8.77 16.9293L11.78 16.4993C12.2 16.4393 12.79 16.1393 13.1 15.8393L20.98 7.95928C22.34 6.59928 22.98 5.01928 20.98 3.01928C18.98 1.01928 17.4 1.65928 16.04 3.01928Z"
-              stroke="#fff"
-              strokeWidth={1.5}
+              stroke="#2F2F2F"
+              strokeWidth={2.5}
               strokeMiterlimit={10}
               strokeLinecap="round"
               strokeLinejoin="round"
             />
             <Path
               d="M14.91 4.15039C15.58 6.54039 17.45 8.41039 19.85 9.09039"
-              stroke="#fff"
-              strokeWidth={1.5}
+              stroke="#2F2F2F"
+              strokeWidth={2.5}
               strokeMiterlimit={10}
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -1699,6 +1728,7 @@ const UserProfileHeader: React.FC<{
           />
         )}
         <View style={styles.rankInfo}>
+          <Text style={styles.rankCurrentLabel}>現在のランク</Text>
           <Text style={styles.rankName}>{stats.fanLevel}</Text>
           {stats.fanLevel !== 'LEGEND' && (
             <>
@@ -1770,15 +1800,67 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 6,
   },
+  paywallBannerTouchable: {
+    marginTop: 25,
+    marginBottom: 12,
+  },
+  paywallBanner: {
+    position: 'relative',
+    borderRadius: 20,
+    minHeight: 120,
+    paddingLeft: 18,
+    paddingRight: 12,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    overflow: 'hidden',
+  },
+  paywallBannerTextBlock: {
+    flex: 1,
+    paddingLeft: 8,
+  },
+  paywallBannerCaption: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    marginBottom: 8,
+  },
+  paywallBannerTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: -0.3,
+  },
+  paywallBannerAction: {
+    color: '#8FE58C',
+    fontSize: 13,
+    fontWeight: '700',
+    marginTop: 12,
+  },
+  paywallBannerImage: {
+    position: 'absolute',
+    top: 0,
+    right: 5,
+    width: 140,
+    height: 113,
+    marginLeft: 8,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 20,
+    elevation: 8,
+  },
   bentoCardContainer: {
-    backgroundColor: '#111111',
-    borderRadius: 28,
-    padding: 16,
-    shadowColor: '#d2d2d2',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    elevation: 6,
+    backgroundColor: 'transparent',
+    borderRadius: 0,
+    padding: 0,
+    shadowColor: 'transparent',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
     marginBottom: 10,
     overflow: 'hidden',
   },
@@ -1790,18 +1872,13 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   profileCard: {
-    backgroundColor: 'rgba(0,0,0,0.02)',
+    backgroundColor: '#F8F8F8',
     paddingHorizontal: 8,
     paddingVertical: 18,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     borderRadius: 18,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.22,
-    shadowRadius: 12,
-    elevation: 6,
   },
   profileLeft: {
     flexDirection: 'row',
@@ -1816,7 +1893,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'transparent',
+    backgroundColor: '#FFFFFF',
   },
   avatarRingLegend: {
     width: 68,
@@ -1830,9 +1907,10 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
+    padding: 2,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#111111',
+    backgroundColor: '#FFFFFF',
   },
   avatarImage: {
     width: 60,
@@ -1863,7 +1941,7 @@ const styles = StyleSheet.create({
   displayName: {
     fontSize: 20,
     fontWeight: '800',
-    color: '#FFFFFF',
+    color: '#2D2D2D',
   },
   rankDot: {
     width: 6,
@@ -1879,7 +1957,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   plusBadgeText: {
-    color: '#FFFFFF',
+    color: '#fff',
     fontSize: 9,
     fontWeight: '700',
     letterSpacing: 0.5,
@@ -1888,6 +1966,21 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 2,
     elevation: 2,
+  },
+  freeBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginLeft: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#E7E7E7',
+  },
+  freeBadgeText: {
+    color: '#5A5A5A',
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   userMeta: {
     marginTop: 8,
@@ -1910,6 +2003,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     minHeight: 100,
+    maxHeight: 150,
     overflow: 'hidden',
   },
   rankCardLegend: {
@@ -1921,6 +2015,11 @@ const styles = StyleSheet.create({
   rankInfo: {
     flex: 1,
     paddingRight: 100,
+  },
+  rankCurrentLabel: {
+    marginTop: 3,
+    fontSize: 12,
+    color: '#B8B8B8',
   },
   rankName: {
     fontSize: 28,
@@ -1950,9 +2049,9 @@ const styles = StyleSheet.create({
   rankIllustration: {
     position: 'absolute',
     right: -4,
-    bottom: -6,
-    width: 120,
-    height: 120,
+    bottom: -14,
+    width: 140,
+    height: 140,
   },
   sectionWrapper: {
     marginTop: 35,
@@ -1972,82 +2071,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 8,
     elevation: 8,
-  },
-  membershipCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 30,
-    shadowColor: '#d2d2d2',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 8,
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  membershipText: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#000000',
-    marginLeft: 6,
-  },
-  membershipButton: {
-    height: 36,
-    minWidth: 116,
-    borderRadius: 18,
-    backgroundColor: '#111111',
-    paddingHorizontal: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  membershipButtonText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  iconCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    shadowColor: '#d2d2d2',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 8,
-    paddingVertical: 20,
-    paddingHorizontal: 16,
-  },
-  iconGrid: {
-    flexDirection: 'row',
-    gap: 18,
-    paddingHorizontal: 1,
-  },
-  iconItem: {
-    width: 80,
-    height: 80,
-    borderRadius: 20,
-    overflow: 'hidden',
-    position: 'relative',
-    backgroundColor: '#F5F5F5',
-  },
-  iconItemSelected: {
-    borderWidth: 4,
-    borderColor: '#dfdfdf',
-  },
-  iconImage: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'cover',
-  },
-  checkmarkContainer: {
-    position: 'absolute',
-    bottom: 4,
-    right: 4,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
   },
   row: {
     flexDirection: 'row',
@@ -2148,81 +2171,11 @@ const styles = StyleSheet.create({
 
 // ================ FAQ Screen Component ================
 export function FAQScreen({ navigation }: any) {
-  const faqData = [
-    {
-      category: 'トラブル・不具合',
-      items: [
-        {
-          question: 'チケットの画像が表示されなくなりました。',
-          answer: '端末のストレージ最適化やOSの更新により、画像のリンクが切れる場合があります。お手数ですが、一度その画像を削除し、再度アルバムから選択し直して保存してください。',
-        },
-        {
-          question: '画面が固まって動かないときは？',
-          answer: '一度アプリを終了して再起動してください。改善しない場合は端末の再起動をお試しください。',
-        },
-        {
-          question: 'アプリが落ちる・動作が重いです。',
-          answer: '画像サイズが大きい場合や、バックグラウンドで多数のアプリが動いている場合に発生することがあります。画像を少し小さくするか、アプリの再起動をお試しください。',
-        },
-      ],
-    },
-    {
-      category: 'データ・バックアップ',
-      items: [
-        {
-          question: '間違ってアプリを消してしまいました。データは復元できますか？',
-          answer: 'いいえ、できません。本アプリは、お客様の端末内（ローカル）のみにデータを保存しており、サーバーには送信していません。アプリを削除すると、データも全て削除されます。',
-        },
-        {
-          question: '機種変更をしたいのですが。',
-          answer: '設定画面の「iCloud同期」をONにしたうえで、同じApple IDで新しい端末にサインインしてください。同期完了まで少し時間がかかる場合があります。',
-        },
-      ],
-    },
-    {
-      category: '機能・仕様',
-      items: [
-        {
-          question: '友達とデータを共有できますか？',
-          answer: '現在、リアルタイムでの共有機能はありません。作成したチケット画像をSNSなどでシェアしてお楽しみください。',
-        },
-        {
-          question: 'Android版（またはiOS版）とデータを移行できますか？',
-          answer: '異なるOS間でのデータ移行は、バックアップファイルの形式が合えば可能ですが、動作保証はしておりません。',
-        },
-      ],
-    },
-    {
-      category: 'Plus・お支払い',
-      items: [
-        {
-          question: 'いつ課金されますか？（自動更新について）',
-          answer: 'Plusプランは「月額（または年額）」の自動更新の定期購読（サブスクリプション）です。\n登録いただいた日を起点として、1ヶ月（または1年）ごとに、ご使用のApple IDに自動的に請求が行われます。',
-        },
-        {
-          question: '解約（キャンセル）したいのですが、どうすればいいですか？',
-          answer: 'アプリを削除（アンインストール）しただけでは解約されませんのでご注意ください。解約をご希望の場合は、更新日の24時間前までに以下の手順で自動更新をオフにしてください。\n\n【iPhone (iOS) の場合】\n1. 端末の「設定」アプリを開く\n2. 一番上の自分の名前（Apple ID）をタップ\n3. 「サブスクリプション」をタップ\n4. 「Tickemo」を選択し、「サブスクリプションをキャンセルする」をタップ',
-        },
-        {
-          question: '機種変更をした場合、有料プランはどうなりますか？',
-          answer: '新しい端末でも、以前と同じApple IDをご利用であれば、引き続きプレミアムプランをご利用いただけます。\nアプリ内のプラン選択画面にある「購入を復元」ボタンをタップしていただくと、有料プランの状態が新しい端末に引き継がれます。（※追加の料金は発生しません）',
-        },
-        {
-          question: '領収書や購入履歴を確認したいです。',
-          answer: 'Tickemoアプリ内からは直接領収書を発行することはできません。\n購入履歴や領収書は、Apple（App Store）からご登録のメールアドレス宛に送信されるメール、またはアカウント設定（購入履歴）よりご確認ください。',
-        },
-      ],
-    },
-    {
-      category: 'その他',
-      items: [
-        {
-          question: '要望や不具合の報告はどこから？',
-          answer: '設定画面の「フィードバック」またはストアのレビューからお願いします。個人で開発しているため、すぐに対応できない場合もございますが、全てのメッセージに目を通しております。',
-        },
-      ],
-    },
-  ];
+  const { t } = useTranslation();
+  const faqData = t('settings.faq.sections', { returnObjects: true }) as Array<{
+    category: string;
+    items: Array<{ question: string; answer: string }>;
+  }>;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F8F8' }}>
@@ -2230,7 +2183,7 @@ export function FAQScreen({ navigation }: any) {
         <TouchableOpacity style={faqStyles.backButton} onPress={() => navigation.goBack()}>
           <MaterialIcons name="arrow-back-ios" size={22} color="#000" />
         </TouchableOpacity>
-        <Text style={faqStyles.headerTitle}>よくある質問</Text>
+        <Text style={faqStyles.headerTitle}>{t('settings.faq.header')}</Text>
         <View style={{ width: 44 }} />
       </View>
 
@@ -2254,9 +2207,7 @@ export function FAQScreen({ navigation }: any) {
         ))}
 
         <View style={faqStyles.footer}>
-          <Text style={faqStyles.footerText}>
-            その他ご不明な点は、設定画面の「フィードバック」からお問い合わせください。
-          </Text>
+          <Text style={faqStyles.footerText}>{t('settings.faq.footer')}</Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -2269,7 +2220,7 @@ const faqStyles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 12,
-    paddingTop: 60,
+    paddingTop: 10,
     paddingBottom: 16,
   },
   backButton: {
@@ -2348,3 +2299,4 @@ const faqStyles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+

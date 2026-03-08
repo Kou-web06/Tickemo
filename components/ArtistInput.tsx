@@ -13,6 +13,7 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
 import { searchAppleMusicArtists, getArtworkUrl } from '../utils/appleMusicApi';
+import { useTranslation } from 'react-i18next';
 
 // Apple Music Developer Token
 const APPLE_MUSIC_DEVELOPER_TOKEN = 'eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjMyTVlRNk5WOTYifQ.eyJpc3MiOiJRMkxMMkI3OTJWIiwiaWF0IjoxNzY5ODQ5MDA5LCJleHAiOjE3ODU0MDEwMDksImF1ZCI6Imh0dHBzOi8vYXBwbGVpZC5hcHBsZS5jb20iLCJzdWIiOiJtZWRpYS5jb20uYW5vbnltb3VzLlRpY2tlbW8ifQ.ect6vO1q3aC9XJVYCUBVLlTHaVEcZebm0-dVZ3ak6uglI33e1ra3qcwkawXaScFFcLB8sgX5TEcFEj9QGF1Z8A';
@@ -31,7 +32,9 @@ interface ArtistInputProps {
   onDropdownVisibilityChange?: (isVisible: boolean) => void;
 }
 
-export default function ArtistInput({ value, imageUrl, onChange, placeholder = 'アーティスト名を検索', onDropdownVisibilityChange }: ArtistInputProps) {
+export default function ArtistInput({ value, imageUrl, onChange, placeholder, onDropdownVisibilityChange }: ArtistInputProps) {
+  const { t } = useTranslation();
+  const resolvedPlaceholder = placeholder ?? t('artistInput.placeholder');
   const [searchTerm, setSearchTerm] = useState('');
   const [suggestions, setSuggestions] = useState<ArtistSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -162,7 +165,7 @@ export default function ArtistInput({ value, imageUrl, onChange, placeholder = '
               style={styles.input}
               value={searchTerm}
               onChangeText={setSearchTerm}
-              placeholder={placeholder}
+              placeholder={resolvedPlaceholder}
               placeholderTextColor="#CCCCCC"
               autoCapitalize="words"
               autoCorrect={false}

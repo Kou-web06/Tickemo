@@ -1,6 +1,7 @@
 import { StyleSheet, View, Text, TouchableOpacity, FlatList, Alert, Dimensions } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useMemo } from 'react';
+import { getAppWidth } from './utils/layout';
 import ChekiCard from './ChekiCard';
 
 interface ChekiRecord {
@@ -61,7 +62,7 @@ interface ListScreenProps {
 }
 
 const ListScreen: React.FC<ListScreenProps> = ({ navigation }) => {
-  const screenWidth = Dimensions.get('window').width;
+  const screenWidth = getAppWidth();
   const SCREEN_PADDING = 12;
   const GAP = 8;
   

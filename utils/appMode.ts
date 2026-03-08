@@ -1,6 +1,6 @@
 const rawMode = (process.env.EXPO_PUBLIC_APP_MODE || '').toLowerCase();
 
-export const isTestflightMode = __DEV__ || rawMode === 'testflight';
+export const isTestflightMode = rawMode === 'testflight';
 export const isProductionMode = !__DEV__ && rawMode === 'production';
 
 // // デバッグログ

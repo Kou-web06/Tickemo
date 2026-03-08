@@ -151,7 +151,11 @@ export const uploadImage = async (
   fileName?: string
 ): Promise<string | null> => {
   try {
-    if (!fileUri.startsWith('file://')) {
+    if (!fileUri) {
+      return null;
+    }
+
+    if (fileUri.startsWith('http://') || fileUri.startsWith('https://') || fileUri.startsWith('Tickemo/')) {
       return fileUri;
     }
 

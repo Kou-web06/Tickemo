@@ -9,6 +9,7 @@ import {
 import { Feather } from '@expo/vector-icons';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { theme } from '../theme';
+import { useTranslation } from 'react-i18next';
 
 interface DateInputFieldProps {
   value: Date | null;
@@ -21,6 +22,7 @@ export default function DateInputField({
   onChange,
   label,
 }: DateInputFieldProps) {
+  const { t } = useTranslation();
   const [isPickerVisible, setIsPickerVisible] = useState(false);
 
   const handleConfirm = (selectedDate: Date) => {
@@ -33,20 +35,19 @@ export default function DateInputField({
   };
 
   const formatDate = (date: Date | null): string => {
-    if (!date) return '日付を選択';
+    if (!date) return t('dateInputField.selectDate');
     try {
-      // yyyy.MM.dd (EEE) フォーマット - 日本語の曜日
+      // yyyy.MM.dd (EEE)
       const year = date.getFullYear();
       const month = String(date.getMonth() + 1).padStart(2, '0');
       const day = String(date.getDate()).padStart(2, '0');
       
-      // 曜日を日本語で取得
-      const daysJa = ['日', '月', '火', '水', '木', '金', '土'];
-      const dayOfWeek = daysJa[date.getDay()];
+      const days = t('dateInputField.daysShort', { returnObjects: true }) as string[];
+      const dayOfWeek = days?.[date.getDay()] ?? '';
       
       return `${year}.${month}.${day} (${dayOfWeek})`;
     } catch {
-      return '日付を選択';
+      return t('dateInputField.selectDate');
     }
   };
 

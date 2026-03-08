@@ -62,7 +62,9 @@ export const FloatingTabBar: React.FC<TabBarProps> = ({ state, descriptors, navi
               canPreventDefault: true,
             });
 
-            if (!isFocused && !event.defaultPrevented) {
+            if (!event.defaultPrevented && isFocused && route.name === 'Settings') {
+              navigation.navigate(route.name);
+            } else if (!isFocused && !event.defaultPrevented) {
               if (route.name === 'Settings') {
                 const rotateValue = getRotateValue(route.key);
                 rotateValue.setValue(0);

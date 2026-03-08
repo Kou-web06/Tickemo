@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Dimensions, Pressable, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ScrollView, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -20,13 +20,15 @@ import Animated, {
 import { theme } from '../theme';
 import { useStatistics } from '../hooks/useStatistics';
 import { getArtworkUrl, searchAppleMusicArtists } from '../utils/appleMusicApi';
+import { useTranslation } from 'react-i18next';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const APPLE_MUSIC_DEVELOPER_TOKEN =
   'eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjMyTVlRNk5WOTYifQ.eyJpc3MiOiJRMkxMMkI3OTJWIiwiaWF0IjoxNzY5ODQ5MDA5LCJleHAiOjE3ODU0MDEwMDksImF1ZCI6Imh0dHBzOi8vYXBwbGVpZC5hcHBsZS5jb20iLCJzdWIiOiJtZWRpYS5jb20uYW5vbnltb3VzLlRpY2tlbW8ifQ.ect6vO1q3aC9XJVYCUBVLlTHaVEcZebm0-dVZ3ak6uglI33e1ra3qcwkawXaScFFcLB8sgX5TEcFEj9QGF1Z8A';
 
 const TAB_OPTIONS = [
-  { key: 'legends', label: 'アーティスト' },
-  { key: 'history', label: '年間' },
+  { key: 'legends', labelKey: 'statistics.tabs.artists' },
+  { key: 'history', labelKey: 'statistics.tabs.yearly' },
 ] as const;
 
 type TabKey = (typeof TAB_OPTIONS)[number]['key'];
@@ -54,6 +56,9 @@ const RANK_HEIGHT_FACTOR = {
 };
 
 const StatisticsScreen: React.FC = () => {
+  const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { topArtists, totalLives, allArtists, yearlyReport } = useStatistics();
   const [activeTab, setActiveTab] = useState<TabKey>('legends');
   const [artistImages, setArtistImages] = useState<Record<string, string>>({});
@@ -61,9 +66,15 @@ const StatisticsScreen: React.FC = () => {
   const [tabLayoutWidth, setTabLayoutWidth] = useState(0);
   const tabTranslateX = useSharedValue(0);
   const chartLift = useSharedValue(0);
-  const chartBarWidth = 28;
-  const chartBarSpacing = 20;
-  const chartWidth = screenWidth - theme.spacing.lg * 2;
+  const chartBarWidth = Math.min(28, Math.max(22, windowWidth * 0.07));
+  const chartBarSpacing = Math.min(20, Math.max(12, windowWidth * 0.05));
+  const chartWidth = windowWidth - theme.spacing.lg * 2;
+  const podiumWidth = Math.min(360, windowWidth - theme.spacing.xxl * 2);
+  const podiumSlotWidth = (podiumWidth - PODIUM_GAP * 2) / 3;
+  const detailSheetHeight = Math.round(windowHeight * 0.45);
+  const containerTopPadding = insets.top + Math.max(8, windowHeight * 0.012);
+  const legendsBottomPadding = insets.bottom + Math.max(96, windowHeight * 0.12);
+  const historyBottomPadding = detailSheetHeight + insets.bottom;
   const [mainValueDisplay, setMainValueDisplay] = useState(0);
   const mainValueFrame = useRef<number | null>(null);
 
@@ -254,7 +265,7 @@ const StatisticsScreen: React.FC = () => {
   }, [chartMaxValue]);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: containerTopPadding }]}> 
       {backgroundImageUrl ? (
         <>
           <Image
@@ -273,12 +284,12 @@ const StatisticsScreen: React.FC = () => {
           />
         </>
       ) : null}
-      <View style={styles.header}>
-        <Text style={styles.title}>レポート</Text>
+      <View style={[styles.header, { paddingHorizontal: Math.min(Math.max(windowWidth * 0.06, theme.spacing.lg), theme.spacing.xxl) }]}>
+        <Text style={[styles.title, { fontSize: Math.min(32, windowWidth * 0.085) }]}>{t('statistics.title')}</Text>
       </View>
 
       <View
-        style={styles.tabRow}
+        style={[styles.tabRow, { width: Math.min(windowWidth * 0.82, 420) }]}
         onLayout={(event) => setTabLayoutWidth(event.nativeEvent.layout.width)}
       >
         <Animated.View
@@ -296,7 +307,7 @@ const StatisticsScreen: React.FC = () => {
               style={styles.tabPill}
               onPress={() => setActiveTab(tab.key)}
             >
-              <Text style={[styles.tabText, isActive && styles.tabTextActive]}>{tab.label}</Text>
+              <Text style={[styles.tabText, isActive && styles.tabTextActive]}>{t(tab.labelKey)}</Text>
             </Pressable>
           );
         })}
@@ -304,21 +315,21 @@ const StatisticsScreen: React.FC = () => {
 
       {activeTab === 'legends' && (
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: legendsBottomPadding }]}
           showsVerticalScrollIndicator={false}
         >
           {totalLives === 0 ? (
             <View style={styles.emptyContainerInline}>
-              <Text style={styles.emptyTitle}>データが足りません…</Text>
-              <Text style={styles.emptyText}>データが集まるとここに分析結果が表示されます</Text>
+              <Text style={styles.emptyTitle}>{t('statistics.emptyTitle')}</Text>
+              <Text style={styles.emptyText}>{t('statistics.emptySubtitle')}</Text>
             </View>
           ) : (
             <View style={styles.legendsSection}>
               <View style={styles.legendsTitleContainer}>
-                <Text style={styles.legendsTitle}>top artists</Text>
+                <Text style={styles.legendsTitle}>{t('statistics.topArtists')}</Text>
               </View>
 
-              <View style={styles.podiumRow}>
+              <View style={[styles.podiumRow, { width: podiumWidth }]}>
                 <View style={[styles.podiumSideSlot, styles.podiumSideSlotLeft]}>
                   <PodiumBar
                     rank={rankTwoDisplayRank}
@@ -327,6 +338,7 @@ const StatisticsScreen: React.FC = () => {
                     imageUrl={rankTwo?.name ? artistImages[rankTwo.name] : ''}
                     highlight={rankTwoDisplayRank === 1}
                     delay={120}
+                    slotWidth={podiumSlotWidth}
                   />
                 </View>
                 <View style={styles.podiumCenterSlot}>
@@ -337,6 +349,7 @@ const StatisticsScreen: React.FC = () => {
                     imageUrl={rankOne?.name ? artistImages[rankOne.name] : ''}
                     highlight
                     delay={0}
+                    slotWidth={podiumSlotWidth}
                   />
                 </View>
                 <View style={[styles.podiumSideSlot, styles.podiumSideSlotRight]}>
@@ -347,11 +360,12 @@ const StatisticsScreen: React.FC = () => {
                     imageUrl={rankThree?.name ? artistImages[rankThree.name] : ''}
                     highlight={rankThreeDisplayRank === 1}
                     delay={220}
+                    slotWidth={podiumSlotWidth}
                   />
                 </View>
               </View>
 
-              <Text style={styles.allArtistsTitle}>all artists</Text>
+              <Text style={styles.allArtistsTitle}>{t('statistics.allArtists')}</Text>
               <View style={styles.artistList}>
                 {allArtists.map((artist, index) => (
                   <Animated.View
@@ -372,7 +386,7 @@ const StatisticsScreen: React.FC = () => {
       )}
 
       {activeTab === 'history' && (
-        <View style={styles.historyLayout}>
+        <View style={[styles.historyLayout, { paddingBottom: historyBottomPadding }]}> 
           <View style={styles.chartArea}>
             <Animated.View style={[styles.activityChartWrapper, chartAnimatedStyle]}>
               <BarChart
@@ -406,10 +420,18 @@ const StatisticsScreen: React.FC = () => {
             </Animated.View>
           </View>
 
-          <View style={styles.detailSheet}>
+          <View
+            style={[
+              styles.detailSheet,
+              {
+                height: detailSheetHeight + insets.bottom,
+                paddingBottom: theme.spacing.xl + insets.bottom,
+              },
+            ]}
+          >
             <View style={styles.detailHeader}>
               <View>
-                <Text style={styles.detailTitle}>詳細</Text>
+                <Text style={styles.detailTitle}>{t('statistics.details.title')}</Text>
                 <Text style={styles.detailSubtitle}>{selectedYear ?? '--'}</Text>
               </View>
             </View>
@@ -436,20 +458,20 @@ const StatisticsScreen: React.FC = () => {
                     </SvgText>
                   </Svg>
                 </View>
-                <Text style={styles.detailMainLabel}>Lives</Text>
+                <Text style={styles.detailMainLabel}>{t('statistics.details.lives')}</Text>
               </View>
               <View style={styles.detailSideColumn}>
                 <View style={styles.detailSideItem}>
                   <Text style={styles.detailSideValue}>
-                    {selectedYearData?.activeDays ?? 0} <Text style={styles.detailSideUnit}>Days</Text>
+                    {selectedYearData?.activeDays ?? 0} <Text style={styles.detailSideUnit}>{t('statistics.details.days')}</Text>
                   </Text>
-                  <Text style={styles.detailSideLabel}>Day Active</Text>
+                  <Text style={styles.detailSideLabel}>{t('statistics.details.dayActive')}</Text>
                 </View>
                 <View style={styles.detailSideItem}>
                   <Text style={styles.detailSideValueEmphasis}>
                     {selectedYearData?.topArtist ?? '--'}
                   </Text>
-                  <Text style={styles.detailSideLabel}>Top</Text>
+                  <Text style={styles.detailSideLabel}>{t('statistics.details.top')}</Text>
                 </View>
               </View>
             </View>
@@ -467,6 +489,7 @@ interface PodiumCardProps {
   imageUrl?: string;
   highlight?: boolean;
   delay?: number;
+  slotWidth: number;
 }
 
 const PodiumBar: React.FC<PodiumCardProps> = ({
@@ -476,6 +499,7 @@ const PodiumBar: React.FC<PodiumCardProps> = ({
   imageUrl,
   highlight,
   delay = 0,
+  slotWidth,
 }) => {
   const rankColor = RANK_COLORS[rank];
   const isEmpty = !artist;
@@ -509,7 +533,13 @@ const PodiumBar: React.FC<PodiumCardProps> = ({
   const contentPaddingTop = imageSize + theme.spacing.md;
 
   return (
-    <View style={[styles.podiumSlot, highlight && styles.podiumSlotHighlight]}>
+    <View
+      style={[
+        styles.podiumSlot,
+        { width: highlight ? slotWidth + theme.spacing.xs : slotWidth },
+        highlight && styles.podiumSlotHighlight,
+      ]}
+    >
       <Text style={styles.podiumArtistLabel} numberOfLines={2}>
         {isEmpty ? '---' : artist}
       </Text>
@@ -716,16 +746,11 @@ const ArtistListItem: React.FC<ArtistListItemProps> = ({ name, count, imageUrl }
   );
 };
 
-const screenWidth = Dimensions.get('window').width;
-const screenHeight = Dimensions.get('window').height;
-const podiumWidth = Math.min(360, screenWidth - theme.spacing.xxl * 2);
-const DETAIL_SHEET_HEIGHT = Math.round(screenHeight * 0.45);
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.colors.background.primary,
-    paddingTop: 65,
+    paddingTop: 0,
   },
   backgroundImage: {
     position: 'absolute',
@@ -800,7 +825,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: theme.spacing.xxl,
-    paddingBottom: 140,
+    paddingBottom: 0,
     gap: theme.spacing.xxl,
   },
   legendsSection: {
@@ -808,7 +833,7 @@ const styles = StyleSheet.create({
   },
   historyLayout: {
     flex: 1,
-    paddingBottom: DETAIL_SHEET_HEIGHT,
+    paddingBottom: 0,
   },
   chartArea: {
     flex: 1,
@@ -824,7 +849,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    height: DETAIL_SHEET_HEIGHT,
+    height: 0,
     backgroundColor: '#1b1b1b',
     borderTopLeftRadius: 40,
     borderTopRightRadius: 40,
@@ -1042,7 +1067,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     gap: PODIUM_GAP,
     paddingHorizontal: theme.spacing.sm,
-    width: podiumWidth,
+    width: '100%',
     alignSelf: 'center',
     position: 'relative',
   },
@@ -1060,12 +1085,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   podiumSlot: {
-    width: (podiumWidth - PODIUM_GAP * 2) / 3,
     alignItems: 'center',
     justifyContent: 'flex-end',
   },
   podiumSlotHighlight: {
-    width: (podiumWidth - PODIUM_GAP * 2) / 3 + theme.spacing.xs,
+    opacity: 1,
   },
   podiumPill: {
     width: '100%',

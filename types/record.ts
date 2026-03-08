@@ -1,10 +1,12 @@
 export interface ChekiRecord {
   id: string;          // uuid
   user_id?: string;     // ローカル識別用（任意）
-  artist: string;
+  artists?: string[];
+  artist?: string;
+  artistImageUrls?: string[];
   artistImageUrl?: string; // アーティストの画像URL（Apple Music等から取得）
   liveName: string;    // DBカラム: live_name
-  liveType?: string;   // ライブ種別（ワンマン/対バン/フェス/FC限定）
+  liveType?: string;   // ライブ種別キー（one-man/two-man/festival/fc-only）
   date: string;        // DBカラム: event_date (YYYY-MM-DD)
   venue?: string;
   seat?: string;

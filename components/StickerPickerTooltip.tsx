@@ -9,13 +9,13 @@ import {
   Dimensions,
   Pressable,
 } from 'react-native';
+import { getAppWidth } from '../utils/layout';
 
 export interface Sticker {
   id: string;
   emoji: string;
   label?: string;
 }
-
 interface StickerPickerTooltipProps {
   visible: boolean;
   onClose: () => void;
@@ -113,7 +113,7 @@ const styles = StyleSheet.create({
   },
   tooltipWrapper: {
     alignItems: 'center',
-    maxWidth: Dimensions.get('window').width - 32,
+    maxWidth: Math.min(Dimensions.get('window').width, getAppWidth()) - 32,
   },
   tooltipBody: {
     backgroundColor: '#FFFFFF',

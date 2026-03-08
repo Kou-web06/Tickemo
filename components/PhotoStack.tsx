@@ -5,7 +5,6 @@ import {
   TouchableOpacity,
   TouchableWithoutFeedback,
   StyleSheet,
-  Dimensions,
   Animated as RNAnimated,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -19,6 +18,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { useResolvedImageUris } from '../hooks/useResolvedImageUri';
+import { getAppWidth } from '../utils/layout';
 
 interface PhotoStackProps {
   photos: string[];
@@ -39,7 +39,7 @@ interface GridPhotoItemProps {
   gridStartY: number;
 }
 
-const SCREEN_WIDTH = Dimensions.get('window').width;
+const SCREEN_WIDTH = getAppWidth();
 const STACK_TOP = 160;
 const STACK_RIGHT = -10;
 const PHOTO_SIZE = 85;

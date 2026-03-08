@@ -11,6 +11,7 @@ import * as MediaLibrary from 'expo-media-library';
 import { resolveLocalImageUri } from '../lib/imageUpload';
 import EditableTicketPreview, { StickerType } from './EditableTicketPreviewCard';
 import { useAppStore } from '../store/useAppStore';
+import { useTranslation } from 'react-i18next';
 
 interface ShareImageGeneratorProps {
   record: ChekiRecord;
@@ -77,6 +78,7 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({
   onClose,
   onBeforeOpenPaywall,
 }) => {
+  const { t } = useTranslation();
   const navigation = useNavigation<any>();
   const isPremium = useAppStore((state) => state.isPremium);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -262,7 +264,7 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({
 
   const captureImage = async (includeBlurBackground: boolean = false): Promise<string | null> => {
     if (!viewRef.current) {
-      Alert.alert('エラー', 'プレビューの準備ができていません');
+      Alert.alert(t('shareImageGenerator.alerts.error'), t('shareImageGenerator.alerts.previewNotReady'));
       return null;
     }
 
@@ -275,7 +277,7 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({
       });
       return uri;
     } catch (error) {
-      Alert.alert('エラー', '画像の生成に失敗しました');
+      Alert.alert(t('shareImageGenerator.alerts.error'), t('shareImageGenerator.alerts.imageGenerateFailed'));
       return null;
     }
   };
@@ -286,12 +288,12 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({
       // QRコードのリンクをクリップボードにコピー
       if (record.qrCode) {
         Clipboard.setString(record.qrCode);
-        Alert.alert('完了', 'リンクをコピーしました');
+        Alert.alert(t('shareImageGenerator.alerts.done'), t('shareImageGenerator.alerts.copiedImageLink'));
       } else {
-        Alert.alert('エラー', 'QRコードが設定されていません');
+        Alert.alert(t('shareImageGenerator.alerts.error'), t('shareImageGenerator.alerts.qrCodeNotSet'));
       }
     } catch (error) {
-      Alert.alert('エラー', 'コピーに失敗しました');
+      Alert.alert(t('shareImageGenerator.alerts.error'), t('shareImageGenerator.alerts.copyFailed'));
     } finally {
       setIsGenerating(false);
     }
@@ -304,15 +306,15 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({
       try {
         const { status } = await MediaLibrary.requestPermissionsAsync();
         if (status !== 'granted') {
-          Alert.alert('エラー', 'ライブラリへのアクセス許可が必要です');
+          Alert.alert(t('shareImageGenerator.alerts.error'), t('shareImageGenerator.alerts.mediaPermissionRequired'));
           setIsGenerating(false);
           return;
         }
         await MediaLibrary.saveToLibraryAsync(uri);
-        Alert.alert('完了', '画像をカメラロールに保存しました');
+        Alert.alert(t('shareImageGenerator.alerts.done'), t('shareImageGenerator.alerts.savedToCameraRoll'));
         onClose();
       } catch (error) {
-        Alert.alert('エラー', '保存に失敗しました');
+        Alert.alert(t('shareImageGenerator.alerts.error'), t('shareImageGenerator.alerts.saveFailed'));
       }
     }
     setIsGenerating(false);
@@ -324,7 +326,7 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({
 
     const { status } = await MediaLibrary.requestPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('エラー', 'ライブラリへのアクセス許可が必要です');
+      Alert.alert(t('shareImageGenerator.alerts.error'), t('shareImageGenerator.alerts.mediaPermissionRequired'));
       return null;
     }
 
@@ -354,7 +356,7 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({
         onClose();
       }
     } catch (error) {
-      Alert.alert('エラー', '共有に失敗しました');
+      Alert.alert(t('shareImageGenerator.alerts.error'), t('shareImageGenerator.alerts.shareFailed'));
     } finally {
       setCaptureBlurBackground(false);
       setIsGenerating(false);
@@ -407,7 +409,7 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({
           <View style={styles.content}>
             {/* ヘッダー */}
             <View style={styles.header}>
-              <Text style={styles.headerTitle}>プレビュー</Text>
+              <Text style={styles.headerTitle}>{t('shareImageGenerator.preview')}</Text>
             </View>
 
             <EditableTicketPreview
@@ -525,7 +527,7 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({
                         strokeLinejoin="round"
                       />
                     </Svg>
-                    <Text style={styles.dynamicItemLabel}>ステッカー</Text>
+                    <Text style={styles.dynamicItemLabel}>{t('shareImageGenerator.dynamic.sticker')}</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity style={styles.dynamicItem} activeOpacity={0.8} onPress={handleToggleParticipatedStamp} disabled={!isPremium}>
@@ -545,12 +547,12 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({
                         strokeLinejoin="round"
                       />
                     </Svg>
-                    <Text style={styles.dynamicItemLabel}>参戦済み</Text>
+                    <Text style={styles.dynamicItemLabel}>{t('shareImageGenerator.dynamic.participated')}</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity style={styles.dynamicItem} activeOpacity={0.8} onPress={handleResetOperations} disabled={!isPremium}>
                     <MaterialCommunityIcons name="backup-restore" size={DYNAMIC_ICON_SIZE} color="#222" />
-                    <Text style={styles.dynamicItemLabel}>リセット</Text>
+                    <Text style={styles.dynamicItemLabel}>{t('shareImageGenerator.dynamic.reset')}</Text>
                   </TouchableOpacity>
                 </View>
 
@@ -559,7 +561,7 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({
                     <BlurView intensity={12} tint="light" style={StyleSheet.absoluteFillObject} />
                     <View style={styles.lockBadge}>
                       <Ionicons name="lock-closed" size={14} color="#111111" />
-                      <Text style={styles.lockBadgeText}>Plusで解放</Text>
+                      <Text style={styles.lockBadgeText}>{t('shareImageGenerator.dynamic.unlockWithPlus')}</Text>
                     </View>
                   </TouchableOpacity>
                 )}
@@ -582,7 +584,7 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({
                   <Feather name="download" size={24} color="#333" />
                 )}
               </View>
-              <Text style={styles.actionButtonLabel}>画像を保存</Text>
+              <Text style={styles.actionButtonLabel}>{t('shareImageGenerator.actions.saveImage')}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -593,7 +595,7 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({
               <View style={styles.actionButtonCircle}>
                 <AntDesign name="link" size={24} color="#333" />
               </View>
-              <Text style={styles.actionButtonLabel}>リンクをコピー</Text>
+              <Text style={styles.actionButtonLabel}>{t('shareImageGenerator.actions.copyLink')}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -608,7 +610,7 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({
                   <Image source={require('../assets/x.logo.white.png')} style={{ width: 18, height: 18 }} />
                 )}
               </View>
-              <Text style={styles.actionButtonLabel}>X (Twitter)</Text>
+              <Text style={styles.actionButtonLabel}>{t('shareImageGenerator.actions.shareX')}</Text>
             </TouchableOpacity>
 
           </View>

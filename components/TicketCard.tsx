@@ -6,6 +6,7 @@ import QRCode from 'react-native-qrcode-svg';
 import TextTicker from 'react-native-text-ticker';
 import { ChekiRecord } from '../contexts/RecordsContext';
 import { NO_IMAGE_URI, useResolvedImageUri } from '../hooks/useResolvedImageUri';
+import { buildTicketArtistDisplay } from '../utils/artistDisplay';
 
 interface TicketCardProps {
   record: ChekiRecord;
@@ -22,6 +23,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({ record, width, isAnimati
   const liveName = record.liveName || '-';
   const isLongName = liveName.length >= 8;
   const coverUri = useResolvedImageUri(record.imageUrls?.[0], record.imageAssetIds?.[0]);
+  const artistDisplay = buildTicketArtistDisplay(record.artists, record.artist);
 
   const backgroundSlideAnim = useRef(new Animated.Value(0)).current;
   const jacketSlideAnim = useRef(new Animated.Value(0)).current;
@@ -193,8 +195,13 @@ export const TicketCard: React.FC<TicketCardProps> = ({ record, width, isAnimati
               {liveName}
             </Text>
           )}
-          <Text style={styles.subtitle} numberOfLines={1}>
-            {record.artist || '-'}
+          <Text
+            style={styles.subtitle}
+            numberOfLines={1}
+            adjustsFontSizeToFit={true}
+          >
+            {artistDisplay.mainText}
+            {artistDisplay.showAndMore && <Text style={styles.andMoreText}> and more...</Text>}
           </Text>
           <View style={styles.details}>
             <View style={styles.detailColumn}>
@@ -204,9 +211,24 @@ export const TicketCard: React.FC<TicketCardProps> = ({ record, width, isAnimati
               </View>
               <View style={{ flexDirection: 'row' }}>
                 <Text style={styles.detailLabel}>VENUE</Text>
-                <Text style={styles.detailValue}>
-                  {record.venue || '-'}
-                </Text>
+                {(record.venue || '-').length >= 8 ? (
+                  <View style={styles.venueTickerContainer}>
+                    <TextTicker
+                      style={styles.detailValue}
+                      duration={(record.venue || '-').length * 250}
+                      loop
+                      bounce={false}
+                      repeatSpacer={40}
+                      marqueeDelay={1000}
+                    >
+                      {record.venue || '-'}
+                    </TextTicker>
+                  </View>
+                ) : (
+                  <Text style={styles.detailValue}>
+                    {record.venue || '-'}
+                  </Text>
+                )}
               </View>
               <View style={{ flexDirection: 'row' }}>
                 <Text style={styles.detailLabel}>SEAT</Text>
@@ -281,7 +303,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     left: 25,
-    width: 180,
+    width: 164,
     height: 20,
   },
   title: {
@@ -302,10 +324,16 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 23,
     left: 23,
+    width: 164,
     fontSize: 12,
     fontWeight: '600',
     color: '#666',
     marginBottom: 8,
+  },
+  andMoreText: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: '#777',
   },
   details: {
     gap: 2,
@@ -328,5 +356,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#000',
     fontWeight: '500',
+  },
+  venueTickerContainer: {
+    width: 106,
+    height: 18,
+    justifyContent: 'center',
   },
 });

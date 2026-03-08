@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, ReactNode, useMemo } from 'react';
 import type { ChekiRecord } from '../types/record';
 import { scheduleLiveReminders } from '../utils/liveNotifications';
+import { trackTicketSaveForReview } from '../utils/appReview';
 import { useAppStore } from '../store/useAppStore';
 import { deleteLiveImages, migrateLegacyImagesToTickemo, resolveLocalImageUri } from '../lib/imageUpload';
 import { useCloudSync } from '../hooks/useCloudSync';
@@ -28,6 +29,33 @@ const normalizeDateFormat = (record: ChekiRecord): ChekiRecord => {
   return {
     ...record,
     date: normalized,
+  };
+};
+
+const normalizeArtists = (record: ChekiRecord): ChekiRecord => {
+  const sourceArtists = record.artists && record.artists.length > 0
+    ? record.artists
+    : [record.artist ?? ''];
+  const sourceArtistImageUrls = record.artistImageUrls && record.artistImageUrls.length > 0
+    ? record.artistImageUrls
+    : [record.artistImageUrl ?? ''];
+
+  const normalizedEntries = sourceArtists
+    .map((artist, index) => ({
+      artist: artist.trim(),
+      artistImageUrl: (sourceArtistImageUrls[index] ?? '').trim(),
+    }))
+    .filter((entry) => entry.artist !== '');
+
+  const artists = normalizedEntries.map((entry) => entry.artist);
+  const artistImageUrls = normalizedEntries.map((entry) => entry.artistImageUrl);
+
+  return {
+    ...record,
+    artists,
+    artistImageUrls,
+    artist: artists[0] ?? '',
+    artistImageUrl: artistImageUrls[0] ?? '',
   };
 };
 
@@ -61,7 +89,7 @@ export const RecordsProvider: React.FC<{ children: ReactNode }> = ({ children })
   const { isSyncing } = useCloudSync();
 
   const records = useMemo(
-    () => lives.map((record) => resolveRecordImages(normalizeDateFormat(record))),
+    () => lives.map((record) => resolveRecordImages(normalizeArtists(normalizeDateFormat(record)))),
     [lives]
   );
   const isLoading = isSyncing;
@@ -84,11 +112,13 @@ export const RecordsProvider: React.FC<{ children: ReactNode }> = ({ children })
   }, [records]);
 
   const addRecord = async (record: ChekiRecord) => {
-    addLive(normalizeDateFormat(record));
+    addLive(normalizeArtists(normalizeDateFormat(record)));
+    void trackTicketSaveForReview();
   };
 
   const updateRecord = async (id: string, updatedRecord: ChekiRecord) => {
-    updateLive(id, normalizeDateFormat(updatedRecord));
+    updateLive(id, normalizeArtists(normalizeDateFormat(updatedRecord)));
+    void trackTicketSaveForReview();
   };
 
   const deleteRecord = async (id: string) => {

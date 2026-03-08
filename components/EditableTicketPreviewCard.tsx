@@ -186,6 +186,13 @@ const EditableTicketPreview: React.FC<EditableTicketPreviewProps> = ({
     () => (contentPrimaryColor === '#111111' ? 'rgba(17,17,17,0.46)' : 'rgba(255,255,255,0.66)'),
     [contentPrimaryColor]
   );
+  const fullArtistText = useMemo(() => {
+    const artists = (record.artists && record.artists.length > 0 ? record.artists : [record.artist || ''])
+      .map((artist) => artist.trim())
+      .filter((artist) => artist.length > 0);
+    if (artists.length === 0) return '-';
+    return artists.join(' / ');
+  }, [record.artists, record.artist]);
 
   const ticketWidth = outputWidth;
   const ticketHeight = outputHeight;
@@ -617,14 +624,18 @@ const EditableTicketPreview: React.FC<EditableTicketPreviewProps> = ({
                     style={{
                       position: 'absolute',
                       left: ticketWidth * 0.1 + imageSize + ticketWidth * 0.08,
+                      right: ticketWidth * 0.13,
                       top: (record.liveName || '-').length <= 8 ? ticketHeight * 0.42 : ticketHeight * 0.455,
                       fontSize: ticketHeight * 0.03,
+                      lineHeight: ticketHeight * 0.034,
                       fontWeight: '800',
                       color: contentMutedColor,
                     }}
-                    numberOfLines={1}
+                    numberOfLines={2}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.75}
                   >
-                    {record.artist || '-'}
+                    {fullArtistText}
                   </Text>
 
                   <View

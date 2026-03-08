@@ -3,15 +3,16 @@ import {
   Alert,
   Animated,
   DeviceEventEmitter,
-  Dimensions,
   Easing,
   PanResponder,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image as ExpoImage } from 'expo-image';
@@ -19,12 +20,11 @@ import * as WebBrowser from 'expo-web-browser';
 import Purchases, { type PurchasesPackage } from 'react-native-purchases';
 import { getPremiumStatusFromCustomerInfo } from '../lib/revenuecat';
 import { useAppStore } from '../store/useAppStore';
+import { useTranslation } from 'react-i18next';
 
 interface PaywallScreenProps {
   navigation: any;
 }
-
-type PlanKey = 'monthly' | 'annual' | 'lifetime';
 
 const BASE_BG = '#141414';
 const CARD_BG = '#1A1A1A';
@@ -32,56 +32,74 @@ const TEXT_MAIN = '#FFFFFF';
 const TEXT_SUB = '#C6C6C6';
 const GRADIENT_COLORS = ['#93EF84', '#8C7AF1'] as const;
 const DRAG_HANDLE_HEIGHT = 28;
-
-const DEFAULT_PRICES: Record<PlanKey, string> = {
-  monthly: '￥250',
-  annual: '￥2,000',
-  lifetime: '￥3,800',
-};
-
-const FEATURES = [
-  '無制限のチケット登録',
-  '広告なしでストレスフリー',
-  'シェアチケットの追加編集',
-  '今後の新機能もすべて解放',
-];
+const IPAD_MAX_SHEET_HEIGHT = 980;
+const DEFAULT_LIFETIME_PRICE_VALUE = 480;
 
 export default function PaywallScreen({ navigation }: PaywallScreenProps) {
+  const { t, i18n } = useTranslation();
   const setRevenueCatState = useAppStore((state) => state.setRevenueCatState);
-  const { height: screenHeight, width: screenWidth } = Dimensions.get('window');
-  const sheetHeight = useMemo(() => Math.round(screenHeight * 0.93), [screenHeight]);
+  const insets = useSafeAreaInsets();
+  const { height: screenHeight, width: screenWidth } = useWindowDimensions();
+  const isIpad = Platform.OS === 'ios' && Platform.isPad;
+  const sheetWidth = useMemo(() => {
+    if (!isIpad) return screenWidth;
+    return Math.min(screenWidth * 0.82, 700);
+  }, [isIpad, screenWidth]);
+  const sheetHeight = useMemo(() => {
+    const sheetRatio = isIpad ? 0.94 : 0.93;
+    const calculatedHeight = Math.round(screenHeight * sheetRatio);
+    return isIpad ? Math.min(calculatedHeight, IPAD_MAX_SHEET_HEIGHT) : calculatedHeight;
+  }, [isIpad, screenHeight]);
+  const dragHandleHeight = Math.max(24, Math.min(34, sheetHeight * 0.036));
+  const heroHeight = Math.max(260, Math.min(380, sheetHeight * 0.38));
+  const contentOverlap = Math.round(heroHeight * 0.49);
+  const contentHorizontalPadding = Math.max(18, Math.min(32, sheetWidth * 0.055));
+  const logoWidth = Math.max(190, Math.min(270, sheetWidth * 0.46));
+  const logoHeight = Math.max(52, Math.min(74, logoWidth * 0.28));
+  const unlockFontSize = Math.max(15, Math.min(20, sheetWidth * 0.03));
+  const featureTextSize = Math.max(13, Math.min(16, sheetWidth * 0.024));
+  const planTitleSize = Math.max(13, Math.min(16, sheetWidth * 0.024));
+  const planPriceSize = Math.max(18, Math.min(22, sheetWidth * 0.033));
+  const planDescriptionSize = Math.max(10, Math.min(12, sheetWidth * 0.018));
+  const planCardMinHeight = Math.max(94, Math.min(120, sheetHeight * 0.13));
+  const ctaMinHeight = Math.max(54, Math.min(66, sheetHeight * 0.075));
+  const ctaFontSize = Math.max(17, Math.min(21, sheetWidth * 0.032));
+  const footerMarginTop = isIpad
+    ? Math.max(6, Math.min(12, sheetHeight * 0.012))
+    : Math.max(14, Math.min(24, sheetHeight * 0.022));
+  const contentBottomPadding = Math.max(16, insets.bottom + 8);
 
-  const [selectedPlan, setSelectedPlan] = useState<PlanKey>('annual');
-  const priceMap = DEFAULT_PRICES;
-  const [packagesMap, setPackagesMap] = useState<Partial<Record<PlanKey, PurchasesPackage>>>({});
+  const [lifetimePackage, setLifetimePackage] = useState<PurchasesPackage | null>(null);
+  const [isPurchasing, setIsPurchasing] = useState(false);
+  const languageCode = useMemo(() => (i18n.resolvedLanguage || i18n.language || 'ja').split('-')[0], [i18n.language, i18n.resolvedLanguage]);
+  const formatFallbackPrice = useCallback(
+    (value: number) => {
+      if (languageCode === 'en') {
+        return `$${value.toLocaleString('en-US')}`;
+      }
+      return `￥${value.toLocaleString('ja-JP')}`;
+    },
+    [languageCode]
+  );
+  const lifetimeFallbackPrice = useMemo(
+    () => formatFallbackPrice(DEFAULT_LIFETIME_PRICE_VALUE),
+    [formatFallbackPrice]
+  );
+  const features = useMemo(() => t('paywall.featureList', { returnObjects: true }) as string[], [t]);
 
   const sheetTranslateY = useRef(new Animated.Value(sheetHeight)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
-  const badgeScale = useRef(new Animated.Value(1)).current;
-  const badgeTranslateY = useRef(new Animated.Value(0)).current;
-  const badgeOpacity = useRef(new Animated.Value(1)).current;
   const ctaShimmerProgress = useRef(new Animated.Value(0)).current;
-  const borderRotation = useRef(new Animated.Value(0)).current;
-  const borderLoopRef = useRef<Animated.CompositeAnimation | null>(null);
   const ctaShimmerLoopRef = useRef<Animated.CompositeAnimation | null>(null);
   const isClosingRef = useRef(false);
-
-  const borderRotate = useMemo(
-    () =>
-      borderRotation.interpolate({
-        inputRange: [0, 1],
-        outputRange: ['0deg', '360deg'],
-      }),
-    [borderRotation]
-  );
 
   const ctaShimmerTranslateX = useMemo(
     () =>
       ctaShimmerProgress.interpolate({
         inputRange: [0, 1],
-        outputRange: [-screenWidth, screenWidth],
+        outputRange: [-sheetWidth, sheetWidth],
       }),
-    [ctaShimmerProgress, screenWidth]
+    [ctaShimmerProgress, sheetWidth]
   );
 
   const closeSheet = useCallback(() => {
@@ -131,27 +149,6 @@ export default function PaywallScreen({ navigation }: PaywallScreenProps) {
   }, []);
 
   useEffect(() => {
-    borderLoopRef.current?.stop();
-    borderRotation.setValue(0);
-
-    const loop = Animated.loop(
-      Animated.timing(borderRotation, {
-        toValue: 1,
-        duration: 3000,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      })
-    );
-
-    borderLoopRef.current = loop;
-    loop.start();
-
-    return () => {
-      borderLoopRef.current?.stop();
-    };
-  }, [borderRotation, selectedPlan]);
-
-  useEffect(() => {
     ctaShimmerLoopRef.current?.stop();
     ctaShimmerProgress.setValue(0);
 
@@ -181,32 +178,6 @@ export default function PaywallScreen({ navigation }: PaywallScreenProps) {
   }, [ctaShimmerProgress]);
 
   useEffect(() => {
-    badgeScale.setValue(0);
-    badgeTranslateY.setValue(10);
-    badgeOpacity.setValue(0);
-
-    Animated.parallel([
-      Animated.spring(badgeScale, {
-        toValue: 1,
-        friction: 6,
-        tension: 120,
-        useNativeDriver: true,
-      }),
-      Animated.spring(badgeTranslateY, {
-        toValue: 0,
-        friction: 7,
-        tension: 110,
-        useNativeDriver: true,
-      }),
-      Animated.timing(badgeOpacity, {
-        toValue: 1,
-        duration: 160,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [badgeOpacity, badgeScale, badgeTranslateY]);
-
-  useEffect(() => {
     let isMounted = true;
 
     const loadOfferings = async () => {
@@ -214,34 +185,28 @@ export default function PaywallScreen({ navigation }: PaywallScreenProps) {
         const offerings = await Purchases.getOfferings();
         const availablePackages = offerings.current?.availablePackages ?? [];
 
-        const nextPackageMap: Partial<Record<PlanKey, PurchasesPackage>> = {};
+        const resolvedLifetimePackage =
+          availablePackages.find((pkg) => {
+            const packageType = String(pkg.packageType ?? '').toUpperCase();
+            const identifier = String(pkg.identifier ?? '').toLowerCase();
+            const productId = String(pkg.product?.identifier ?? '').toLowerCase();
+            const joined = `${identifier} ${productId}`;
 
-        availablePackages.forEach((pkg) => {
-          const packageType = String(pkg.packageType ?? '').toUpperCase();
-          const identifier = String(pkg.identifier ?? '').toLowerCase();
-          const productId = String(pkg.product?.identifier ?? '').toLowerCase();
-          const joined = `${identifier} ${productId}`;
-
-          if (packageType === 'MONTHLY' || joined.includes('month')) {
-            nextPackageMap.monthly = pkg;
-            return;
-          }
-
-          if (packageType === 'ANNUAL' || packageType === 'YEARLY' || joined.includes('year')) {
-            nextPackageMap.annual = pkg;
-            return;
-          }
-
-          if (packageType === 'LIFETIME' || joined.includes('life') || joined.includes('one_time')) {
-            nextPackageMap.lifetime = pkg;
-          }
-        });
+            return (
+              packageType === 'LIFETIME' ||
+              joined.includes('lifetime') ||
+              joined.includes('permanent') ||
+              joined.includes('buyout') ||
+              joined.includes('one_time') ||
+              joined.includes('onetime')
+            );
+          }) ?? null;
 
         if (!isMounted) {
           return;
         }
 
-        setPackagesMap(nextPackageMap);
+        setLifetimePackage(resolvedLifetimePackage);
       } catch (error) {
         console.warn('[Paywall] Failed to load offerings:', error);
       }
@@ -302,7 +267,7 @@ export default function PaywallScreen({ navigation }: PaywallScreenProps) {
       });
 
       if (isPremium) {
-        Alert.alert('購入を復元しました', '', [
+        Alert.alert(t('paywall.alerts.restoreSuccess'), '', [
           {
             text: 'OK',
             onPress: closeSheet,
@@ -311,7 +276,7 @@ export default function PaywallScreen({ navigation }: PaywallScreenProps) {
         return;
       }
 
-      Alert.alert('購入の復元に失敗しました', '', [
+      Alert.alert(t('paywall.alerts.restoreFailed'), '', [
         {
           text: 'OK',
           onPress: closeSheet,
@@ -320,7 +285,7 @@ export default function PaywallScreen({ navigation }: PaywallScreenProps) {
     } catch (error) {
       console.warn('[Paywall] Restore failed:', error);
 
-      Alert.alert('購入の復元に失敗しました', '', [
+      Alert.alert(t('paywall.alerts.restoreFailed'), '', [
         {
           text: 'OK',
           onPress: closeSheet,
@@ -339,103 +304,119 @@ export default function PaywallScreen({ navigation }: PaywallScreenProps) {
     }
   }, []);
 
-  const handleSubscribe = useCallback(async () => {
-    const selectedPackage = packagesMap[selectedPlan];
-    if (!selectedPackage) {
+  const applyCustomerInfoToStore = useCallback((customerInfo: Awaited<ReturnType<typeof Purchases.getCustomerInfo>>) => {
+    const status = getPremiumStatusFromCustomerInfo(customerInfo);
+    setRevenueCatState({
+      isPremium: status.isPremium,
+      membershipType: status.membershipType,
+      activeEntitlementIds: status.activeEntitlementIds,
+      revenueCatInitialized: true,
+    });
+    return status;
+  }, [setRevenueCatState]);
+
+  const sleep = useCallback((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)), []);
+
+  const waitForPremiumGrant = useCallback(async (attempts = 8, intervalMs = 900) => {
+    for (let i = 0; i < attempts; i += 1) {
+      const customerInfo = await Purchases.getCustomerInfo();
+      const status = applyCustomerInfoToStore(customerInfo);
+      if (status.isPremium) {
+        return true;
+      }
+      await sleep(intervalMs);
+    }
+    return false;
+  }, [applyCustomerInfoToStore, sleep]);
+
+  const handlePurchase = useCallback(async () => {
+    if (isPurchasing) {
       return;
     }
 
+    if (!lifetimePackage) {
+      Alert.alert(t('paywall.alerts.purchaseUnavailable'));
+      return;
+    }
+
+    setIsPurchasing(true);
+
     try {
-      await Purchases.purchasePackage(selectedPackage);
+      await Purchases.purchasePackage(lifetimePackage);
       const customerInfo = await Purchases.getCustomerInfo();
-      const { isPremium, membershipType, activeEntitlementIds } = getPremiumStatusFromCustomerInfo(customerInfo);
-      setRevenueCatState({
-        isPremium,
-        membershipType,
-        activeEntitlementIds,
-        revenueCatInitialized: true,
-      });
+      const status = applyCustomerInfoToStore(customerInfo);
+      if (!status.isPremium) {
+        const recovered = await waitForPremiumGrant();
+        if (!recovered) {
+          Alert.alert(t('paywall.alerts.purchasePendingTitle'), t('paywall.alerts.purchasePendingMessage'));
+          return;
+        }
+      }
       closeSheet();
     } catch (error: any) {
       if (error?.userCancelled) {
         return;
       }
-      console.warn('[Paywall] Purchase failed:', error);
-    }
-  }, [closeSheet, packagesMap, selectedPlan, setRevenueCatState]);
 
-  const renderPlanCard = (
-    key: PlanKey,
-    title: string,
-    price: string,
-    description: string,
-    showBadge?: boolean,
-    badgeText?: string
-  ) => {
-    const isSelected = selectedPlan === key;
-    const cardContent = (
-      <View style={styles.planCardSurface}>
-        <Text style={styles.planTitle}>{title}</Text>
-        <Text style={styles.planPrice}>{price}</Text>
-        <Text style={styles.planDescription}>{description}</Text>
-      </View>
-    );
+      const backendCode = Number(error?.userInfo?.rc_backend_error_code ?? -1);
+      const readableErrorCode = String(error?.userInfo?.readable_error_code ?? '').toUpperCase();
+      const isInvalidReceipt = backendCode === 7712 || readableErrorCode === 'INVALID_RECEIPT';
 
-    return (
-      <TouchableOpacity key={key} activeOpacity={0.9} style={styles.planCardWrap} onPress={() => setSelectedPlan(key)}>
-        {showBadge ? (
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              styles.badgeContainer,
+      if (isInvalidReceipt) {
+        try {
+          await Purchases.syncPurchases();
+          const recovered = await waitForPremiumGrant();
+
+          if (recovered) {
+            Alert.alert(t('paywall.alerts.purchaseRecovered'), '', [
               {
-                opacity: badgeOpacity,
-                transform: [{ scale: badgeScale }, { translateY: badgeTranslateY }],
+                text: 'OK',
+                onPress: closeSheet,
               },
-            ]}
-          >
-            <LinearGradient colors={GRADIENT_COLORS} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={styles.badge}>
-              <Text style={styles.badgeText}>{badgeText ?? '33% OFF'}</Text>
-            </LinearGradient>
-          </Animated.View>
-        ) : null}
+            ], { cancelable: false });
+            return;
+          }
 
-        {isSelected ? (
-          <View style={styles.planCardFrame}>
-            <Animated.View
-              pointerEvents="none"
-              style={[styles.planCardAnimatedBorder, { transform: [{ rotate: borderRotate }] }]}
-            >
-              <LinearGradient
-                colors={GRADIENT_COLORS}
-                start={{ x: 0, y: 0.5 }}
-                end={{ x: 1, y: 0.5 }}
-                style={styles.planCardAnimatedGradient}
-              />
-            </Animated.View>
-            {cardContent}
-          </View>
-        ) : (
-          <View style={[styles.planCardFrame, styles.planCardFrameInactive]}>{cardContent}</View>
-        )}
-      </TouchableOpacity>
-    );
-  };
+          Alert.alert(t('paywall.alerts.purchasePendingTitle'), t('paywall.alerts.purchasePendingMessage'));
+          return;
+        } catch (syncError) {
+          console.warn('[Paywall] syncPurchases after INVALID_RECEIPT failed:', syncError);
+        }
+      }
+
+      console.warn('[Paywall] Purchase failed:', error);
+      Alert.alert(t('paywall.alerts.purchaseFailed'));
+    } finally {
+      setIsPurchasing(false);
+    }
+  }, [applyCustomerInfoToStore, closeSheet, isPurchasing, lifetimePackage, t, waitForPremiumGrant]);
+
+  const selectedPrice = lifetimePackage?.product?.priceString ?? lifetimeFallbackPrice;
 
   return (
     <View style={styles.modalRoot}>
       <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]} />
 
       <Animated.View
-        style={[styles.sheet, { height: sheetHeight, transform: [{ translateY: sheetTranslateY }] }]}
+        style={[
+          styles.sheet,
+          {
+            width: sheetWidth,
+            height: sheetHeight,
+            transform: [{ translateY: sheetTranslateY }],
+            borderTopLeftRadius: Math.max(24, Math.min(34, sheetWidth * 0.045)),
+            borderTopRightRadius: Math.max(24, Math.min(34, sheetWidth * 0.045)),
+            alignSelf: 'center',
+          },
+        ]}
       >
         <SafeAreaView style={styles.container} edges={['bottom']}>
-          <View style={styles.dragHandleArea} {...panResponder.panHandlers}>
+          <View style={[styles.dragHandleArea, { height: dragHandleHeight }]} {...panResponder.panHandlers}>
             <View style={styles.dragIndicator} />
           </View>
 
           <View style={styles.body}>
-            <View style={styles.heroWrap}>
+            <View style={[styles.heroWrap, { height: heroHeight }]}>
               <ExpoImage
                 source={require('../assets/paywall/paywallBackground.png')}
                 style={styles.heroImage}
@@ -448,38 +429,62 @@ export default function PaywallScreen({ navigation }: PaywallScreenProps) {
               />
             </View>
 
-            <View style={styles.content}>
+            <View
+              style={[
+                styles.content,
+                {
+                  marginTop: -contentOverlap,
+                  paddingHorizontal: contentHorizontalPadding,
+                  paddingBottom: contentBottomPadding,
+                },
+              ]}
+            >
               <ExpoImage
                 source={require('../assets/paywall/Plus.logo.png')}
-                style={styles.logo}
+                style={[styles.logo, { width: logoWidth, height: logoHeight }]}
                 contentFit="contain"
               />
 
-              <Text style={styles.unlockText}>すべての機能をアンロックする</Text>
+              <Text style={[styles.unlockText, { fontSize: unlockFontSize, marginBottom: Math.max(18, Math.min(30, sheetHeight * 0.03)) }]}>{t('paywall.unlockAll')}</Text>
 
-              <View style={styles.featureList}>
-                {FEATURES.map((feature) => (
+              <View style={[styles.featureList, { marginBottom: Math.max(24, Math.min(42, sheetHeight * 0.045)), gap: Math.max(8, Math.min(12, sheetHeight * 0.012)) }]}>
+                {features.map((feature) => (
                   <View style={styles.featureItem} key={feature}>
                     <Ionicons name="checkmark-circle-outline" size={18} color={TEXT_MAIN} />
-                    <Text style={styles.featureText}>{feature}</Text>
+                    <Text style={[styles.featureText, { fontSize: featureTextSize }]}>{feature}</Text>
                   </View>
                 ))}
               </View>
 
-              <Text style={styles.planLabel}>プランを選択</Text>
+              <Text style={styles.planLabel}>{t('paywall.selectPlan')}</Text>
 
-              <View style={styles.planRow}>
-                {renderPlanCard('monthly', '月額プラン', priceMap.monthly, 'お試しに最適')}
-                {renderPlanCard('annual', '年額プラン', priceMap.annual, '1ヶ月あたり166円', true, '33% OFF')}
-                {renderPlanCard('lifetime', '買い切り', priceMap.lifetime, '初期会員限定', true, 'リリース記念価格')}
+              <View style={[styles.planRow, { marginBottom: Math.max(18, Math.min(26, sheetHeight * 0.028)) }]}>
+                <View style={[styles.planCardFrame, { minHeight: planCardMinHeight, borderRadius: Math.max(14, Math.min(18, sheetWidth * 0.03)) }]}>
+                  <LinearGradient
+                    colors={GRADIENT_COLORS}
+                    start={{ x: 0, y: 0.5 }}
+                    end={{ x: 1, y: 0.5 }}
+                    style={styles.planCardBorder}
+                  />
+                  <View style={[styles.planCardSurface, { paddingVertical: Math.max(14, Math.min(20, sheetHeight * 0.022)) }]}>
+                    <Text style={[styles.planTitle, { fontSize: planTitleSize }]}>{t('paywall.plans.lifetimeTitle')}</Text>
+                    <Text style={[styles.planPrice, { fontSize: planPriceSize }]}>{selectedPrice}</Text>
+                    <Text style={[styles.planDescription, { fontSize: planDescriptionSize }]}>{t('paywall.plans.lifetimeDesc')}</Text>
+                  </View>
+                </View>
               </View>
 
-              <TouchableOpacity style={styles.ctaButtonWrap} activeOpacity={0.9} onPress={handleSubscribe}>
+              <TouchableOpacity
+                style={[styles.ctaButtonWrap, isPurchasing && styles.ctaButtonWrapDisabled]}
+                activeOpacity={0.9}
+                onPress={handlePurchase}
+                disabled={isPurchasing}
+              >
                 <LinearGradient
                   colors={GRADIENT_COLORS}
                   start={{ x: 0, y: 0.5 }}
                   end={{ x: 1, y: 0.5 }}
-                  style={styles.ctaButton}
+                  style={[styles.ctaButton, { minHeight: ctaMinHeight }]}
                 >
                   <Animated.View
                     pointerEvents="none"
@@ -490,25 +495,26 @@ export default function PaywallScreen({ navigation }: PaywallScreenProps) {
                       },
                     ]}
                   />
-                  <Text style={styles.ctaText}>Plus を始める</Text>
+                  <Text style={[styles.ctaText, { fontSize: ctaFontSize }]}>
+                    {isPurchasing ? t('paywall.ctaProcessing') : t('paywall.ctaLifetime')}
+                  </Text>
                 </LinearGradient>
               </TouchableOpacity>
 
-              <Text style={styles.noticeText}>サブスクリプションは自動的に更新されます。いつでもキャンセルできます。</Text>
-
-              <View style={styles.footerLinks}>
+              <View style={[styles.footerLinks, { marginTop: footerMarginTop }]}>
                 <TouchableOpacity onPress={handleRestore}>
-                  <Text style={styles.footerLinkText}>購入を復元</Text>
+                  <Text style={styles.footerLinkText}>{t('paywall.restore')}</Text>
                 </TouchableOpacity>
                 <Text style={styles.footerSeparator}>｜</Text>
                 <TouchableOpacity onPress={() => handleOpenLink('https://traveling-fahrenheit-b9b.notion.site/Tickemo-Terms-of-Use-2f65fd5d3e2d80ba8abcda85615cde4a?pvs=74')}>
-                  <Text style={styles.footerLinkText}>利用規約</Text>
+                  <Text style={styles.footerLinkText}>{t('paywall.terms')}</Text>
                 </TouchableOpacity>
                 <Text style={styles.footerSeparator}>｜</Text>
                 <TouchableOpacity onPress={() => handleOpenLink('https://traveling-fahrenheit-b9b.notion.site/Tickemo-Privacy-Policy-2f85fd5d3e2d809b912dfc4ec2a2ed6a?pvs=74')}>
-                  <Text style={styles.footerLinkText}>プライバシーポリシー</Text>
+                  <Text style={styles.footerLinkText}>{t('paywall.privacy')}</Text>
                 </TouchableOpacity>
               </View>
+
             </View>
           </View>
         </SafeAreaView>
@@ -615,34 +621,18 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   planRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexDirection: 'column',
     alignItems: 'stretch',
     marginBottom: 20,
-    gap: 8,
-  },
-  planCardWrap: {
-    flex: 1,
-    position: 'relative',
   },
   planCardFrame: {
     borderRadius: 14,
-    aspectRatio: 0.86,
-    minHeight: 120,
+    minHeight: 96,
     overflow: 'hidden',
+    padding: 1,
   },
-  planCardFrameInactive: {
-    backgroundColor: BASE_BG,
-  },
-  planCardAnimatedBorder: {
+  planCardBorder: {
     ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  planCardAnimatedGradient: {
-    width: '170%',
-    height: '170%',
-    borderRadius: 999,
   },
   planCardSurface: {
     backgroundColor: CARD_BG,
@@ -674,27 +664,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 2,
   },
-  badgeContainer: {
-    position: 'absolute',
-    top: -14,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    zIndex: 3,
-  },
-  badge: {
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-  },
-  badgeText: {
-    color: '#141414',
-    fontSize: 9,
-    fontWeight: '900',
-    letterSpacing: 0.2,
-  },
   ctaButtonWrap: {
     marginTop: 10,
+  },
+  ctaButtonWrapDisabled: {
+    opacity: 0.85,
   },
   ctaButton: {
     borderRadius: 999,
@@ -714,12 +688,6 @@ const styles = StyleSheet.create({
     color: '#111111',
     fontSize: 18,
     fontWeight: '800',
-  },
-  noticeText: {
-    marginTop: 14,
-    color: TEXT_SUB,
-    fontSize: 10,
-    textAlign: 'center',
   },
   footerLinks: {
     marginTop: 18,

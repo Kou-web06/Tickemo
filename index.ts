@@ -1,6 +1,7 @@
 // import 'react-native-reanimated';  // Temporarily disabled due to TextImpl error
 import 'react-native-gesture-handler';
 import { registerRootComponent } from 'expo';
+import './i18n';
 
 import App from './App';
 

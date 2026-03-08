@@ -51,21 +51,21 @@ export interface AppleMusicSearchResponse {
 
 /**
  * Apple Music APIで楽曲を検索
- * @param artistName アーティスト名
+ * @param term 検索キーワード
  * @param developerToken JWT Developer Token
  * @param limit 取得する曲数（デフォルト: 20）
  * @returns 楽曲の配列
  */
 export async function searchAppleMusicSongs(
-  artistName: string,
+  term: string,
   developerToken: string,
   limit: number = 20
 ): Promise<AppleMusicSong[]> {
   try {
-    // console.log('[Apple Music API] Searching for artist:', artistName);
+    // console.log('[Apple Music API] Searching songs with term:', term);
     
     const url = `https://api.music.apple.com/v1/catalog/jp/search?term=${encodeURIComponent(
-      artistName
+      term
     )}&types=songs&limit=${limit}`;
 
     // console.log('[Apple Music API] URL:', url);

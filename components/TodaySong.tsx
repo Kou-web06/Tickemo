@@ -6,6 +6,7 @@ import { requireNativeModule } from 'expo-modules-core';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { theme } from '../theme';
 import { searchAppleMusicSongs, getArtworkUrl, AppleMusicSong } from '../utils/appleMusicApi';
+import { useTranslation } from 'react-i18next';
 
 // ネイティブモジュールの読み込み
 const TickemoPlayer = requireNativeModule('TickemoPlayer');
@@ -44,6 +45,7 @@ const getDailyPickKey = (artistName: string, dateKey: string) => {
 const MAX_HISTORY = 20;
 
 export default function TodaySong({ artistName, developerToken }: TodaySongProps) {
+  const { t } = useTranslation();
   const [song, setSong] = useState<AppleMusicSong | null>(null);
   const [loading, setLoading] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -126,7 +128,7 @@ export default function TodaySong({ artistName, developerToken }: TodaySongProps
     
     if (!song?.id) {
       console.warn('[TodaySong] No song ID');
-      Alert.alert('エラー', '楽曲情報が取得できませんでした');
+      Alert.alert(t('todaySong.alerts.error'), t('todaySong.alerts.songUnavailable'));
       return;
     }
 
@@ -142,7 +144,7 @@ export default function TodaySong({ artistName, developerToken }: TodaySongProps
       }
     } catch (error: any) {
       console.error('[TodaySong] Native Player Error:', error);
-      Alert.alert('再生エラー', error.message || '再生に失敗しました');
+      Alert.alert(t('todaySong.alerts.playbackError'), error.message || t('todaySong.alerts.playbackFailed'));
       setIsPlaying(false);
     }
   };
@@ -159,7 +161,7 @@ export default function TodaySong({ artistName, developerToken }: TodaySongProps
       }
     } catch (error) {
       console.error('[TodaySong] Failed to open Apple Music:', error);
-      Alert.alert('エラー', 'Apple Musicを開けませんでした');
+      Alert.alert(t('todaySong.alerts.error'), t('todaySong.alerts.appleMusicOpenFailed'));
     }
   };
 
@@ -188,7 +190,7 @@ export default function TodaySong({ artistName, developerToken }: TodaySongProps
           position: 'relative',
           flexDirection: 'row',
           alignItems: 'center',
-          backgroundColor: 'rgba(255, 255, 255, 0.08)',
+          backgroundColor: 'rgba(255, 255, 255, 0.20)',
           borderRadius: 18,
           padding: theme.spacing.md,
           marginVertical: theme.spacing.lg,
@@ -226,7 +228,7 @@ export default function TodaySong({ artistName, developerToken }: TodaySongProps
                 shadowRadius: 8,
               }}
             >
-              今日の1曲
+              {t('todaySong.title')}
             </Text>
           </View>
 

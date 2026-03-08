@@ -45,7 +45,22 @@ export const useResolvedImageUri = (savedUri?: string, assetId?: string | null) 
       }
       
       if (isActive) {
-        setResolvedUri(uri ?? savedUri ?? null);
+        const normalizedSaved = savedUri ? (normalizeStoredImageUri(savedUri) || savedUri) : '';
+        const isRenderableSavedUri = Boolean(
+          normalizedSaved &&
+          (normalizedSaved.startsWith('file://') ||
+            normalizedSaved.startsWith('http://') ||
+            normalizedSaved.startsWith('https://') ||
+            normalizedSaved.startsWith('data:'))
+        );
+
+        if (uri) {
+          setResolvedUri(uri);
+        } else if (isRenderableSavedUri) {
+          setResolvedUri(normalizedSaved);
+        } else {
+          setResolvedUri(null);
+        }
       }
     };
 
@@ -93,7 +108,21 @@ export const useResolvedImageUris = (savedUris?: string[], assetIds?: Array<stri
           return resolved;
         })
       );
-      const finalUris = resolved.map((uri, index) => uri ?? savedUris[index] ?? NO_IMAGE_URI);
+      const finalUris = resolved.map((uri, index) => {
+        if (uri) return uri;
+
+        const saved = savedUris[index] ?? '';
+        const normalizedSaved = normalizeStoredImageUri(saved) || saved;
+        const isRenderableSavedUri = Boolean(
+          normalizedSaved &&
+          (normalizedSaved.startsWith('file://') ||
+            normalizedSaved.startsWith('http://') ||
+            normalizedSaved.startsWith('https://') ||
+            normalizedSaved.startsWith('data:'))
+        );
+
+        return isRenderableSavedUri ? normalizedSaved : NO_IMAGE_URI;
+      });
       if (isActive) {
         setResolvedUris(finalUris);
       }

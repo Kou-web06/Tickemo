@@ -3,12 +3,12 @@ import {
   View,
   ScrollView,
   StyleSheet,
-  Dimensions,
   NativeScrollEvent,
   NativeSyntheticEvent,
 } from 'react-native';
+import { getAppWidth } from '../utils/layout';
 
-const { width } = Dimensions.get('window');
+const width = getAppWidth();
 const CARD_WIDTH = width - 40; // padding を考慮
 
 interface DataCarouselProps {

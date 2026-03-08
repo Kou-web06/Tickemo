@@ -1,9 +1,11 @@
 import React, { useMemo, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Dimensions, Animated, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Animated, TouchableOpacity } from 'react-native';
 import Svg, { Path, Defs, LinearGradient, Stop, Line, Circle, Text as SvgText } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
+import { getAppWidth } from '../utils/layout';
+import { useTranslation } from 'react-i18next';
 
-const { width } = Dimensions.get('window');
+const width = getAppWidth();
 const CARD_WIDTH = width - 40;
 
 interface HeatmapSlideProps {
@@ -79,6 +81,7 @@ const getSmoothPath = (points: Array<{ x: number; y: number }>) => {
 };
 
 export default function HeatmapSlide({ records, variant = 'light' }: HeatmapSlideProps) {
+  const { t } = useTranslation();
   const isDark = variant === 'dark';
   const currentYear = new Date().getFullYear();
   const [selectedYear, setSelectedYear] = useState(currentYear);
@@ -257,7 +260,7 @@ export default function HeatmapSlide({ records, variant = 'light' }: HeatmapSlid
               {selectedYear}
             </Text>
             <Text style={[styles.subtitle, isDark && styles.subtitleDark, { color: palette.subtitle }]}>
-              年間ライブ記録
+              {t('statistics.yearlyRecord')}
             </Text>
           </View>
           <TouchableOpacity

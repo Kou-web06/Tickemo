@@ -1,7 +1,8 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, Dimensions, StyleSheet } from 'react-native';
+import { Animated, StyleSheet } from 'react-native';
+import { getAppWidth } from '../utils/layout';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const SCREEN_WIDTH = getAppWidth();
 
 interface AnimatedScreenProps {
   children: React.ReactNode;

@@ -18,8 +18,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAppStore } from '../store/useAppStore';
 import { normalizeStoredImageUri, resolveLocalImageUri } from '../lib/imageUpload';
 import { pushImageToCloud } from '../lib/icloudImageSync';
+import { useTranslation } from 'react-i18next';
 
 export default function ProfileEditScreen({ navigation }: any) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [displayName, setDisplayName] = useState('');
   const [username, setUsername] = useState('');
@@ -74,17 +76,17 @@ export default function ProfileEditScreen({ navigation }: any) {
     const normalizedUsername = username.trim().replace(/^@+/, '');
 
     if (!trimmedName) {
-      Alert.alert('入力エラー', '表示名を入力してください');
+      Alert.alert(t('profileEdit.alerts.inputError'), t('profileEdit.alerts.displayNameRequired'));
       return;
     }
 
     if (trimmedName.length > 8) {
-      setDisplayNameError('表示名は8文字以内で入力してください');
+      setDisplayNameError(t('profileEdit.alerts.displayNameTooLong'));
       return;
     }
 
     if (!normalizedUsername) {
-      Alert.alert('入力エラー', 'ユーザー名を入力してください');
+      Alert.alert(t('profileEdit.alerts.inputError'), t('profileEdit.alerts.usernameRequired'));
       return;
     }
 
@@ -113,7 +115,12 @@ export default function ProfileEditScreen({ navigation }: any) {
       navigation.goBack();
     } catch (error) {
       console.log('Failed to update profile:', error);
-      Alert.alert('エラー', `プロフィールの更新に失敗しました\n${(error as Error).message || '不明なエラー'}`);
+      Alert.alert(
+        t('profileEdit.alerts.error'),
+        t('profileEdit.alerts.updateFailed', {
+          message: (error as Error).message || t('profileEdit.alerts.unknownError'),
+        })
+      );
     } finally {
       setIsSaving(false);
     }
@@ -134,7 +141,7 @@ export default function ProfileEditScreen({ navigation }: any) {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('エラー', '写真ライブラリへのアクセス許可が必要です');
+        Alert.alert(t('profileEdit.alerts.error'), t('profileEdit.alerts.permissionRequired'));
         return;
       }
 
@@ -151,7 +158,7 @@ export default function ProfileEditScreen({ navigation }: any) {
         
         if (!baseDir) {
           console.warn('[ProfileEdit] FileSystem not available');
-          Alert.alert('エラー', 'ファイルシステムが利用できません');
+          Alert.alert(t('profileEdit.alerts.error'), t('profileEdit.alerts.fsUnavailable'));
           return;
         }
 
@@ -168,17 +175,22 @@ export default function ProfileEditScreen({ navigation }: any) {
       }
     } catch (error) {
       console.log('[ProfileEdit] Failed to pick avatar:', error);
-      Alert.alert('エラー', `画像の保存に失敗しました\n${(error as Error).message || '不明なエラー'}`);
+      Alert.alert(
+        t('profileEdit.alerts.error'),
+        t('profileEdit.alerts.imageSaveFailed', {
+          message: (error as Error).message || t('profileEdit.alerts.unknownError'),
+        })
+      );
     }
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={[styles.header, { paddingTop: Math.max(insets.top + 24, 42) }]}> 
+      <View style={[styles.header, { paddingTop: Math.min(insets.top, 35) }]}> 
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <Ionicons name="chevron-back" size={26} color="#000" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>プロフィール編集</Text>
+        <Text style={styles.headerTitle}>{t('profileEdit.title')}</Text>
         <TouchableOpacity
           style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
           onPress={handleSave}
@@ -187,7 +199,7 @@ export default function ProfileEditScreen({ navigation }: any) {
           {isSaving ? (
             <ActivityIndicator color="#FFF" size="small" />
           ) : (
-            <Text style={styles.saveButtonText}>保存</Text>
+            <Text style={styles.saveButtonText}>{t('profileEdit.save')}</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -217,30 +229,30 @@ export default function ProfileEditScreen({ navigation }: any) {
             </TouchableOpacity>
           </View>
           <View style={styles.profileMeta}>
-            <Text style={styles.profileLabel}>Joined</Text>
+            <Text style={styles.profileLabel}>{t('profileEdit.joined')}</Text>
             <Text style={styles.profileValue}>{joinedAt ? new Date(joinedAt).toLocaleDateString() : '-'}</Text>
           </View>
         </View>
 
         <View style={styles.formCard}>
-          <Text style={styles.sectionLabel}>表示名</Text>
+          <Text style={styles.sectionLabel}>{t('profileEdit.displayName')}</Text>
           <TextInput
             style={styles.input}
             value={displayName}
             onChangeText={(value) => {
               setDisplayName(value);
               if (value.trim().length > 8) {
-                setDisplayNameError('表示名は8文字以内で入力してください');
+                setDisplayNameError(t('profileEdit.alerts.displayNameTooLong'));
               } else if (displayNameError) {
                 setDisplayNameError('');
               }
             }}
-            placeholder="表示名"
+            placeholder={t('profileEdit.displayNamePlaceholder')}
             placeholderTextColor="#B8B8B8"
           />
           {!!displayNameError && <Text style={styles.errorText}>{displayNameError}</Text>}
 
-          <Text style={styles.sectionLabel}>ユーザー名</Text>
+          <Text style={styles.sectionLabel}>{t('profileEdit.username')}</Text>
           <View style={styles.usernameRow}>
             <Text style={styles.usernamePrefix}>@</Text>
             <TextInput
@@ -252,14 +264,14 @@ export default function ProfileEditScreen({ navigation }: any) {
                   setUsernameError('');
                 }
               }}
-              placeholder="username"
+              placeholder={t('profileEdit.usernamePlaceholder')}
               placeholderTextColor="#B8B8B8"
               autoCapitalize="none"
               autoCorrect={false}
             />
           </View>
           {!!usernameError && <Text style={styles.errorText}>{usernameError}</Text>}
-          <Text style={styles.helpText}>ユーザー名は公開プロフィールに表示されます</Text>
+          <Text style={styles.helpText}>{t('profileEdit.helpText')}</Text>
         </View>
 
         {isLoading && (

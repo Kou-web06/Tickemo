@@ -11,12 +11,14 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AntDesign, Ionicons } from '@expo/vector-icons';
 import { useCloudSync } from '../hooks/useCloudSync';
+import { useTranslation } from 'react-i18next';
 
 interface ICloudSyncScreenProps {
   navigation: any;
 }
 
 export default function ICloudSyncScreen({ navigation }: ICloudSyncScreenProps) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { isSyncing, lastSyncTime, forceSync } = useCloudSync();
   const [isManualSyncing, setIsManualSyncing] = useState(false);
@@ -40,7 +42,7 @@ export default function ICloudSyncScreen({ navigation }: ICloudSyncScreenProps) 
   };
 
   const formatLastSyncTime = () => {
-    if (!lastSyncTime) return '未同期';
+    if (!lastSyncTime) return t('icloudSync.notSynced');
     const date = new Date(lastSyncTime);
     const year = date.getFullYear();
     const month = `${date.getMonth() + 1}`.padStart(2, '0');
@@ -53,7 +55,7 @@ export default function ICloudSyncScreen({ navigation }: ICloudSyncScreenProps) 
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
       {/* ヘッダー */}
-      <View style={[styles.header, { paddingTop: Math.max(insets.top + 12, 24) }]}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top, 24) }]}>
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => navigation.goBack()}
@@ -61,7 +63,7 @@ export default function ICloudSyncScreen({ navigation }: ICloudSyncScreenProps) 
         >
           <Ionicons name="chevron-back" size={28} color="#000" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>iCloud同期</Text>
+        <Text style={styles.headerTitle}>{t('icloudSync.title')}</Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -80,24 +82,20 @@ export default function ICloudSyncScreen({ navigation }: ICloudSyncScreenProps) 
         {/* ステータスカード */}
         <View style={styles.statusCard}>
           <View style={styles.statusCardContent}>
-            <Text style={styles.statusLabel}>ステータス</Text>
+            <Text style={styles.statusLabel}>{t('icloudSync.statusLabel')}</Text>
             <View style={styles.statusIndicator}>
               <View style={styles.statusDot} />
-              <Text style={styles.statusText}>同期済み</Text>
+              <Text style={styles.statusText}>{t('icloudSync.statusSynced')}</Text>
             </View>
           </View>
         </View>
 
         {/* 説明テキスト */}
-        <Text style={styles.descriptionText}>
-          iCloud同期はオンになっており、チケットやライブの記録はすべてのデバイスで最新の状態に保たれます。
-        </Text>
+        <Text style={styles.descriptionText}>{t('icloudSync.description')}</Text>
 
         {/* 最終同期日時 */}
         <View style={styles.syncTimeCardContainer}>
-          <View style={styles.syncTimeCard}>
-            <Text style={styles.syncTimeLabel}>最終同期日時: {formatLastSyncTime()}</Text>
-          </View>
+          <Text style={styles.syncTimeLabel}>{t('icloudSync.lastSync')}: {formatLastSyncTime()}</Text>
         </View>
 
         {/* 手動同期ボタン */}
@@ -110,12 +108,12 @@ export default function ICloudSyncScreen({ navigation }: ICloudSyncScreenProps) 
           {isManualSyncing || isSyncing ? (
             <>
               <ActivityIndicator color="#666" size="small" />
-              <Text style={styles.syncButtonText}>同期中...</Text>
+              <Text style={styles.syncButtonText}>{t('icloudSync.syncing')}</Text>
             </>
           ) : (
             <>
               <AntDesign name="cloud-sync" size={18} color="#666" />
-              <Text style={styles.syncButtonText}>今すぐ同期</Text>
+              <Text style={styles.syncButtonText}>{t('icloudSync.syncNow')}</Text>
             </>
           )}
         </TouchableOpacity>

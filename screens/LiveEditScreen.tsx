@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -15,7 +15,7 @@ import {
 import { Picker } from '@react-native-picker/picker';
 import { Image } from 'expo-image';
 import { SvgXml } from 'react-native-svg';
-import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons, MaterialIcons, MaterialCommunityIcons, Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -28,10 +28,14 @@ import ArtistInput from '../components/ArtistInput';
 import SetlistEditor from '../components/SetlistEditor';
 import { useResolvedImageUris } from '../hooks/useResolvedImageUri';
 import type { SetlistItem } from '../types/setlist';
+import { useTranslation } from 'react-i18next';
+import { LIVE_TYPE_KEYS, LIVE_TYPE_ICON_MAP, normalizeLiveType, type LiveTypeKey } from '../utils/liveType';
 
 interface LiveInfo {
   name: string;
-  artist: string;
+  artists: string[];
+  artist?: string;
+  artistImageUrls?: string[];
   liveType?: string;
   artistImageUrl?: string; // アーティスト画像URL
   date: Date;
@@ -54,22 +58,7 @@ interface Props {
   successHoldDuration?: number; // Success表示後の待機時間（デフォルト1500ms）
 }
 
-const MEMO_PROMPTS = [
-  "今日の推しのビジュ、一言で言うと？",
-  "一番鳥肌が立った瞬間はどこ？",
-  "MCで心に残った言葉はあった？",
-  "席からの景色はどうだった？（近かった？遠かった？）",
-  "会場の熱気や、照明の演出はどうだった？",
-  "思い出に残ってる曲とかあった？？"
-];
-
-const LIVE_TYPES = ['ワンマン', '対バン', 'フェス', 'FC限定'] as const;
-const LIVE_TYPE_ICON_MAP: Record<(typeof LIVE_TYPES)[number], keyof typeof MaterialCommunityIcons.glyphMap> = {
-  ワンマン: 'account',
-  対バン: 'account-multiple',
-  フェス: 'account-group',
-  FC限定: 'account-star',
-};
+const LIVE_TYPES = LIVE_TYPE_KEYS;
 
 const ADD_PHOTO_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
 <g clip-path="url(#clip0_4418_9255)">
@@ -87,12 +76,26 @@ const ADD_PHOTO_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" h
 </svg>`;
 
 export default function LiveEditScreen({ initialData, onSave, onCancel, focusMemo = false, successHoldDuration = 1500 }: Props) {
-  const MAX_VENUE_LENGTH = 12;
+  const { t } = useTranslation();
+  const liveTypeLabels = useMemo(
+    () => t('liveEdit.liveTypes', { returnObjects: true }) as string[],
+    [t]
+  );
+
+  const memoPrompts = useMemo(
+    () => t('liveEdit.memoPrompts', { returnObjects: true }) as string[],
+    [t]
+  );
 
   // ランダムなプレースホルダーを決定（マウント時に1回だけ計算）
   const randomPlaceholder = useMemo(() => {
-    return MEMO_PROMPTS[Math.floor(Math.random() * MEMO_PROMPTS.length)];
-  }, []);
+    return memoPrompts[Math.floor(Math.random() * memoPrompts.length)] || '';
+  }, [memoPrompts]);
+
+  const areImageUrisEqual = (prev: string[], next: string[]) => {
+    if (prev.length !== next.length) return false;
+    return prev.every((value, index) => value === next[index]);
+  };
 
   const parseTime = (timeStr?: string, defaultTime: string = '18:00'): string => {
     if (!timeStr || typeof timeStr !== 'string') {
@@ -111,12 +114,19 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
   };
 
   const [name, setName] = useState(initialData?.name || '');
-  const [artist, setArtist] = useState(initialData?.artist || '');
-  const [liveType, setLiveType] = useState(
-    initialData?.liveType && LIVE_TYPES.includes(initialData.liveType as (typeof LIVE_TYPES)[number])
-      ? initialData.liveType
-      : LIVE_TYPES[0]
+  const [artists, setArtists] = useState<string[]>(
+    initialData?.artists && initialData.artists.length > 0
+      ? initialData.artists
+      : initialData?.artist
+        ? [initialData.artist]
+        : ['']
   );
+  const [artistImageUrls, setArtistImageUrls] = useState<string[]>(
+    initialData?.artists && initialData.artists.length > 0
+      ? initialData.artists.map((_, index) => initialData?.artistImageUrls?.[index] ?? (index === 0 ? initialData?.artistImageUrl || '' : ''))
+      : [initialData?.artistImageUrl || '']
+  );
+  const [liveType, setLiveType] = useState<LiveTypeKey>(normalizeLiveType(initialData?.liveType));
   const [artistImageUrl, setArtistImageUrl] = useState(initialData?.artistImageUrl || '');
   const [date, setDate] = useState(initialData?.date || new Date());
   const [venue, setVenue] = useState(initialData?.venue || '');
@@ -128,7 +138,6 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
   const resolvedInitialImages = useResolvedImageUris(initialData?.imageUrls);
   
   const [imageUrls, setImageUrls] = useState<string[]>([]);
-  const [imageUpdateKeys, setImageUpdateKeys] = useState<Record<number, number>>({});
   
   const [qrCode, setQrCode] = useState(initialData?.qrCode || '');
   const [memo, setMemo] = useState(initialData?.memo || '');
@@ -136,7 +145,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
   const [setlistSongs, setSetlistSongs] = useState<SetlistItem[]>(initialData?.setlistSongs || []);
   const [showStartTimeModal, setShowStartTimeModal] = useState(false);
   const [showEndTimeModal, setShowEndTimeModal] = useState(false);
-  const [isArtistDropdownOpen, setIsArtistDropdownOpen] = useState(false);
+  const [artistDropdownVisibility, setArtistDropdownVisibility] = useState<Record<number, boolean>>({});
   const [isSongDropdownOpen, setIsSongDropdownOpen] = useState(false);
   const pagerRef = useRef<PagerView>(null);
   const memoInputRef = useRef<TextInput>(null);
@@ -149,6 +158,16 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
   const isSubmittingRef = useRef(false);
   const isFocused = useIsFocused();
   const hasUserEditedImages = useRef(false);
+  const initialDataSignature = useMemo(() => {
+    if (!initialData) return 'none';
+    return JSON.stringify({
+      name: initialData.name ?? '',
+      artists: initialData.artists ?? (initialData.artist ? [initialData.artist] : ['']),
+      date: initialData.date ? new Date(initialData.date).toISOString() : '',
+      venue: initialData.venue ?? '',
+      imageUrls: initialData.imageUrls ?? [],
+    });
+  }, [initialData]);
 
   useEffect(() => {
     if (showSuccess) {
@@ -189,7 +208,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
 
   useEffect(() => {
     hasUserEditedImages.current = false;
-  }, [initialData]);
+  }, [initialDataSignature]);
 
   // useResolvedImageUris で解決された画像パスを反映
   // 編集中の変更を上書きしないよう、ユーザー操作後は反映しない
@@ -201,35 +220,70 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
 
     // 画像がない場合（空配列）で初期化
     if (!initialData.imageUrls || initialData.imageUrls.length === 0) {
-      if (imageUrls.length > 0) { 
-         setImageUrls([]);
-         setImageUpdateKeys({});
-      }
+      setImageUrls((prev) => (prev.length > 0 ? [] : prev));
       return;
     }
 
     // 解決された画像がある場合
     if (resolvedInitialImages && resolvedInitialImages.length > 0) {
-      // 初期ロード時またはデータ変更時のみ反映する
-      setImageUrls(resolvedInitialImages);
-        
-      // imageUpdateKeysも再初期化
-      const newKeys: Record<number, number> = {};
-      const timestamp = Date.now();
-      resolvedInitialImages.forEach((_, index) => {
-        newKeys[index] = timestamp + index;
-      });
-      setImageUpdateKeys(newKeys);
+      setImageUrls((prev) => (areImageUrisEqual(prev, resolvedInitialImages) ? prev : resolvedInitialImages));
     }
-  }, [resolvedInitialImages, initialData]);
+  }, [resolvedInitialImages, initialDataSignature]);
+
+  const handleArtistChange = (index: number, value: string, imageUrl?: string) => {
+    setArtists((prev) => prev.map((artist, currentIndex) => (currentIndex === index ? value : artist)));
+    setArtistImageUrls((prev) => {
+      const next = [...prev];
+      while (next.length < artists.length) {
+        next.push('');
+      }
+      next[index] = imageUrl || '';
+      return next;
+    });
+  };
+
+  const handleAddArtist = () => {
+    setArtists((prev) => [...prev, '']);
+    setArtistImageUrls((prev) => [...prev, '']);
+  };
+
+  const handleRemoveArtist = (index: number) => {
+    setArtists((prev) => {
+      if (prev.length <= 1) {
+        return prev;
+      }
+      return prev.filter((_, currentIndex) => currentIndex !== index);
+    });
+    setArtistImageUrls((prev) => {
+      if (prev.length <= 1) {
+        return prev;
+      }
+      return prev.filter((_, currentIndex) => currentIndex !== index);
+    });
+    setArtistDropdownVisibility({});
+  };
+
+  const handleArtistDropdownVisibilityChange = useCallback((index: number, visible: boolean) => {
+    setArtistDropdownVisibility((prev) => {
+      if (prev[index] === visible) {
+        return prev;
+      }
+      return { ...prev, [index]: visible };
+    });
+  }, []);
+
+  const primaryArtist = useMemo(
+    () => artists.find((artistName) => artistName.trim().length > 0) ?? '',
+    [artists]
+  );
 
   const isBasicValid =
     name.trim().length > 0 &&
-    artist.trim().length > 0 &&
+    artists.some((artistName) => artistName.trim().length > 0) &&
     venue.trim().length > 0 &&
     Boolean(date);
 
-  const isVenueAtLimit = venue.length >= MAX_VENUE_LENGTH;
+  const isStreamingLive = liveType === 'streaming';
 
   const goToPage = (index: number) => {
     pagerRef.current?.setPage(index);
@@ -239,7 +293,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
   const handlePageSelected = (event: any) => {
     const nextIndex = event.nativeEvent.position;
     if (nextIndex > 0 && !isBasicValid) {
-      Alert.alert('入力エラー', 'ライブ名・アーティスト名・日付・会場は必須です');
+      Alert.alert(t('liveEdit.alerts.inputError'), t('liveEdit.alerts.requiredFields'));
       pagerRef.current?.setPage(0);
       setCurrentPage(0);
       return;
@@ -249,7 +303,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
 
   const handleNext = () => {
     if (currentPage === 0 && !isBasicValid) {
-      Alert.alert('入力エラー', 'ライブ名・アーティスト名・日付・会場は必須です');
+      Alert.alert(t('liveEdit.alerts.inputError'), t('liveEdit.alerts.requiredFields'));
       return;
     }
     goToPage(Math.min(currentPage + 1, 2));
@@ -305,11 +359,11 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
           <View style={styles.timeModalContent}>
             <View style={styles.timeModalHeader}>
               <TouchableOpacity onPress={onClose}>
-                <Text style={styles.timeModalCancel}>キャンセル</Text>
+                <Text style={styles.timeModalCancel}>{t('liveEdit.timePicker.cancel')}</Text>
               </TouchableOpacity>
               <Text style={styles.timeModalTitle}>{title}</Text>
               <TouchableOpacity onPress={onClose}>
-                <Text style={styles.timeModalDone}>完了</Text>
+                <Text style={styles.timeModalDone}>{t('liveEdit.timePicker.done')}</Text>
               </TouchableOpacity>
             </View>
             
@@ -347,12 +401,12 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('権限が必要です', 'カバーアートを選択するにはフォトライブラリへのアクセスが必要です。');
+        Alert.alert(t('liveEdit.alerts.permissionRequiredTitle'), t('liveEdit.alerts.photoPermissionRequired'));
         return;
       }
       // 既存の制限などを無視して、常に1枚を選択して置換する
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         allowsMultipleSelection: false,
         aspect: [1, 1], // 正方形
@@ -364,17 +418,16 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
         const asset = result.assets[0];
         const resolvedUri = await resolvePickedImageUri(asset);
         if (!resolvedUri) {
-          Alert.alert('エラー', '画像の読み込みに失敗しました。もう一度お試しください。');
+          Alert.alert(t('liveEdit.alerts.error'), t('liveEdit.alerts.imageLoadFailed'));
           return;
         }
         // ジャケット画像として1枚だけ保存（配列を置換）
         hasUserEditedImages.current = true;
-        setImageUrls([resolvedUri]);
-        setImageUpdateKeys({ 0: Date.now() });
+        setImageUrls((prev) => (prev.length === 1 && prev[0] === resolvedUri ? prev : [resolvedUri]));
       }
     } catch (error) {
       console.log('[LiveEditScreen] Image pick failed:', error);
-      Alert.alert('エラー', '画像の選択中に問題が発生しました。');
+      Alert.alert(t('liveEdit.alerts.error'), t('liveEdit.alerts.imagePickFailed'));
     }
   };
 
@@ -384,10 +437,6 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
   const handleRemoveImage = () => {
     hasUserEditedImages.current = true;
     setImageUrls([]);
-    setImageUpdateKeys({});
-  };  const handleArtistChange = (name: string, imageUrl?: string) => {
-    setArtist(name);
-    setArtistImageUrl(imageUrl || '');
   };
 
   const resolvePickedImageUri = async (asset: ImagePicker.ImagePickerAsset): Promise<string> => {
@@ -421,18 +470,24 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
   };
 
   const handleSave = async () => {
-    if (!name || !artist || !venue) {
-      Alert.alert('エラー', 'ライブ名、アーティスト名、会場は必須項目です');
-      return;
-    }
+    const validArtistEntries = artists
+      .map((artistName, index) => ({
+        artistName: artistName.trim(),
+        artistImageUrl: (artistImageUrls[index] ?? '').trim(),
+      }))
+      .filter((entry) => entry.artistName !== '');
 
-    if (venue.trim().length > MAX_VENUE_LENGTH) {
-      Alert.alert('エラー', '会場名は12文字以内で入力してください');
+    const filteredArtists = validArtistEntries.map((entry) => entry.artistName);
+    const filteredArtistImageUrls = validArtistEntries.map((entry) => entry.artistImageUrl);
+    const primaryArtistImageUrl = filteredArtistImageUrls[0] || '';
+
+    if (!name || filteredArtists.length === 0 || !venue) {
+      Alert.alert(t('liveEdit.alerts.error'), t('liveEdit.alerts.requiredFieldsShort'));
       return;
     }
 
     if (imageUrls.length === 0) {
-      Alert.alert('エラー', 'カバーアートを選択してください');
+      Alert.alert(t('liveEdit.alerts.error'), t('liveEdit.alerts.coverRequired'));
       return;
     }
 
@@ -445,9 +500,11 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
     try {
       await onSave({
         name,
-        artist,
+        artists: filteredArtists,
+        artist: filteredArtists[0] || '',
+        artistImageUrls: filteredArtistImageUrls,
         liveType,
-        artistImageUrl,
+        artistImageUrl: primaryArtistImageUrl || artistImageUrl,
         date,
         venue,
         seat: seat || '',
@@ -469,14 +526,24 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
     }
   };
 
-  const handleVenueChange = (value: string) => {
-    if (value.length > MAX_VENUE_LENGTH) {
-      Alert.alert('入力エラー', '会場名は12文字以内で入力してください');
-      setVenue(value.slice(0, MAX_VENUE_LENGTH));
-      return;
-    }
-    setVenue(value);
-  };
+  const handleClosePress = useCallback(() => {
+    Alert.alert(
+      t('liveEdit.alerts.discardConfirmTitle'),
+      t('liveEdit.alerts.discardConfirmMessage'),
+      [
+        {
+          text: t('liveEdit.alerts.continueEditing'),
+          style: 'cancel',
+        },
+        {
+          text: t('liveEdit.alerts.discard'),
+          style: 'destructive',
+          onPress: onCancel,
+        },
+      ],
+      { cancelable: true }
+    );
+  }, [onCancel, t]);
 
   return (
     <KeyboardAvoidingView
@@ -487,10 +554,10 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
 
       {/* ヘッダー */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={onCancel} style={styles.headerButton}>
+        <TouchableOpacity onPress={handleClosePress} style={styles.headerButton}>
           <Ionicons name="close" size={28} color="#000" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>ライブ情報の設定</Text>
+        <Text style={styles.headerTitle}>{t('liveEdit.headerTitle')}</Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -498,7 +565,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
         <View style={styles.stepHeaderRow}>
           <Text style={styles.stepHeaderLabel}>Step {currentPage + 1}/3</Text>
           <Text style={styles.stepHeaderTitle}>
-            {currentPage === 0 ? '基本情報' : currentPage === 1 ? 'セットリスト作成' : 'その他'}
+            {currentPage === 0 ? t('liveEdit.pages.basic') : currentPage === 1 ? t('liveEdit.pages.setlist') : t('liveEdit.pages.other')}
           </Text>
         </View>
         <View style={styles.progressTrack}>
@@ -518,26 +585,26 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
             style={styles.pageScroll}
             contentContainerStyle={styles.pageContent}
             showsVerticalScrollIndicator={false}
-            scrollEnabled={!isArtistDropdownOpen}
+            scrollEnabled={!Object.values(artistDropdownVisibility).some(Boolean)}
             keyboardShouldPersistTaps="handled"
           >
             {/* ライブ名 */}
             <View style={styles.section}>
-              <RequiredLabel label="ライブ名" required />
+              <RequiredLabel label={t('liveEdit.labels.liveName')} required />
               <View style={styles.inputContainer}>
                 <View style={styles.inputBlur}>
                   <TextInput
                     style={styles.input}
                     value={name}
                     onChangeText={setName}
-                    placeholder="例: どんぐりTOUR 2026"
+                    placeholder={t('liveEdit.placeholders.liveName')}
                     placeholderTextColor="#CCCCCC"
                   />
                 </View>
               </View>
 
               <View style={styles.liveTypeWrap}>
-                <Text style={styles.liveTypeLabel}>ライブの種類</Text>
+                <Text style={styles.liveTypeLabel}>{t('liveEdit.labels.liveType')}</Text>
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
@@ -545,6 +612,8 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
                 >
                   {LIVE_TYPES.map((type) => {
                     const selected = liveType === type;
+                    const labelIndex = LIVE_TYPES.indexOf(type);
+                    const displayLabel = liveTypeLabels[labelIndex] ?? type;
                     return (
                       <TouchableOpacity
                         key={type}
@@ -552,12 +621,20 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
                         style={[styles.liveTypeChip, selected && styles.liveTypeChipSelected]}
                         onPress={() => setLiveType(type)}
                       >
-                        <MaterialCommunityIcons
-                          name={LIVE_TYPE_ICON_MAP[type]}
-                          size={14}
-                          color={selected ? '#FFFFFF' : '#B6B6B6'}
-                        />
-                        <Text style={[styles.liveTypeChipText, selected && styles.liveTypeChipTextSelected]}>{type}</Text>
+                        {type === 'streaming' ? (
+                          <Feather
+                            name="radio"
+                            size={14}
+                            color={selected ? '#FFFFFF' : '#B6B6B6'}
+                          />
+                        ) : (
+                          <MaterialCommunityIcons
+                            name={LIVE_TYPE_ICON_MAP[type] as keyof typeof MaterialCommunityIcons.glyphMap}
+                            size={14}
+                            color={selected ? '#FFFFFF' : '#B6B6B6'}
+                          />
+                        )}
+                        <Text style={[styles.liveTypeChipText, selected && styles.liveTypeChipTextSelected]}>{displayLabel}</Text>
                       </TouchableOpacity>
                     );
                   })}
@@ -567,19 +644,34 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
 
             {/* アーティスト名 */}
             <View style={[styles.section, { zIndex: 1000 }]}>
-              <RequiredLabel label="アーティスト名" required />
-              <ArtistInput
-                value={artist}
-                imageUrl={artistImageUrl}
-                onChange={handleArtistChange}
-                placeholder="アーティストを検索"
-                onDropdownVisibilityChange={setIsArtistDropdownOpen}
-              />
+              <RequiredLabel label={t('liveEdit.labels.artistName')} required />
+              {artists.map((artistName, index) => (
+                <View key={`artist-${index}`} style={[styles.artistFieldContainer, { zIndex: 1000 - index }]}>
+                  <ArtistInput
+                    value={artistName}
+                    imageUrl={artistImageUrls[index] || ''}
+                    onChange={(value, imageUrl) => handleArtistChange(index, value, imageUrl)}
+                    placeholder={t('liveEdit.placeholders.artistSearch')}
+                    onDropdownVisibilityChange={(visible) => handleArtistDropdownVisibilityChange(index, visible)}
+                  />
+                  {artists.length >= 2 && (
+                    <TouchableOpacity
+                      style={styles.artistRemoveButton}
+                      onPress={() => handleRemoveArtist(index)}
+                    >
+                      <Text style={styles.artistRemoveButtonText}>削除</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ))}
+              <TouchableOpacity style={styles.artistAddButton} onPress={handleAddArtist}>
+                <Text style={styles.artistAddButtonText}>＋ アーティストを追加</Text>
+              </TouchableOpacity>
             </View>
 
             {/* 日付 */}
             <View style={styles.section}>
-              <RequiredLabel label="日付" required />
+              <RequiredLabel label={t('liveEdit.labels.date')} required />
               <DateInputField
                 value={date}
                 onChange={setDate}
@@ -588,7 +680,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
 
             {/* 時間 */}
             <View style={styles.section}>
-              <Text style={styles.sectionLabel}>開始時間</Text>
+              <Text style={styles.sectionLabel}>{t('liveEdit.labels.startTime')}</Text>
               <TouchableOpacity
                 style={styles.inputContainer}
                 onPress={() => setShowStartTimeModal(true)}
@@ -605,7 +697,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
             </View>
 
             <View style={styles.section}>
-              <Text style={styles.sectionLabel}>終了時間</Text>
+              <Text style={styles.sectionLabel}>{t('liveEdit.labels.endTime')}</Text>
               <TouchableOpacity
                 style={styles.inputContainer}
                 onPress={() => setShowEndTimeModal(true)}
@@ -623,37 +715,35 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
 
             {/* 会場 */}
             <View style={styles.section}>
-              <RequiredLabel label="会場" required />
+              <RequiredLabel
+                label={isStreamingLive ? t('liveEdit.labels.platform') : t('liveEdit.labels.venue')}
+                required
+              />
               <View style={styles.inputContainer}>
                 <View style={styles.inputBlur}>
                   <TextInput
                     style={styles.input}
                     value={venue}
-                    onChangeText={handleVenueChange}
-                    placeholder="例: 東京ドーム"
+                    onChangeText={setVenue}
+                    placeholder={isStreamingLive ? t('liveEdit.placeholders.platform') : t('liveEdit.placeholders.venue')}
                     placeholderTextColor="#CCCCCC"
-                    maxLength={MAX_VENUE_LENGTH}
                   />
                 </View>
               </View>
-              {isVenueAtLimit && (
-                <View style={styles.warningContainer}>
-                  <MaterialIcons name="error-outline" size={14} color="#FF453A" />
-                  <Text style={styles.warningText}>会場名は12文字以内で入力してください</Text>
-                </View>
-              )}
             </View>
 
             {/* 座席 */}
             <View style={styles.section}>
-              <Text style={styles.sectionLabel}>座席</Text>
+              <Text style={styles.sectionLabel}>
+                {isStreamingLive ? t('liveEdit.labels.watchEnvironment') : t('liveEdit.labels.seat')}
+              </Text>
               <View style={styles.inputContainer}>
                 <View style={styles.inputBlur}>
                   <TextInput
                     style={styles.input}
                     value={seat}
                     onChangeText={setSeat}
-                    placeholder="例: アリーナA-10"
+                    placeholder={isStreamingLive ? t('liveEdit.placeholders.watchEnvironment') : t('liveEdit.placeholders.seat')}
                     placeholderTextColor="#CCCCCC"
                   />
                 </View>
@@ -665,7 +755,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
 
           <TimePickerModal
             visible={showStartTimeModal}
-            title="開始時間を選択"
+            title={t('liveEdit.timePicker.startTitle')}
             selectedTime={startTime}
             onSelect={setStartTime}
             onClose={() => setShowStartTimeModal(false)}
@@ -673,7 +763,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
 
           <TimePickerModal
             visible={showEndTimeModal}
-            title="終了時間を選択"
+            title={t('liveEdit.timePicker.endTitle')}
             selectedTime={endTime}
             onSelect={setEndTime}
             onClose={() => setShowEndTimeModal(false)}
@@ -681,18 +771,14 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
         </View>
 
         <View key="setlist" style={styles.page}>
-          <ScrollView
+          <View
             style={styles.pageScroll}
-            contentContainerStyle={styles.pageContent}
-            showsVerticalScrollIndicator={false}
-            scrollEnabled={!isSongDropdownOpen}
-            keyboardShouldPersistTaps="handled"
           >
             {/* SET LIST */}
             <View style={[styles.section, { zIndex: 50, minHeight: 300 }]}>
-              <Text style={styles.sectionLabel}>SET LIST</Text>
+              <Text style={styles.sectionLabel}>{t('liveEdit.labels.setList')}</Text>
               <SetlistEditor
-                artistName={artist}
+                artistName={primaryArtist}
                 initialSongs={setlistSongs}
                 onChange={setSetlistSongs}
                 onDropdownVisibilityChange={setIsSongDropdownOpen}
@@ -700,7 +786,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
             </View>
 
             <View style={{ height: 20 }} />
-          </ScrollView>
+          </View>
         </View>
 
         <View key="memories" style={styles.page}>
@@ -712,16 +798,14 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
           >
             {/* ジャケット画像（1枚） */}
             <View style={styles.section}>
-              <Text style={styles.sectionLabel}>カバーアート（表紙）</Text>
+              <Text style={styles.sectionLabel}>{t('liveEdit.labels.coverArt')}</Text>
               
               {imageUrls.length > 0 ? (
                 <View style={styles.jacketContainer}>
                   <Image
-                    key={`jacket-${imageUpdateKeys[0] || '0'}`}
                     source={{ uri: imageUrls[0] }}
                     style={styles.jacketImage}
                     contentFit="cover"
-                    cachePolicy="none"
                   />
                   <TouchableOpacity
                     style={styles.jacketRemoveButton}
@@ -739,11 +823,10 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
                   <View style={styles.emptyJacketContent}>
                     <SvgXml xml={ADD_PHOTO_ICON_SVG} width={48} height={48} />
                     <Text style={styles.emptyJacketTitle}>
-                      このライブの『表紙』を選択
+                      {t('liveEdit.jacket.emptyTitle')}
                     </Text>
                     <Text style={styles.emptyJacketSubtitle}>
-                      カメラロールにある数百枚の中から、{'\n'}
-                      『最高の1枚』を選ぼう！
+                      {t('liveEdit.jacket.emptySubtitle')}
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -752,14 +835,14 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
 
             {/* QRコード */}
             <View style={styles.section}>
-              <Text style={styles.sectionLabel}>QRコード（公式サイト、チケット、SNS等のURL）</Text>
+              <Text style={styles.sectionLabel}>{t('liveEdit.labels.qrCode')}</Text>
               <View style={styles.inputContainer}>
                 <View style={styles.inputBlur}>
                   <TextInput
                     style={styles.input}
                     value={qrCode}
                     onChangeText={setQrCode}
-                    placeholder="例: https://example.com"
+                    placeholder={t('liveEdit.placeholders.qrCode')}
                     placeholderTextColor="#CCCCCC"
                     autoCapitalize="none"
                     keyboardType="url"
@@ -770,7 +853,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
 
             {/* 思い出（メモ）*/}
             <View style={styles.section}>
-              <Text style={styles.sectionLabel}>思い出（メモ）</Text>
+              <Text style={styles.sectionLabel}>{t('liveEdit.labels.memories')}</Text>
               <View style={styles.inputContainer}>
                 <View style={styles.inputBlur}>
                   <TextInput
@@ -797,7 +880,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
         <View style={styles.footerButtons}>
           {currentPage > 0 ? (
             <TouchableOpacity style={styles.navButton} onPress={handleBack}>
-              <Text style={styles.navButtonText}>戻る</Text>
+              <Text style={styles.navButtonText}>{t('liveEdit.nav.back')}</Text>
             </TouchableOpacity>
           ) : (
             <View style={styles.navButtonPlaceholder} />
@@ -813,14 +896,14 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
               onPress={handleNext}
               disabled={currentPage === 0 && !isBasicValid}
             >
-              <Text style={styles.navButtonPrimaryText}>次へ</Text>
+              <Text style={styles.navButtonPrimaryText}>{t('liveEdit.nav.next')}</Text>
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
               style={[styles.navButton, styles.navButtonPrimary]}
               onPress={handleSave}
             >
-              <Text style={styles.navButtonPrimaryText}>保存</Text>
+              <Text style={styles.navButtonPrimaryText}>{t('liveEdit.nav.save')}</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -1015,12 +1098,41 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#999999',
     marginBottom: 8,
-    marginLeft: 4,
+    marginLeft: 24,
   },
   requiredMark: {
     color: '#D6007A',
     fontWeight: '400',
     fontSize: 18,
+  },
+  artistFieldContainer: {
+    marginBottom: 10,
+  },
+  artistRemoveButton: {
+    alignSelf: 'flex-end',
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: '#EFEFEF',
+  },
+  artistRemoveButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#555555',
+  },
+  artistAddButton: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: '#111111',
+  },
+  artistAddButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   inputContainer: {
     borderRadius: 25,

@@ -1,8 +1,9 @@
 import { View, StyleSheet, DeviceEventEmitter, Animated, Dimensions, Image, Easing, Alert, Platform } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, StackActions } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import PagerView from 'react-native-pager-view';
 import { useFonts, Anton_400Regular } from '@expo-google-fonts/anton';
@@ -16,6 +17,7 @@ import { PaywallScreen } from './screens';
 import { FloatingTabBar } from './components/FloatingTabBar';
 import { AdmobBanner } from './components/AdmobBanner';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { theme } from './theme';
 import { RecordsProvider } from './contexts/RecordsContext';
 import { TabBarProvider, useTabBar } from './contexts/TabBarContext';
@@ -25,6 +27,7 @@ import { setGlobalNotification } from './contexts/NotificationContext';
 import { useAppStore } from './store/useAppStore';
 import { isTestflightMode } from './utils/appMode';
 import { getPremiumStatusFromCustomerInfo, initializeRevenueCat } from './lib/revenuecat';
+import { APP_MAX_WIDTH } from './utils/layout';
 
 // Keep the splash screen visible while we fetch fonts
 SplashScreen.preventAutoHideAsync();
@@ -103,22 +106,24 @@ function SettingsStackScreen() {
 
 // ================ Root App Component ================
 function AppContent() {
+  const { t } = useTranslation();
   const [currentPage, setCurrentPage] = useState(1); // デフォルトを中央のタブに設定
   const pagerRef = useRef<PagerView>(null);
   const { isTabBarVisible } = useTabBar();
   const isPremium = useAppStore((state) => state.isPremium);
   const [isBannerVisible, setIsBannerVisible] = useState(true);
+  const settingsNavigationRef = useRef<any>(null);
 
   // タブレット検出と警告（起動時のみ）
   useEffect(() => {
     if (isTablet()) {
       Alert.alert(
-        'ご注意',
-        'このアプリはスマートフォン向けに最適化されています。タブレットでは一部の表示が最適でない場合があります。',
-        [{ text: 'OK' }]
+        t('app.tabletWarning.title'),
+        t('app.tabletWarning.message'),
+        [{ text: t('app.tabletWarning.ok') }]
       );
     }
-  }, []);
+  }, [t]);
 
   const handleNotificationTap = (data: any) => {
     console.log('[App] Notification tapped:', data);
@@ -245,7 +250,7 @@ function AppContent() {
             </NavigationContainer>
           </View>
           <View key="settings" style={styles.page}>
-            <NavigationContainer independent={true}>
+            <NavigationContainer independent={true} ref={settingsNavigationRef}>
               <SettingsStackScreen />
             </NavigationContainer>
           </View>
@@ -271,6 +276,12 @@ function AppContent() {
                 navigate: (name: string) => {
                   const index = routes.findIndex((route) => route.name === name);
                   if (index >= 0) {
+                    if (index === currentPage && name === 'Settings') {
+                      if (settingsNavigationRef.current?.canGoBack?.()) {
+                        settingsNavigationRef.current.dispatch(StackActions.popToTop());
+                      }
+                      DeviceEventEmitter.emit('settings:scrollToTop');
+                    }
                     handleTabPress(index);
                   }
                 },
@@ -448,53 +459,55 @@ export default function App() {
 
 
   return (
-    <NetworkProvider>
-      <RecordsProvider>
-        <TabBarProvider>
-          <View style={styles.appRoot}>
-            {fontsLoaded ? <AppContent /> : <View style={styles.appPlaceholder} />}
-            {showSplashOverlay && (
-              <Animated.View
-                pointerEvents="none"
-                style={[
-                  styles.splashOverlay,
-                  {
-                    opacity: splashAnim.interpolate({
-                      inputRange: [0, 0.8, 1],
-                      outputRange: [1, 1, 0],
-                    }),
-                  },
-                ]}
-              >
+    <SafeAreaProvider>
+      <NetworkProvider>
+        <RecordsProvider>
+          <TabBarProvider>
+            <View style={styles.appRoot}>
+              {fontsLoaded ? <AppContent /> : <View style={styles.appPlaceholder} />}
+              {showSplashOverlay && (
                 <Animated.View
+                  pointerEvents="none"
                   style={[
-                    styles.splashImageWrap,
+                    styles.splashOverlay,
                     {
-                      width: splashSize,
-                      height: splashSize,
-                      borderRadius: splashAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [0, splashSize / 2],
+                      opacity: splashAnim.interpolate({
+                        inputRange: [0, 0.8, 1],
+                        outputRange: [1, 1, 0],
                       }),
-                      transform: [
-                        {
-                          scale: splashAnim.interpolate({
-                            inputRange: [0, 1],
-                            outputRange: [1, 0.06],
-                          }),
-                        },
-                      ],
                     },
                   ]}
                 >
-                  <Image source={splashImage} style={styles.splashImage} />
+                  <Animated.View
+                    style={[
+                      styles.splashImageWrap,
+                      {
+                        width: splashSize,
+                        height: splashSize,
+                        borderRadius: splashAnim.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0, splashSize / 2],
+                        }),
+                        transform: [
+                          {
+                            scale: splashAnim.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: [1, 0.06],
+                            }),
+                          },
+                        ],
+                      },
+                    ]}
+                  >
+                    <Image source={splashImage} style={styles.splashImage} />
+                  </Animated.View>
                 </Animated.View>
-              </Animated.View>
-            )}
-          </View>
-        </TabBarProvider>
-      </RecordsProvider>
-    </NetworkProvider>
+              )}
+            </View>
+          </TabBarProvider>
+        </RecordsProvider>
+      </NetworkProvider>
+    </SafeAreaProvider>
   );
 }
 
@@ -527,6 +540,9 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
+    width: '100%',
+    maxWidth: APP_MAX_WIDTH,
+    alignSelf: 'center',
     backgroundColor: theme.colors.background.primary,
   },
   pagerView: {

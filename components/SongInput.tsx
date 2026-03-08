@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from 'react-i18next';
 import { searchAppleMusicSongs, getArtworkUrl, AppleMusicSong } from '../utils/appleMusicApi';
 
 interface SongInputProps {
@@ -93,20 +94,37 @@ const hiraganaToRomaji = (text: string): string => {
 
 const ENCORE_KEYWORDS = ['アンコール', 'encore', 'en', 'あんこーる'];
 const MC_KEYWORDS = ['mc', 'talk', 'トーク', 'しゃべり'];
+const CUSTOM_SONG_KEYWORDS = ['未発表曲', '未発表', '新曲', 'オリジナル', 'custom', 'original'];
 
-const getSpecialSuggestions = (query: string) => {
+type SpecialSuggestion = { type: 'encore' | 'mc' | 'custom-song'; label: string; id: string };
+
+const extractCustomSongTitle = (query: string): string => {
+  const trimmedQuery = query.trim();
+  const matchedKeyword = CUSTOM_SONG_KEYWORDS.find((keyword) =>
+    trimmedQuery.toLowerCase().includes(keyword.toLowerCase())
+  );
+
+  if (!matchedKeyword) {
+    return '';
+  }
+
+  const pattern = new RegExp(matchedKeyword, 'i');
+  return trimmedQuery.replace(pattern, '').replace(/^[:：\-\s]+/, '').trim();
+};
+
+const getSpecialSuggestions = (query: string, t: (key: string) => string) => {
   const normalized = query.trim().toLowerCase();
-  if (!normalized) return [] as Array<{ type: 'encore' | 'mc'; label: string; id: string }>;
+  if (!normalized) return [] as SpecialSuggestion[];
 
   const matchesKeyword = (keywords: string[]) =>
     keywords.some((keyword) => normalized.includes(keyword.toLowerCase()));
 
-  const results: Array<{ type: 'encore' | 'mc'; label: string; id: string }> = [];
+  const results: SpecialSuggestion[] = [];
 
   if (matchesKeyword(ENCORE_KEYWORDS)) {
     results.push({
       type: 'encore',
-      label: '📣 アンコール区切りを追加',
+      label: t('liveEdit.songInput.special.encore'),
       id: 'special-encore',
     });
   }
@@ -114,23 +132,34 @@ const getSpecialSuggestions = (query: string) => {
   if (matchesKeyword(MC_KEYWORDS)) {
     results.push({
       type: 'mc',
-      label: '🎙️ MC / トークを追加',
+      label: t('liveEdit.songInput.special.mc'),
       id: 'special-mc',
+    });
+  }
+
+  if (matchesKeyword(CUSTOM_SONG_KEYWORDS)) {
+    results.push({
+      type: 'custom-song',
+      label: t('liveEdit.songInput.special.customSong'),
+      id: 'special-custom-song',
     });
   }
 
   return results;
 };
 
-export default function SongInput({ artistName, onSelectSong, onSelectSpecial, placeholder = '曲名を入力...', onDropdownVisibilityChange }: SongInputProps) {
+export default function SongInput({ artistName, onSelectSong, onSelectSpecial, placeholder, onDropdownVisibilityChange }: SongInputProps) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState<AppleMusicSong[]>([]);
   const [loading, setLoading] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
+  const [showCustomSongInput, setShowCustomSongInput] = useState(false);
+  const [customSongTitle, setCustomSongTitle] = useState('');
 
   useEffect(() => {
     const searchSongs = async () => {
-      const specialSuggestions = getSpecialSuggestions(query);
+      const specialSuggestions = getSpecialSuggestions(query, t);
       if (query.trim().length < 2 && specialSuggestions.length === 0) {
         setSuggestions([]);
         setShowDropdown(false);
@@ -146,14 +175,12 @@ export default function SongInput({ artistName, onSelectSong, onSelectSpecial, p
       const romajiQuery = hiraganaToRomaji(query.trim());
       const searchTerms: string[] = [];
       
-      // 元のクエリを追加
-      const baseQuery = artistName ? `${artistName} ${query}` : query;
-      searchTerms.push(baseQuery);
+      // 入力フリーワードのみで検索
+      searchTerms.push(query.trim());
       
       // ローマ字変換が元と異なる場合、ローマ字クエリも追加
       if (romajiQuery !== query.trim()) {
-        const romajiSearchQuery = artistName ? `${artistName} ${romajiQuery}` : romajiQuery;
-        searchTerms.push(romajiSearchQuery);
+        searchTerms.push(romajiQuery);
       }
       
       // 複数の検索クエリで検索し、結果を統合（重複削除）
@@ -176,9 +203,36 @@ export default function SongInput({ artistName, onSelectSong, onSelectSpecial, p
 
     const timer = setTimeout(searchSongs, 300);
     return () => clearTimeout(timer);
-  }, [query, artistName]);
+  }, [query, t]);
 
-  const specialSuggestions = getSpecialSuggestions(query);
+  const specialSuggestions = getSpecialSuggestions(query, t);
+
+  const clearInputAndDropdown = () => {
+    setQuery('');
+    setSuggestions([]);
+    setShowDropdown(false);
+    setShowCustomSongInput(false);
+    setCustomSongTitle('');
+    onDropdownVisibilityChange?.(false);
+  };
+
+  const handleAddCustomSong = () => {
+    const songName = customSongTitle.trim();
+    if (!songName) {
+      Alert.alert(t('liveEdit.songInput.alerts.enterTitleTitle'), t('liveEdit.songInput.alerts.enterTitleMessage'));
+      return;
+    }
+
+    onSelectSong({
+      songId: '',
+      songName,
+      artistName: artistName || '',
+      albumName: '',
+      artworkUrl: '',
+    });
+
+    clearInputAndDropdown();
+  };
 
   const handleSelectSong = (song: AppleMusicSong) => {
     const artworkUrl = song.attributes.artwork 
@@ -192,12 +246,7 @@ export default function SongInput({ artistName, onSelectSong, onSelectSpecial, p
       albumName: '', // Apple Music APIのsongsエンドポイントにはalbum名が直接含まれていない
       artworkUrl,
     });
-
-    // 検索バーをクリアするが、キーボードは閉じない
-    setQuery('');
-    setSuggestions([]);
-    setShowDropdown(false);
-    onDropdownVisibilityChange?.(false);
+    clearInputAndDropdown();
   };
 
   return (
@@ -208,7 +257,7 @@ export default function SongInput({ artistName, onSelectSong, onSelectSpecial, p
           style={styles.input}
           value={query}
           onChangeText={setQuery}
-          placeholder={placeholder}
+          placeholder={placeholder ?? t('liveEdit.songInput.placeholders.default')}
           placeholderTextColor="#CCCCCC"
           autoCorrect={false}
           blurOnSubmit={false}
@@ -216,7 +265,7 @@ export default function SongInput({ artistName, onSelectSong, onSelectSpecial, p
         {loading && <ActivityIndicator size="small" color="#D6007A" />}
       </View>
 
-      {showDropdown && (specialSuggestions.length > 0 || suggestions.length > 0) && (
+      {showDropdown && (specialSuggestions.length > 0 || suggestions.length > 0 || showCustomSongInput) && (
         <View 
           style={styles.dropdown}
           onStartShouldSetResponder={() => true}
@@ -236,17 +285,39 @@ export default function SongInput({ artistName, onSelectSong, onSelectSpecial, p
                 key={item.id}
                 style={styles.specialSuggestionItem}
                 onPress={() => {
+                  if (item.type === 'custom-song') {
+                    setShowCustomSongInput(true);
+                    setCustomSongTitle(extractCustomSongTitle(query));
+                    return;
+                  }
+
                   onSelectSpecial?.(item.type);
-                  setQuery('');
-                  setSuggestions([]);
-                  setShowDropdown(false);
-                  onDropdownVisibilityChange?.(false);
+                  clearInputAndDropdown();
                 }}
               >
                 <Text style={styles.specialSuggestionText}>{item.label}</Text>
                 <Ionicons name="add-circle-outline" size={22} color="#D6007A" />
               </TouchableOpacity>
             ))}
+            {showCustomSongInput && (
+              <View style={styles.customSongContainer}>
+                <Text style={styles.customSongLabel}>{t('liveEdit.songInput.customTitleLabel')}</Text>
+                <View style={styles.customSongInputRow}>
+                  <TextInput
+                    style={styles.customSongInput}
+                    value={customSongTitle}
+                    onChangeText={setCustomSongTitle}
+                    placeholder={t('liveEdit.songInput.placeholders.customTitle')}
+                    placeholderTextColor="#A5A5A5"
+                    autoCorrect={false}
+                    autoCapitalize="none"
+                  />
+                  <TouchableOpacity style={styles.customSongAddButton} onPress={handleAddCustomSong}>
+                    <Text style={styles.customSongAddButtonText}>{t('liveEdit.songInput.addButton')}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
             {suggestions.map((item) => (
               <TouchableOpacity
                 key={item.id}
@@ -344,6 +415,46 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: '#444',
+  },
+  customSongContainer: {
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F5F5F5',
+    gap: 8,
+  },
+  customSongLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#666',
+  },
+  customSongInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  customSongInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: '#111',
+    backgroundColor: '#FFF',
+  },
+  customSongAddButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 10,
+    backgroundColor: '#111',
+  },
+  customSongAddButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFF',
   },
   artwork: {
     width: 50,

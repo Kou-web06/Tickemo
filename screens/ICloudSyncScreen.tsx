@@ -9,6 +9,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { BlurView } from 'expo-blur';
 import { AntDesign, Ionicons } from '@expo/vector-icons';
 import { useCloudSync } from '../hooks/useCloudSync';
 import { useTranslation } from 'react-i18next';
@@ -55,17 +56,19 @@ export default function ICloudSyncScreen({ navigation }: ICloudSyncScreenProps) 
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
       {/* ヘッダー */}
-      <View style={[styles.header, { paddingTop: Math.max(insets.top, 24) }]}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Ionicons name="chevron-back" size={28} color="#000" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>{t('icloudSync.title')}</Text>
-        <View style={styles.headerSpacer} />
-      </View>
+      <BlurView tint="light" intensity={80} style={[styles.glassHeader, { paddingTop: Math.max(insets.top, 12) }]}>
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="chevron-back" size={28} color="#000" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>{t('icloudSync.title')}</Text>
+          <View style={styles.headerSpacer} />
+        </View>
+      </BlurView>
 
       <ScrollView
         style={styles.content}
@@ -127,13 +130,18 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F2F2F7',
   },
+  glassHeader: {
+    backgroundColor: 'rgba(248, 248, 248, 0.62)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.45)',
+    overflow: 'hidden',
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-    marginTop: 30,
   },
   backButton: {
     width: 44,

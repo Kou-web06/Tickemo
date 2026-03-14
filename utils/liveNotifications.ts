@@ -216,6 +216,9 @@ const getYearlyReportTargets = () => {
 };
 
 export const scheduleLiveReminders = async (records: ChekiRecord[]) => {
+  // 通知システム一新中のため一時停止
+  return;
+
   // ロック取得を試みる（重複実行防止）
   const lockValue = Date.now().toString();
   const existingLock = await AsyncStorage.getItem(SCHEDULE_LOCK_KEY);

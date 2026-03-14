@@ -1,8 +1,17 @@
-import React, { useRef, useState } from 'react';
-import { Animated, View, TouchableOpacity, StyleSheet, Platform, Text } from 'react-native';
+import React from 'react';
+import { View, TouchableOpacity, StyleSheet, Animated, Easing } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
-import { Octicons, Ionicons, MaterialIcons, MaterialCommunityIcons, FontAwesome6, Entypo } from '@expo/vector-icons';
-import { theme } from '../theme';
+import { HugeiconsIcon } from '@hugeicons/react-native';
+import {
+  Home01Icon,
+  Home05Icon,
+  Calendar03Icon,
+  CalendarFold,
+  LayoutGridIcon,
+  GridViewIcon,
+  Settings03Icon,
+} from '@hugeicons/core-free-icons';
 
 interface TabBarProps {
   state: any;
@@ -11,51 +20,67 @@ interface TabBarProps {
 }
 
 export const FloatingTabBar: React.FC<TabBarProps> = ({ state, descriptors, navigation }) => {
-  const [pressedTab, setPressedTab] = useState<string | null>(null);
-  const rotateValuesRef = useRef<Record<string, Animated.Value>>({});
+  const insets = useSafeAreaInsets();
+  const settingsSpin = React.useRef(new Animated.Value(0)).current;
+  const routes = Array.isArray(state?.routes) ? state.routes : [];
+  const activeIndex = typeof state?.index === 'number' ? state.index : 0;
 
-  const getRotateValue = (routeKey: string) => {
-    if (!rotateValuesRef.current[routeKey]) {
-      rotateValuesRef.current[routeKey] = new Animated.Value(0);
-    }
-    return rotateValuesRef.current[routeKey];
-  };
+  if (routes.length === 0) {
+    return null;
+  }
+
+  const settingsRotate = settingsSpin.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
   
   // Check if any focused route wants to hide the tab bar
-  const focusedRoute = state.routes[state.index];
-  const { options } = descriptors[focusedRoute.key];
+  const focusedRoute = routes[activeIndex] || routes[0];
+  const { options } = descriptors?.[focusedRoute.key] ?? { options: {} };
   
   // If tabBarStyle has display: 'none', don't render the tab bar
   if (options.tabBarStyle?.display === 'none') {
     return null;
   }
 
-  const getIconInfo = (routeName: string): { IconComponent: any; name: string } => {
+  const getIconInfo = (routeName: string, isFocused: boolean) => {
     switch (routeName) {
       case 'Home':
-        return { IconComponent: Ionicons, name: 'albums' };
-      case 'Countdown':
-        return { IconComponent: Entypo, name: 'modern-mic' };
+        return isFocused ? Home01Icon : Home05Icon;
+      case 'Calendar':
+        return isFocused ? Calendar03Icon : CalendarFold;
       case 'Statistics':
-        return { IconComponent: Ionicons, name: 'stats-chart' };
+        return isFocused ? GridViewIcon : LayoutGridIcon;
       case 'Settings':
-        return { IconComponent: Ionicons, name: 'settings-sharp' };
+        return Settings03Icon;
       default:
-        return { IconComponent: Octicons, name: 'circle' };
+        return Home01Icon;
     }
   };
 
+  const spinSettingsIcon = () => {
+    settingsSpin.setValue(0);
+    Animated.timing(settingsSpin, {
+      toValue: 1,
+      duration: 150,
+      easing: Easing.linear,
+      useNativeDriver: true,
+    }).start();
+  };
+
   return (
-    <View style={styles.container}>
-      <View style={styles.tabBarWrapper}>
-        <BlurView intensity={50} tint="dark" style={styles.blurView}>
-          <View style={styles.tabBar}>
-            {state.routes.map((route: any, index: number) => {
-          const { options } = descriptors[route.key];
-          const isFocused = state.index === index;
-          const isPressed = pressedTab === route.key;
+    <View style={[styles.container, { bottom: insets.bottom > 0 ? insets.bottom - 10 : 0 }]}>
+      <BlurView tint="light" intensity={80} style={styles.tabBar}>
+        <View style={styles.tabBarContent}>
+          {routes.map((route: any, index: number) => {
+          const { options } = descriptors?.[route.key] ?? { options: {} };
+          const isFocused = activeIndex === index;
 
           const onPress = () => {
+            if (route.name === 'Settings') {
+              spinSettingsIcon();
+            }
+
             const event = navigation.emit({
               type: 'tabPress',
               target: route.key,
@@ -65,69 +90,43 @@ export const FloatingTabBar: React.FC<TabBarProps> = ({ state, descriptors, navi
             if (!event.defaultPrevented && isFocused && route.name === 'Settings') {
               navigation.navigate(route.name);
             } else if (!isFocused && !event.defaultPrevented) {
-              if (route.name === 'Settings') {
-                const rotateValue = getRotateValue(route.key);
-                rotateValue.setValue(0);
-                Animated.timing(rotateValue, {
-                  toValue: 1,
-                  duration: 500,
-                  useNativeDriver: true,
-                }).start();
-              }
               navigation.navigate(route.name);
             }
-            setPressedTab(null);
           };
 
-          const onPressIn = () => {
-            setPressedTab(route.key);
-          };
+          const icon = getIconInfo(route.name, isFocused);
+          const iconNode = (
+            <HugeiconsIcon icon={icon} size={24} color={isFocused ? '#FFFFFF' : '#A890B3'} strokeWidth={1.8} />
+          );
+          const renderedIcon = route.name === 'Settings' ? (
+            <Animated.View style={{ transform: [{ rotate: settingsRotate }] }}>{iconNode}</Animated.View>
+          ) : (
+            iconNode
+          );
 
-          const onPressOut = () => {
-            setPressedTab(null);
-          };
-
-          const { IconComponent, name: iconName } = getIconInfo(route.name);
-
-          const rotateValue = getRotateValue(route.key);
-          const rotateStyle = route.name === 'Settings'
-            ? {
-              transform: [
-                {
-                  rotate: rotateValue.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: ['0deg', '360deg'],
-                  }),
-                },
-              ],
-            }
-            : null;
-
-          return (
-            <TouchableOpacity
-              key={route.key}
-              accessibilityRole="button"
-              accessibilityState={isFocused ? { selected: true } : {}}
-              accessibilityLabel={options.tabBarAccessibilityLabel}
-              testID={options.tabBarTestID}
-              onPress={onPress}
-              onPressIn={onPressIn}
-              onPressOut={onPressOut}
-              style={styles.tab}
-              activeOpacity={0.7}
-            >
-              <Animated.View style={rotateStyle ?? undefined}>
-                <IconComponent
-                  name={iconName}
-                  size={theme.tabBar.iconSize}
-                  color={(isFocused || isPressed) ? theme.colors.tabBar.activeIcon : theme.colors.tabBar.inactiveIcon}
-                />
-              </Animated.View>
-            </TouchableOpacity>
-          ); })}
-          </View>
-        </BlurView>
-      </View>
+            return (
+              <TouchableOpacity
+                key={route.key}
+                accessibilityRole="button"
+                accessibilityState={isFocused ? { selected: true } : {}}
+                accessibilityLabel={options.tabBarAccessibilityLabel}
+                testID={options.tabBarTestID}
+                onPress={onPress}
+                style={styles.tab}
+                activeOpacity={0.9}
+              >
+                {isFocused ? (
+                  <View style={styles.activeCircle}>
+                    {renderedIcon}
+                  </View>
+                ) : (
+                  renderedIcon
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </BlurView>
     </View>
   );
 };
@@ -135,44 +134,44 @@ export const FloatingTabBar: React.FC<TabBarProps> = ({ state, descriptors, navi
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    bottom: theme.tabBar.bottomOffset,
     left: 0,
     right: 0,
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: theme.spacing.md,
+    alignSelf: 'center',
     zIndex: 9999,
   },
-  tabBarWrapper: {
-    borderRadius: theme.tabBar.borderRadius,
-    overflow: 'visible',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 3,
-    elevation: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-  },
-  blurView: {
-    borderRadius: theme.tabBar.borderRadius,
-    overflow: 'hidden',
-  },
   tabBar: {
-    minWidth: 220,
-    flexDirection: 'row',
-    borderRadius: theme.tabBar.borderRadius,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    paddingVertical: theme.tabBar.padding,
-    paddingHorizontal: theme.spacing.xxl,
+    width: '85%',
+    height: 64,
+    borderRadius: 32,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(243, 229, 250, 0.6)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.45)',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: theme.spacing.lg,
+    shadowColor: '#6C3A8D',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 15,
+    elevation: 5,
+  },
+  tabBarContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
   },
   tab: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: theme.spacing.xxs,
-    paddingHorizontal: theme.spacing.xs,
+  },
+  activeCircle: {
+    width: 65,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#A328DD',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

@@ -31,12 +31,30 @@ import { isTestflightMode } from '../utils/appMode';
 import { NO_IMAGE_URI, useResolvedImageUri } from '../hooks/useResolvedImageUri';
 import { useTranslation } from 'react-i18next';
 import { LIVE_TYPE_ICON_MAP, normalizeLiveType, getLiveTypeLabel } from '../utils/liveType';
+import { DummyJacket } from '../components/DummyJacket';
 
 const Stack = createNativeStackNavigator();
 const FREE_TICKET_LIMIT = 3;
 
 // Apple Music Developer Token (JWT)
 const APPLE_MUSIC_DEVELOPER_TOKEN = 'eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjMyTVlRNk5WOTYifQ.eyJpc3MiOiJRMkxMMkI3OTJWIiwiaWF0IjoxNzY5ODQ5MDA5LCJleHAiOjE3ODU0MDEwMDksImF1ZCI6Imh0dHBzOi8vYXBwbGVpZC5hcHBsZS5jb20iLCJzdWIiOiJtZWRpYS5jb20uYW5vbnltb3VzLlRpY2tlbW8ifQ.ect6vO1q3aC9XJVYCUBVLlTHaVEcZebm0-dVZ3ak6uglI33e1ra3qcwkawXaScFFcLB8sgX5TEcFEj9QGF1Z8A';
+
+const sanitizeTicketPrice = (value: unknown): number | undefined => {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : undefined;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value
+      .replace(/[０-９]/g, (digit) => String(digit.charCodeAt(0) - 0xfee0))
+      .replace(/[^0-9]/g, '');
+    if (!normalized) return undefined;
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  return undefined;
+};
 
 const EMPTY_TICKET_SVG = `
 <svg width="280" height="561" viewBox="0 0 280 561" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -72,6 +90,7 @@ interface LiveInfo {
   date: Date;
   venue: string;
   seat?: string;
+  ticketPrice?: number;
   startTime: string;
   endTime: string;
   imageUrl?: string;
@@ -220,7 +239,7 @@ function CountdownMain({ navigation }: any) {
   }));
 
   const coverUri = useResolvedImageUri(nextRecord?.imageUrls?.[0], nextRecord?.imageAssetIds?.[0]);
-  const backgroundUri = nextRecord ? (coverUri ?? NO_IMAGE_URI) : null;
+  const backgroundUri = nextRecord && coverUri && coverUri !== NO_IMAGE_URI ? coverUri : null;
 
   useEffect(() => {
     if (!backgroundUri) {
@@ -412,6 +431,29 @@ function CountdownMain({ navigation }: any) {
     setShowEditScreen(true);
   };
 
+  const liveEditInitialData = useMemo(() => {
+    if (isCreatingNewLive || !nextRecord) return null;
+    return {
+      name: nextRecord.liveName,
+      artists: nextRecord.artists && nextRecord.artists.length > 0 ? nextRecord.artists : [nextRecord.artist || ''],
+      artist: nextRecord.artist,
+      artistImageUrls: nextRecord.artistImageUrls,
+      liveType: nextRecord.liveType,
+      artistImageUrl: nextRecord.artistImageUrl,
+      date: parseRecordDate(nextRecord.date) || new Date(),
+      venue: nextRecord.venue || '',
+      seat: nextRecord.seat || '',
+      ticketPrice: sanitizeTicketPrice(nextRecord.ticketPrice),
+      startTime: nextRecord.startTime || '18:00',
+      endTime: nextRecord.endTime || '20:00',
+      imageUrls: resolvedImageUrls.length > 0 ? resolvedImageUrls : nextRecord.imageUrls,
+      qrCode: nextRecord.qrCode,
+      memo: nextRecord.memo,
+      detail: nextRecord.detail,
+      setlistSongs: setlistSongs,
+    };
+  }, [isCreatingNewLive, nextRecord, resolvedImageUrls, setlistSongs]);
+
   const dedupeImageEntries = (
     urls: string[],
     assetIds: Array<string | null>
@@ -510,6 +552,7 @@ function CountdownMain({ navigation }: any) {
           date: formatDate(info.date),
           venue: info.venue,
           seat: info.seat || '',
+          ticketPrice: sanitizeTicketPrice(info.ticketPrice),
           startTime: info.startTime || '',
           endTime: info.endTime || '',
           imageUrls: uploadedImageUrls,
@@ -562,6 +605,7 @@ function CountdownMain({ navigation }: any) {
           date: formatDate(info.date),
           venue: info.venue,
           seat: info.seat || nextRecord.seat || '',
+          ticketPrice: sanitizeTicketPrice(info.ticketPrice) ?? sanitizeTicketPrice(nextRecord.ticketPrice),
           startTime: info.startTime || nextRecord.startTime || '',
           endTime: info.endTime || nextRecord.endTime || '',
           imageUrls: uploadedImageUrls.length > 0 ? uploadedImageUrls : (nextRecord.imageUrls || []),
@@ -898,13 +942,17 @@ function CountdownMain({ navigation }: any) {
                       ]}
                     >
                       <View style={[styles.jacketContainer, { width: jacketSize, height: jacketSize, borderRadius: 10 * baseScale }]}>
-                        <Image
-                          source={{ uri: coverUri ?? NO_IMAGE_URI }}
-                          style={styles.jacketImage}
-                          contentFit="cover"
-                          cachePolicy="memory-disk"
-                          transition={0}
-                        />
+                        {coverUri && coverUri !== NO_IMAGE_URI ? (
+                          <Image
+                            source={{ uri: coverUri }}
+                            style={styles.jacketImage}
+                            contentFit="cover"
+                            cachePolicy="memory-disk"
+                            transition={0}
+                          />
+                        ) : (
+                          <DummyJacket style={styles.jacketImage} iconSize={Math.max(18, jacketSize * 0.3)} />
+                        )}
                       </View>
                     </Animated.View>
                   </Pressable>
@@ -1002,24 +1050,7 @@ function CountdownMain({ navigation }: any) {
         onRequestClose={() => setShowEditScreen(false)}
       >
         <LiveEditScreen
-          initialData={!isCreatingNewLive && nextRecord ? {
-            name: nextRecord.liveName,
-            artists: nextRecord.artists && nextRecord.artists.length > 0 ? nextRecord.artists : [nextRecord.artist || ''],
-            artist: nextRecord.artist,
-            artistImageUrls: nextRecord.artistImageUrls,
-            liveType: nextRecord.liveType,
-            artistImageUrl: nextRecord.artistImageUrl,
-            date: parseRecordDate(nextRecord.date) || new Date(),
-            venue: nextRecord.venue || '',
-            seat: nextRecord.seat || '',
-            startTime: nextRecord.startTime || '18:00',
-            endTime: nextRecord.endTime || '20:00',
-            imageUrls: resolvedImageUrls.length > 0 ? resolvedImageUrls : nextRecord.imageUrls,
-            qrCode: nextRecord.qrCode,
-            memo: nextRecord.memo,
-            detail: nextRecord.detail,
-            setlistSongs: setlistSongs,
-          } : null}
+          initialData={liveEditInitialData}
           onSave={handleSaveLiveInfo}
           onCancel={() => { setShowEditScreen(false); setIsCreatingNewLive(false); }}
         />
@@ -1066,7 +1097,7 @@ export default function CountdownScreen() {
         name="Settings"
         component={SettingsScreen}
         options={{
-          animation: 'slide_from_right',
+          animation: 'none',
           presentation: 'card',
           gestureEnabled: false,
           fullScreenGestureEnabled: false,
@@ -1076,7 +1107,7 @@ export default function CountdownScreen() {
         name="ProfileEdit"
         component={ProfileEditScreen}
         options={{
-          animation: 'slide_from_right',
+          animation: 'none',
           presentation: 'card',
           gestureEnabled: false,
           fullScreenGestureEnabled: false,

@@ -12,6 +12,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { Image as ExpoImage } from 'expo-image';
+import { BlurView } from 'expo-blur';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -185,24 +186,26 @@ export default function ProfileEditScreen({ navigation }: any) {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={[styles.header, { paddingTop: Math.min(insets.top, 35) }]}> 
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Ionicons name="chevron-back" size={26} color="#000" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>{t('profileEdit.title')}</Text>
-        <TouchableOpacity
-          style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
-          onPress={handleSave}
-          disabled={isSaving}
-        >
-          {isSaving ? (
-            <ActivityIndicator color="#FFF" size="small" />
-          ) : (
-            <Text style={styles.saveButtonText}>{t('profileEdit.save')}</Text>
-          )}
-        </TouchableOpacity>
-      </View>
+    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
+      <BlurView tint="light" intensity={80} style={[styles.glassHeader, { paddingTop: Math.max(insets.top, 12) }]}>
+        <View style={styles.header}> 
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+            <Ionicons name="chevron-back" size={26} color="#000" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>{t('profileEdit.title')}</Text>
+          <TouchableOpacity
+            style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
+            onPress={handleSave}
+            disabled={isSaving}
+          >
+            {isSaving ? (
+              <ActivityIndicator color="#FFF" size="small" />
+            ) : (
+              <Text style={styles.saveButtonText}>{t('profileEdit.save')}</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </BlurView>
 
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.profileCard}>
@@ -289,13 +292,18 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F8F8F8',
   },
+  glassHeader: {
+    backgroundColor: 'rgba(248, 248, 248, 0.62)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.45)',
+    overflow: 'hidden',
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 8,
   },
   backButton: {
     width: 36,
@@ -315,7 +323,7 @@ const styles = StyleSheet.create({
     borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#111111',
+    backgroundColor: '#8315B1',
     minWidth: 70,
   },
   saveButtonDisabled: {

@@ -340,8 +340,8 @@ i18n.use(initReactI18next).init({
             error: 'エラー',
             discardConfirmTitle: '入力内容を破棄しますか？',
             discardConfirmMessage: '保存していない入力内容は失われます。',
-            continueEditing: '編集を続ける',
-            discard: '破棄する',
+            continueEditing: 'キャンセル',
+            discard: '破棄',
             permissionRequiredTitle: '権限が必要です',
             requiredFields: 'ライブ名・アーティスト名・日付・会場は必須です',
             requiredFieldsShort: 'ライブ名、アーティスト名、会場は必須項目です',
@@ -381,6 +381,7 @@ i18n.use(initReactI18next).init({
             placeholders: {
               songSearch: '曲名を検索',
               ocrDraft: '抽出されたテキストがここに表示されます',
+              lineByLineInput: '1曲ごとに改行しながら入力してください',
             },
             popover: {
               bulkRegister: 'まとめて登録 β',
@@ -834,6 +835,7 @@ i18n.use(initReactI18next).init({
             placeholders: {
               songSearch: 'Search song title',
               ocrDraft: 'Extracted text will appear here',
+              lineByLineInput: 'Enter one song per line',
             },
             popover: {
               bulkRegister: 'Bulk add β',

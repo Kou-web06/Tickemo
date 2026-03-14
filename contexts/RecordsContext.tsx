@@ -59,6 +59,32 @@ const normalizeArtists = (record: ChekiRecord): ChekiRecord => {
   };
 };
 
+const coerceTicketPrice = (value: unknown): number | undefined => {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : undefined;
+  }
+
+  if (typeof value === 'string') {
+    const normalizedDigits = value
+      .replace(/[０-９]/g, (digit) => String(digit.charCodeAt(0) - 0xfee0))
+      .replace(/[^0-9]/g, '');
+    if (!normalizedDigits) return undefined;
+    const parsed = Number(normalizedDigits);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  return undefined;
+};
+
+const normalizeTicketPrice = (record: ChekiRecord): ChekiRecord => {
+  const raw = (record as ChekiRecord & { ticketPrice?: unknown }).ticketPrice;
+  const ticketPrice = coerceTicketPrice(raw);
+  return {
+    ...record,
+    ticketPrice,
+  };
+};
+
 const resolveRecordImages = (record: ChekiRecord): ChekiRecord => {
   if (!record.imageUrls || record.imageUrls.length === 0) return record;
   const resolvedEntries = record.imageUrls
@@ -89,7 +115,7 @@ export const RecordsProvider: React.FC<{ children: ReactNode }> = ({ children })
   const { isSyncing } = useCloudSync();
 
   const records = useMemo(
-    () => lives.map((record) => resolveRecordImages(normalizeArtists(normalizeDateFormat(record)))),
+    () => lives.map((record) => resolveRecordImages(normalizeArtists(normalizeDateFormat(normalizeTicketPrice(record))))),
     [lives]
   );
   const isLoading = isSyncing;
@@ -112,12 +138,14 @@ export const RecordsProvider: React.FC<{ children: ReactNode }> = ({ children })
   }, [records]);
 
   const addRecord = async (record: ChekiRecord) => {
-    addLive(normalizeArtists(normalizeDateFormat(record)));
+    const normalizedRecord = normalizeArtists(normalizeDateFormat(normalizeTicketPrice(record)));
+    addLive(normalizedRecord);
     void trackTicketSaveForReview();
   };
 
   const updateRecord = async (id: string, updatedRecord: ChekiRecord) => {
-    updateLive(id, normalizeArtists(normalizeDateFormat(updatedRecord)));
+    const normalizedRecord = normalizeArtists(normalizeDateFormat(normalizeTicketPrice(updatedRecord)));
+    updateLive(id, normalizedRecord);
     void trackTicketSaveForReview();
   };
 

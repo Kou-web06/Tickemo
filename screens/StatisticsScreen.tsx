@@ -1,747 +1,592 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView, useWindowDimensions } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, useWindowDimensions, TouchableOpacity } from 'react-native';
+import { MaterialIcons } from '@expo/vector-icons';
+import { HugeiconsIcon } from '@hugeicons/react-native';
+import {
+  MedalFirstPlaceIcon,
+  MedalSecondPlaceIcon,
+  MedalThirdPlaceIcon,
+  Medal06Icon,
+  Wallet03Icon,
+  ViewIcon,
+  ViewOffIcon,
+} from '@hugeicons/core-free-icons';
 import { Image } from 'expo-image';
-import { BlurView } from 'expo-blur';
-import { LinearGradient } from 'expo-linear-gradient';
-import Svg, { Defs, LinearGradient as SvgLinearGradient, Stop, Text as SvgText } from 'react-native-svg';
-import { BarChart } from 'react-native-gifted-charts';
-import Animated, {
-  Easing,
-  FadeInDown,
-  runOnJS,
-  useAnimatedReaction,
-  useAnimatedStyle,
-  useDerivedValue,
-  useSharedValue,
-  withDelay,
-  withSequence,
-  withTiming,
-} from 'react-native-reanimated';
-import { theme } from '../theme';
-import { useStatistics } from '../hooks/useStatistics';
-import { getArtworkUrl, searchAppleMusicArtists } from '../utils/appleMusicApi';
-import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { BlurView } from 'expo-blur';
+import { BarChart } from 'react-native-gifted-charts';
+import { useRecords } from '../contexts/RecordsContext';
+import { useAppStore } from '../store/useAppStore';
+import { useFonts, LINESeedJP_400Regular, LINESeedJP_700Bold } from '@expo-google-fonts/line-seed-jp';
+import { getArtworkUrl, searchAppleMusicArtists, searchAppleMusicSongs } from '../utils/appleMusicApi';
 
-const APPLE_MUSIC_DEVELOPER_TOKEN =
-  'eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjMyTVlRNk5WOTYifQ.eyJpc3MiOiJRMkxMMkI3OTJWIiwiaWF0IjoxNzY5ODQ5MDA5LCJleHAiOjE3ODU0MDEwMDksImF1ZCI6Imh0dHBzOi8vYXBwbGVpZC5hcHBsZS5jb20iLCJzdWIiOiJtZWRpYS5jb20uYW5vbnltb3VzLlRpY2tlbW8ifQ.ect6vO1q3aC9XJVYCUBVLlTHaVEcZebm0-dVZ3ak6uglI33e1ra3qcwkawXaScFFcLB8sgX5TEcFEj9QGF1Z8A';
+const PRIMARY_COLOR = '#a328dd';
+const PRIMARY_LIGHT = '#f3d9ff';
+const TEXT_DARK = '#414141';
+const TEXT_GRAY = '#a1a1a1';
+const BG_LIGHT = '#f5f5f5';
+const APPLE_MUSIC_DEVELOPER_TOKEN = 'eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjMyTVlRNk5WOTYifQ.eyJpc3MiOiJRMkxMMkI3OTJWIiwiaWF0IjoxNzY5ODQ5MDA5LCJleHAiOjE3ODU0MDEwMDksImF1ZCI6Imh0dHBzOi8vYXBwbGVpZC5hcHBsZS5jb20iLCJzdWIiOiJtZWRpYS5jb20uYW5vbnltb3VzLlRpY2tlbW8ifQ.ect6vO1q3aC9XJVYCUBVLlTHaVEcZebm0-dVZ3ak6uglI33e1ra3qcwkawXaScFFcLB8sgX5TEcFEj9QGF1Z8A';
 
-const TAB_OPTIONS = [
-  { key: 'legends', labelKey: 'statistics.tabs.artists' },
-  { key: 'history', labelKey: 'statistics.tabs.yearly' },
-] as const;
-
-type TabKey = (typeof TAB_OPTIONS)[number]['key'];
-
-const RANK_COLORS = {
-  1: '#F7C948',
-  2: '#BFC5D2',
-  3: '#C58A6A',
+type SummaryData = {
+  totalLives: number;
+  totalArtists: number;
+  totalVenues: number;
 };
 
-const RANK_GRADIENTS = {
-  1: ['#EBDAA0', '#FFF7DD', '#B0A47C'],
-  2: ['#C7D2D9', '#F4F7FA', '#A1AFBA'],
-  3: ['#C58A6A', '#FFD7C5', '#776867'],
-} as const;
+type MonthlyData = {
+  month: string;
+  count: number;
+};
 
-const PODIUM_BASE_HEIGHT = 200;
-const PODIUM_MAX_HEIGHT = 280;
-const PODIUM_ANIM_DURATION = 1000;
-const PODIUM_GAP = theme.spacing.md;
-const RANK_HEIGHT_FACTOR = {
-  1: 1,
-  2: 0.9,
-  3: 0.8,
+type TopItem = {
+  name: string;
+  count: number;
+  imageUrl?: string;
+};
+
+const parseRecordDateTime = (date: string, startTime?: string) => {
+  const [y, m, d] = date.split('.').map((value) => Number(value));
+  if (!y || !m || !d) {
+    return null;
+  }
+
+  const parsed = new Date(y, m - 1, d, 0, 0, 0, 0);
+  if (startTime) {
+    const [h, min] = startTime.split(':').map((value) => Number(value));
+    if (!Number.isNaN(h)) {
+      parsed.setHours(h, Number.isNaN(min) ? 0 : min, 0, 0);
+    }
+  }
+
+  return parsed;
 };
 
 const StatisticsScreen: React.FC = () => {
-  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const { topArtists, totalLives, allArtists, yearlyReport } = useStatistics();
-  const [activeTab, setActiveTab] = useState<TabKey>('legends');
+  const { width: windowWidth } = useWindowDimensions();
+  const { records } = useRecords();
+  const setlists = useAppStore((state) => state.setlists);
   const [artistImages, setArtistImages] = useState<Record<string, string>>({});
-  const [selectedYear, setSelectedYear] = useState<number | null>(null);
-  const [tabLayoutWidth, setTabLayoutWidth] = useState(0);
-  const tabTranslateX = useSharedValue(0);
-  const chartLift = useSharedValue(0);
-  const chartBarWidth = Math.min(28, Math.max(22, windowWidth * 0.07));
-  const chartBarSpacing = Math.min(20, Math.max(12, windowWidth * 0.05));
-  const chartWidth = windowWidth - theme.spacing.lg * 2;
-  const podiumWidth = Math.min(360, windowWidth - theme.spacing.xxl * 2);
-  const podiumSlotWidth = (podiumWidth - PODIUM_GAP * 2) / 3;
-  const detailSheetHeight = Math.round(windowHeight * 0.45);
-  const containerTopPadding = insets.top + Math.max(8, windowHeight * 0.012);
-  const legendsBottomPadding = insets.bottom + Math.max(96, windowHeight * 0.12);
-  const historyBottomPadding = detailSheetHeight + insets.bottom;
-  const [mainValueDisplay, setMainValueDisplay] = useState(0);
-  const mainValueFrame = useRef<number | null>(null);
+  const [songImages, setSongImages] = useState<Record<string, string>>({});
+  const [fontsLoaded] = useFonts({
+    LINESeedJP_400Regular,
+    LINESeedJP_700Bold,
+  });
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [priceHidden, setPriceHidden] = useState(false);
 
-  // 年次レポート通知からの遷移処理
-  useEffect(() => {
-    const { getGlobalNotification } = require('../contexts/NotificationContext');
-    const notification = getGlobalNotification();
-    if (notification && notification.kind === 'yearly_report') {
-      console.log('[StatisticsScreen] Opening yearly report tab');
-      setActiveTab('history');
-      // 最新の年度を選択
-      const latestYear = yearlyReport[yearlyReport.length - 1]?.year ?? null;
-      if (latestYear) {
-        setSelectedYear(latestYear);
-      }
+  const attendedRecords = useMemo(() => {
+    const now = new Date();
+    return records.filter((record) => {
+      const parsed = parseRecordDateTime(record.date, record.startTime);
+      return parsed ? parsed.getTime() <= now.getTime() : false;
+    });
+  }, [records]);
+
+  const availableYears = useMemo(() => {
+    const years = attendedRecords
+      .map((record) => parseInt(record.date.split('.')[0] || '0', 10))
+      .filter((year) => Number.isFinite(year) && year > 0)
+      .sort((a, b) => a - b);
+
+    if (years.length === 0) {
+      const currentYear = new Date().getFullYear();
+      return {
+        minYear: currentYear,
+        maxYear: currentYear,
+      };
     }
-  }, [yearlyReport]);
 
-  const chartMaxValue = useMemo(() => {
-    if (yearlyReport.length === 0) return 12;
-    const maxValue = yearlyReport.reduce((max, item) => Math.max(max, item.totalLives), 0);
-    const rounded = Math.max(3, Math.ceil(maxValue / 3) * 3);
-    return rounded;
-  }, [yearlyReport]);
+    return {
+      minYear: years[0],
+      maxYear: years[years.length - 1],
+    };
+  }, [attendedRecords]);
 
-  const rankOne = topArtists[0];
-  const rankTwo = topArtists[1];
-  const rankThree = topArtists[2];
-  const backgroundImageUrl = rankOne?.name ? artistImages[rankOne.name] : null;
+  useEffect(() => {
+    setSelectedYear((currentYear) => {
+      if (currentYear < availableYears.minYear) return availableYears.minYear;
+      if (currentYear > availableYears.maxYear) return availableYears.maxYear;
+      return currentYear;
+    });
+  }, [availableYears]);
 
-  const rankPercents = [rankOne?.percentage, rankTwo?.percentage, rankThree?.percentage]
-    .filter((value): value is number => typeof value === 'number')
-    .filter((value) => value >= 0);
-  const uniquePercents = Array.from(new Set(rankPercents)).sort((a, b) => b - a);
+  const totalSpending = useMemo((): number => {
+    return attendedRecords
+      .filter((r) => {
+        const year = parseInt(r.date.split('.')[0] || '0');
+        return year === selectedYear;
+      })
+      .reduce((sum, r) => {
+        const price = typeof r.ticketPrice === 'number' && Number.isFinite(r.ticketPrice) ? r.ticketPrice : 0;
+        return sum + price;
+      }, 0);
+  }, [attendedRecords, selectedYear]);
 
-  const getDisplayRank = (value?: number): 1 | 2 | 3 => {
-    if (typeof value !== 'number' || value < 0) return 3;
-    const index = uniquePercents.indexOf(value) + 1;
-    if (index === 1) return 1;
-    if (index === 2) return 2;
-    return 3;
-  };
+  const summaryData = useMemo((): SummaryData => {
+    const filtered = attendedRecords.filter((r) => {
+      const year = parseInt(r.date.split('.')[0] || '0');
+      return year === selectedYear;
+    });
 
-  const rankTwoDisplayRank = getDisplayRank(rankTwo?.percentage);
-  const rankThreeDisplayRank = getDisplayRank(rankThree?.percentage);
+    const uniqueArtists = new Set<string>();
+    const uniqueVenues = new Set<string>();
+
+    filtered.forEach((r) => {
+      if (r.artist) uniqueArtists.add(r.artist);
+      if (r.venue) uniqueVenues.add(r.venue);
+    });
+
+    return {
+      totalLives: filtered.length,
+      totalArtists: uniqueArtists.size,
+      totalVenues: uniqueVenues.size,
+    };
+  }, [attendedRecords, selectedYear]);
+
+  const monthlyData = useMemo((): MonthlyData[] => {
+    const filtered = attendedRecords.filter((r) => {
+      const year = parseInt(r.date.split('.')[0] || '0');
+      return year === selectedYear;
+    });
+
+    const monthCounts: Record<number, number> = {};
+    for (let i = 1; i <= 12; i++) {
+      monthCounts[i] = 0;
+    }
+
+    filtered.forEach((r) => {
+      const month = parseInt(r.date.split('.')[1] || '0');
+      if (month >= 1 && month <= 12) {
+        monthCounts[month]++;
+      }
+    });
+
+    return Array.from({ length: 12 }, (_, i) => ({
+      month: `${i + 1}月`,
+      count: monthCounts[i + 1],
+    }));
+  }, [attendedRecords, selectedYear]);
+
+  const topArtists = useMemo((): TopItem[] => {
+    const filtered = attendedRecords.filter((r) => {
+      const year = parseInt(r.date.split('.')[0] || '0');
+      return year === selectedYear;
+    });
+
+    const artistMap: Record<string, { count: number; imageUrl: string }> = {};
+    filtered.forEach((r) => {
+      if (r.artist) {
+        const savedImageUrl = r.artistImageUrl || r.artistImageUrls?.[0] || '';
+        const current = artistMap[r.artist];
+
+        if (current) {
+          current.count += 1;
+          if (!current.imageUrl && savedImageUrl) {
+            current.imageUrl = savedImageUrl;
+          }
+        } else {
+          artistMap[r.artist] = {
+            count: 1,
+            imageUrl: savedImageUrl,
+          };
+        }
+      }
+    });
+
+    return Object.entries(artistMap)
+      .map(([name, value]) => ({ name, count: value.count, imageUrl: value.imageUrl }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 3);
+  }, [attendedRecords, selectedYear]);
+
+  const topVenues = useMemo((): TopItem[] => {
+    const filtered = attendedRecords.filter((r) => {
+      const year = parseInt(r.date.split('.')[0] || '0');
+      return year === selectedYear;
+    });
+
+    const counts: Record<string, number> = {};
+    filtered.forEach((r) => {
+      if (r.venue) {
+        counts[r.venue] = (counts[r.venue] || 0) + 1;
+      }
+    });
+
+    return Object.entries(counts)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 3);
+  }, [attendedRecords, selectedYear]);
+
+  const topSongs = useMemo((): TopItem[] => {
+    const filteredRecords = attendedRecords.filter((record) => {
+      const year = parseInt(record.date.split('.')[0] || '0', 10);
+      return year === selectedYear;
+    });
+
+    const songMap: Record<string, { name: string; count: number; imageUrl: string }> = {};
+
+    filteredRecords.forEach((record) => {
+      const items = setlists[record.id] || [];
+
+      items.forEach((item) => {
+        if (item.type !== 'song' || !item.songName?.trim()) {
+          return;
+        }
+
+        const key = item.songId || item.songName.trim().toLowerCase();
+        const existing = songMap[key];
+
+        if (existing) {
+          existing.count += 1;
+          if (!existing.imageUrl && item.artworkUrl) {
+            existing.imageUrl = item.artworkUrl;
+          }
+          return;
+        }
+
+        songMap[key] = {
+          name: item.songName.trim(),
+          count: 1,
+          imageUrl: item.artworkUrl || '',
+        };
+      });
+    });
+
+    return Object.values(songMap)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5)
+      .map((song) => ({
+        name: song.name,
+        count: song.count,
+        imageUrl: song.imageUrl,
+      }));
+  }, [attendedRecords, selectedYear, setlists]);
 
   useEffect(() => {
     let isActive = true;
-    const namesToFetch = allArtists
+    const artistNames = topArtists
+      .filter((artist) => !artist.imageUrl)
       .map((artist) => artist.name)
       .filter((name) => name && !artistImages[name]);
 
-    if (namesToFetch.length === 0) return undefined;
+    if (artistNames.length === 0) {
+      return undefined;
+    }
 
     const fetchArtistImages = async () => {
-      for (const name of namesToFetch) {
-        try {
-          const results = await searchAppleMusicArtists(name, APPLE_MUSIC_DEVELOPER_TOKEN, 1);
-          const artwork = results[0]?.attributes.artwork?.url;
-          const imageUrl = artwork ? getArtworkUrl(artwork, 300) : '';
+      for (const name of artistNames) {
+        const results = await searchAppleMusicArtists(name, APPLE_MUSIC_DEVELOPER_TOKEN, 1);
+        const artworkUrl = results[0]?.attributes.artwork?.url;
+        const imageUrl = artworkUrl ? getArtworkUrl(artworkUrl, 160) : '';
 
-          if (isActive) {
-            setArtistImages((prev) => {
-              if (prev[name]) return prev;
-              return {
-                ...prev,
-                [name]: imageUrl,
-              };
-            });
-          }
-        } catch (error) {
-          console.warn('[Statistics] Failed to fetch artist image:', name, error);
+        if (!isActive) {
+          return;
         }
+
+        setArtistImages((current) => {
+          if (current[name]) {
+            return current;
+          }
+
+          return {
+            ...current,
+            [name]: imageUrl,
+          };
+        });
       }
     };
 
-    fetchArtistImages();
+    void fetchArtistImages();
 
     return () => {
       isActive = false;
     };
-  }, [allArtists, artistImages]);
+  }, [artistImages, topArtists]);
 
   useEffect(() => {
-    if (selectedYear !== null) return;
-    const latestWithData = [...yearlyReport]
-      .reverse()
-      .find((item) => item.totalLives > 0)?.year;
-    const fallbackYear = yearlyReport[yearlyReport.length - 1]?.year ?? null;
-    setSelectedYear(latestWithData ?? fallbackYear);
-  }, [selectedYear, yearlyReport]);
+    let isActive = true;
+    const songNames = topSongs
+      .filter((song) => !song.imageUrl)
+      .map((song) => song.name)
+      .filter((name) => name && !songImages[name]);
 
-  const tabIndex = useMemo(
-    () => TAB_OPTIONS.findIndex((tab) => tab.key === activeTab),
-    [activeTab]
-  );
+    if (songNames.length === 0) {
+      return undefined;
+    }
 
-  useEffect(() => {
-    if (!tabLayoutWidth) return;
-    const trackWidth = tabLayoutWidth - 24;
-    const tabWidth = trackWidth / TAB_OPTIONS.length;
-    tabTranslateX.value = withTiming(tabWidth * tabIndex, { duration: 240 });
-  }, [tabIndex, tabLayoutWidth, tabTranslateX]);
+    const fetchSongImages = async () => {
+      for (const name of songNames) {
+        const results = await searchAppleMusicSongs(name, APPLE_MUSIC_DEVELOPER_TOKEN, 1);
+        const artworkUrl = results[0]?.attributes.artwork?.url;
+        const imageUrl = artworkUrl ? getArtworkUrl(artworkUrl, 160) : '';
 
-  useEffect(() => {
-    chartLift.value = withSequence(
-      withTiming(12, { duration: 140 }),
-      withTiming(0, { duration: 260 })
-    );
-  }, [chartLift, selectedYear]);
-
-  const tabIndicatorStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: tabTranslateX.value }],
-  }));
-
-  const chartAnimatedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: chartLift.value }],
-  }));
-
-  const focusedBarIndex = useMemo(() => {
-    if (selectedYear === null) return -1;
-    return yearlyReport.findIndex((item) => item.year === selectedYear);
-  }, [selectedYear, yearlyReport]);
-
-  const activityChartData = useMemo(() => {
-    return yearlyReport.map((item) => {
-      const isFocused = selectedYear === item.year;
-      return {
-        value: item.totalLives,
-        label: `${item.year}`,
-        frontColor: isFocused ? 'rgba(255, 255, 255, 0)' : 'rgba(0, 122, 255, 0)',
-        gradientColor: isFocused ? '#FFFFFF' : 'rgba(120, 200, 255, 0.75)',
-        labelTextStyle: { color: '#FFFFFF' },
-        onPress: () => setSelectedYear(item.year),
-      };
-    });
-  }, [selectedYear, yearlyReport]);
-
-  const selectedYearData = useMemo(() => {
-    if (selectedYear === null) return null;
-    return yearlyReport.find((item) => item.year === selectedYear) ?? null;
-  }, [selectedYear, yearlyReport]);
-
-  const mainValueTarget = selectedYearData?.totalLives ?? 0;
-
-  useEffect(() => {
-    if (activeTab !== 'history') {
-      return () => {
-        if (mainValueFrame.current !== null) {
-          cancelAnimationFrame(mainValueFrame.current);
-          mainValueFrame.current = null;
+        if (!isActive) {
+          return;
         }
-      };
-    }
-    if (mainValueFrame.current !== null) {
-      cancelAnimationFrame(mainValueFrame.current);
-      mainValueFrame.current = null;
-    }
-    setMainValueDisplay(0);
-    const durationMs = 800;
-    const start = Date.now();
-    const step = () => {
-      const elapsed = Date.now() - start;
-      const progress = Math.min(1, elapsed / durationMs);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setMainValueDisplay(Math.round(mainValueTarget * eased));
-      if (progress < 1) {
-        mainValueFrame.current = requestAnimationFrame(step);
-      } else {
-        mainValueFrame.current = null;
+
+        setSongImages((current) => {
+          if (current[name]) {
+            return current;
+          }
+
+          return {
+            ...current,
+            [name]: imageUrl,
+          };
+        });
       }
     };
-    mainValueFrame.current = requestAnimationFrame(step);
+
+    void fetchSongImages();
+
     return () => {
-      if (mainValueFrame.current !== null) {
-        cancelAnimationFrame(mainValueFrame.current);
-        mainValueFrame.current = null;
-      }
+      isActive = false;
     };
-  }, [activeTab, mainValueTarget]);
+  }, [songImages, topSongs]);
 
-  const yAxisLabelTexts = useMemo(() => {
-    const labels = [] as string[];
-    for (let value = 0; value <= chartMaxValue; value += 3) {
-      labels.push(`${value}`);
-    }
-    return labels;
-  }, [chartMaxValue]);
-
-  return (
-    <View style={[styles.container, { paddingTop: containerTopPadding }]}> 
-      {backgroundImageUrl ? (
-        <>
-          <Image
-            source={{ uri: backgroundImageUrl }}
-            style={styles.backgroundImage}
-            cachePolicy="memory-disk"
-            transition={0}
-          />
-          <BlurView intensity={50} tint="dark" style={styles.backgroundBlur} />
-          <LinearGradient
-            colors={['rgba(0, 0, 0, 0.25)', 'rgba(0, 0, 0, 0.75)', 'rgba(0, 0, 0, 0.95)']}
-            start={{ x: 0.5, y: 0 }}
-            end={{ x: 0.5, y: 1 }}
-            style={styles.backgroundGradient}
-            pointerEvents="none"
-          />
-        </>
-      ) : null}
-      <View style={[styles.header, { paddingHorizontal: Math.min(Math.max(windowWidth * 0.06, theme.spacing.lg), theme.spacing.xxl) }]}>
-        <Text style={[styles.title, { fontSize: Math.min(32, windowWidth * 0.085) }]}>{t('statistics.title')}</Text>
-      </View>
-
-      <View
-        style={[styles.tabRow, { width: Math.min(windowWidth * 0.82, 420) }]}
-        onLayout={(event) => setTabLayoutWidth(event.nativeEvent.layout.width)}
-      >
-        <Animated.View
-          style={[
-            styles.tabIndicator,
-            { width: tabLayoutWidth ? (tabLayoutWidth - 8) / TAB_OPTIONS.length : 0 },
-            tabIndicatorStyle,
-          ]}
-        />
-        {TAB_OPTIONS.map((tab) => {
-          const isActive = activeTab === tab.key;
-          return (
-            <Pressable
-              key={tab.key}
-              style={styles.tabPill}
-              onPress={() => setActiveTab(tab.key)}
-            >
-              <Text style={[styles.tabText, isActive && styles.tabTextActive]}>{t(tab.labelKey)}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      {activeTab === 'legends' && (
-        <ScrollView
-          contentContainerStyle={[styles.scrollContent, { paddingBottom: legendsBottomPadding }]}
-          showsVerticalScrollIndicator={false}
-        >
-          {totalLives === 0 ? (
-            <View style={styles.emptyContainerInline}>
-              <Text style={styles.emptyTitle}>{t('statistics.emptyTitle')}</Text>
-              <Text style={styles.emptyText}>{t('statistics.emptySubtitle')}</Text>
-            </View>
-          ) : (
-            <View style={styles.legendsSection}>
-              <View style={styles.legendsTitleContainer}>
-                <Text style={styles.legendsTitle}>{t('statistics.topArtists')}</Text>
-              </View>
-
-              <View style={[styles.podiumRow, { width: podiumWidth }]}>
-                <View style={[styles.podiumSideSlot, styles.podiumSideSlotLeft]}>
-                  <PodiumBar
-                    rank={rankTwoDisplayRank}
-                    artist={rankTwo?.name}
-                    percentage={rankTwo?.percentage ?? 0}
-                    imageUrl={rankTwo?.name ? artistImages[rankTwo.name] : ''}
-                    highlight={rankTwoDisplayRank === 1}
-                    delay={120}
-                    slotWidth={podiumSlotWidth}
-                  />
-                </View>
-                <View style={styles.podiumCenterSlot}>
-                  <PodiumBar
-                    rank={1}
-                    artist={rankOne?.name}
-                    percentage={rankOne?.percentage ?? 0}
-                    imageUrl={rankOne?.name ? artistImages[rankOne.name] : ''}
-                    highlight
-                    delay={0}
-                    slotWidth={podiumSlotWidth}
-                  />
-                </View>
-                <View style={[styles.podiumSideSlot, styles.podiumSideSlotRight]}>
-                  <PodiumBar
-                    rank={rankThreeDisplayRank}
-                    artist={rankThree?.name}
-                    percentage={rankThree?.percentage ?? 0}
-                    imageUrl={rankThree?.name ? artistImages[rankThree.name] : ''}
-                    highlight={rankThreeDisplayRank === 1}
-                    delay={220}
-                    slotWidth={podiumSlotWidth}
-                  />
-                </View>
-              </View>
-
-              <Text style={styles.allArtistsTitle}>{t('statistics.allArtists')}</Text>
-              <View style={styles.artistList}>
-                {allArtists.map((artist, index) => (
-                  <Animated.View
-                    key={`${artist.name}-${artist.rank}`}
-                    entering={FadeInDown.delay(240 + index * 70).duration(420)}
-                  >
-                    <ArtistListItem
-                      name={artist.name}
-                      count={artist.count}
-                      imageUrl={artistImages[artist.name]}
-                    />
-                  </Animated.View>
-                ))}
-              </View>
-            </View>
-          )}
-        </ScrollView>
-      )}
-
-      {activeTab === 'history' && (
-        <View style={[styles.historyLayout, { paddingBottom: historyBottomPadding }]}> 
-          <View style={styles.chartArea}>
-            <Animated.View style={[styles.activityChartWrapper, chartAnimatedStyle]}>
-              <BarChart
-                data={activityChartData}
-                width={chartWidth}
-                barWidth={chartBarWidth}
-                spacing={chartBarSpacing}
-                initialSpacing={12}
-                endSpacing={12}
-                yAxisLabelWidth={32}
-                noOfSections={Math.max(1, Math.floor(chartMaxValue / 3))}
-                maxValue={chartMaxValue}
-                stepValue={3}
-                yAxisLabelTexts={yAxisLabelTexts}
-                isAnimated
-                animationDuration={700}
-                barBorderRadius={4}
-                yAxisThickness={0}
-                xAxisThickness={0}
-                xAxisLabelTextStyle={styles.chartLabelYear}
-                yAxisTextStyle={styles.chartLabelYear}
-                yAxisTextNumberOfLines={1}
-                showGradient
-                scrollToEnd
-                showScrollIndicator={false}
-                rulesType="dashed"
-                rulesColor="rgba(255, 255, 255, 0.2)"
-                dashWidth={6}
-                dashGap={6}
-              />
-            </Animated.View>
-          </View>
-
-          <View
-            style={[
-              styles.detailSheet,
-              {
-                height: detailSheetHeight + insets.bottom,
-                paddingBottom: theme.spacing.xl + insets.bottom,
-              },
-            ]}
-          >
-            <View style={styles.detailHeader}>
-              <View>
-                <Text style={styles.detailTitle}>{t('statistics.details.title')}</Text>
-                <Text style={styles.detailSubtitle}>{selectedYear ?? '--'}</Text>
-              </View>
-            </View>
-
-            <View style={styles.detailContentRow}>
-              <View style={styles.detailMainColumn}>
-                <View style={styles.detailMainValueGradient}>
-                  <Svg width="100%" height="100%">
-                    <Defs>
-                      <SvgLinearGradient id="detailMainValueGradient" x1="0" y1="0" x2="0" y2="1">
-                        <Stop offset="0" stopColor="#0A78FF" />
-                        <Stop offset="1" stopColor="#FFFFFF" />
-                      </SvgLinearGradient>
-                    </Defs>
-                    <SvgText
-                      x="0"
-                      y="84"
-                      fill="url(#detailMainValueGradient)"
-                      fontSize={88}
-                      fontWeight="900"
-                      letterSpacing={-1}
-                    >
-                      {mainValueDisplay}
-                    </SvgText>
-                  </Svg>
-                </View>
-                <Text style={styles.detailMainLabel}>{t('statistics.details.lives')}</Text>
-              </View>
-              <View style={styles.detailSideColumn}>
-                <View style={styles.detailSideItem}>
-                  <Text style={styles.detailSideValue}>
-                    {selectedYearData?.activeDays ?? 0} <Text style={styles.detailSideUnit}>{t('statistics.details.days')}</Text>
-                  </Text>
-                  <Text style={styles.detailSideLabel}>{t('statistics.details.dayActive')}</Text>
-                </View>
-                <View style={styles.detailSideItem}>
-                  <Text style={styles.detailSideValueEmphasis}>
-                    {selectedYearData?.topArtist ?? '--'}
-                  </Text>
-                  <Text style={styles.detailSideLabel}>{t('statistics.details.top')}</Text>
-                </View>
-              </View>
-            </View>
-          </View>
-        </View>
-      )}
-    </View>
-  );
-};
-
-interface PodiumCardProps {
-  rank: 1 | 2 | 3;
-  artist?: string;
-  percentage: number;
-  imageUrl?: string;
-  highlight?: boolean;
-  delay?: number;
-  slotWidth: number;
-}
-
-const PodiumBar: React.FC<PodiumCardProps> = ({
-  rank,
-  artist,
-  percentage,
-  imageUrl,
-  highlight,
-  delay = 0,
-  slotWidth,
-}) => {
-  const rankColor = RANK_COLORS[rank];
-  const isEmpty = !artist;
-  const clampedShare = Math.min(100, Math.max(0, percentage));
-  const heightFactor = RANK_HEIGHT_FACTOR[rank];
-  const targetHeight =
-    (PODIUM_BASE_HEIGHT + (PODIUM_MAX_HEIGHT - PODIUM_BASE_HEIGHT) * (clampedShare / 100)) *
-    heightFactor;
-  const animatedHeight = useSharedValue(0);
-
-  useEffect(() => {
-    animatedHeight.value = withDelay(
-      delay,
-      withTiming(targetHeight, {
-        duration: PODIUM_ANIM_DURATION,
-        easing: Easing.out(Easing.exp),
-      })
-    );
-  }, [animatedHeight, delay, targetHeight]);
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    height: animatedHeight.value,
+  const chartData = monthlyData.map((m) => ({
+    value: m.count,
+    label: m.month,
+    labelWidth: 30,
+    labelTextStyle: { color: TEXT_GRAY, fontSize: 8 },
   }));
 
-  const imageSizeByRank = {
-    1: 94,
-    2: 68,
-    3: 68,
-  } as const;
-  const imageSize = imageSizeByRank[rank];
-  const contentPaddingTop = imageSize + theme.spacing.md;
+  const handlePrevYear = () => {
+    setSelectedYear(Math.max(availableYears.minYear, selectedYear - 1));
+  };
+
+  const handleNextYear = () => {
+    setSelectedYear(Math.min(availableYears.maxYear, selectedYear + 1));
+  };
+
+  if (!fontsLoaded) {
+    return null;
+  }
+
+  const maxMonthValue = Math.max(...monthlyData.map((m) => m.count), 1);
 
   return (
-    <View
-      style={[
-        styles.podiumSlot,
-        { width: highlight ? slotWidth + theme.spacing.xs : slotWidth },
-        highlight && styles.podiumSlotHighlight,
-      ]}
-    >
-      <Text style={styles.podiumArtistLabel} numberOfLines={2}>
-        {isEmpty ? '---' : artist}
-      </Text>
-      <Animated.View
-        style={[
-          styles.podiumPill,
-          rank === 2 && styles.podiumPillRank2,
-          rank === 3 && styles.podiumPillRank3,
-          animatedStyle,
-        ]}
-      >
-        <LinearGradient
-          colors={['rgba(255, 255, 255, 0.10)', 'rgba(255, 255, 255, 0)']}
-          start={{ x: 0.5, y: 0 }}
-          end={{ x: 0.5, y: 1 }}
-          style={StyleSheet.absoluteFill}
-        />
-        {!isEmpty && (
-          <View
-            style={[
-              styles.podiumImageAnchor,
-              rank === 2 && styles.podiumImageAnchorRank2,
-              rank === 3 && styles.podiumImageAnchorRank3,
-              highlight && styles.podiumImageAnchorHighlight,
-            ]}
-          >
-            <LinearGradient
-              colors={RANK_GRADIENTS[rank]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={[
-                styles.artistImageFrameGradient,
-                rank === 1 && styles.artistImageFrameGradientRank1,
-                rank === 2 && styles.artistImageFrameGradientRank2,
-                rank === 3 && styles.artistImageFrameGradientRank3,
-                highlight && styles.artistImageFrameHighlight,
-              ]}
-            >
-              <View
-                style={[
-                  styles.artistImageFrame,
-                  rank === 1 && styles.artistImageFrameRank1,
-                  rank === 2 && styles.artistImageFrameRank2,
-                  rank === 3 && styles.artistImageFrameRank3,
-                ]}
-              >
-                <View
-                  style={[
-                    styles.artistImageRing,
-                    rank === 1 && styles.artistImageRingRank1,
-                    rank === 2 && styles.artistImageRingRank2,
-                    rank === 3 && styles.artistImageRingRank3,
-                  ]}
-                >
-                  {imageUrl ? (
-                    <Image
-                      source={{ uri: imageUrl }}
-                      style={[
-                        styles.artistImage,
-                        rank === 1 && styles.artistImageRank1,
-                        rank === 2 && styles.artistImageRank2,
-                        rank === 3 && styles.artistImageRank3,
-                      ]}
-                      contentFit="cover"
-                    />
-                  ) : (
-                    <View
-                      style={[
-                        styles.artistImagePlaceholder,
-                        rank === 1 && styles.artistImagePlaceholderRank1,
-                        rank === 2 && styles.artistImagePlaceholderRank2,
-                        rank === 3 && styles.artistImagePlaceholderRank3,
-                      ]}
-                    />
-                  )}
-                </View>
-                <LinearGradient
-                  colors={RANK_GRADIENTS[rank]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={[
-                    styles.rankBadge,
-                    rank === 1 && styles.rankBadgeRank1,
-                    rank === 2 && styles.rankBadgeRank2,
-                    rank === 3 && styles.rankBadgeRank3,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.rankText,
-                      rank === 1 && styles.rankTextRank1,
-                      rank === 2 && styles.rankTextRank2,
-                      rank === 3 && styles.rankTextRank3,
-                    ]}
-                  >
-                    {rank}
-                  </Text>
-                </LinearGradient>
-              </View>
-            </LinearGradient>
-          </View>
-        )}
-        <View style={[styles.podiumContent, { paddingTop: contentPaddingTop }]}>
-          <AnimatedCountText value={clampedShare} delay={delay} highlight={highlight} />
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      <BlurView tint="light" intensity={80} style={styles.glassHeaderShell}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Report</Text>
         </View>
-      </Animated.View>
+
+        <View style={styles.yearSelector}>
+          <TouchableOpacity
+            style={[styles.yearButton, selectedYear <= availableYears.minYear && styles.yearButtonDisabled]}
+            onPress={handlePrevYear}
+            disabled={selectedYear <= availableYears.minYear}
+          >
+            <MaterialIcons
+              name="chevron-left"
+              size={20}
+              color={selectedYear <= availableYears.minYear ? '#ddd' : TEXT_DARK}
+            />
+          </TouchableOpacity>
+          <Text style={styles.yearDisplay}>{selectedYear}</Text>
+          <TouchableOpacity
+            style={[styles.yearButton, selectedYear >= availableYears.maxYear && styles.yearButtonDisabled]}
+            onPress={handleNextYear}
+            disabled={selectedYear >= availableYears.maxYear}
+          >
+            <MaterialIcons
+              name="chevron-right"
+              size={20}
+              color={selectedYear >= availableYears.maxYear ? '#ddd' : TEXT_DARK}
+            />
+          </TouchableOpacity>
+        </View>
+      </BlurView>
+
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 100 }]}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.summaryGrid}>
+          <SummaryCard label="live" value={summaryData.totalLives} />
+          <SummaryCard label="artists" value={summaryData.totalArtists} />
+          <SummaryCard label="venues" value={summaryData.totalVenues} />
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>TOTAL SPENDING</Text>
+          <View style={styles.spendingCard}>
+            <HugeiconsIcon icon={Wallet03Icon} size={28} color={PRIMARY_COLOR} strokeWidth={1.8} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.spendingLabel}>年間合計</Text>
+              <Text style={styles.spendingAmount}>
+                {priceHidden ? '¥ ••••••' : `¥ ${totalSpending.toLocaleString()}`}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={() => setPriceHidden((v) => !v)} style={styles.spendingToggle}>
+              <HugeiconsIcon
+                icon={priceHidden ? ViewOffIcon : ViewIcon}
+                size={22}
+                color={TEXT_GRAY}
+                strokeWidth={1.8}
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>MONTHLY LIVES</Text>
+          <View style={styles.chartCard}>
+            <BarChart
+              data={chartData}
+              width={windowWidth - 100}
+              barWidth={24}
+              spacing={12}
+              initialSpacing={8}
+              endSpacing={8}
+              height={120}
+              yAxisLabelWidth={0}
+              yAxisThickness={0}
+              xAxisThickness={0}
+              noOfSections={Math.max(1, Math.ceil(maxMonthValue / 3))}
+              maxValue={Math.max(1, Math.ceil(maxMonthValue / 3) * 3)}
+              frontColor={PRIMARY_COLOR}
+              barBorderRadius={4}
+            />
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <View style={styles.rankingHeader}>
+            <Text style={styles.sectionTitle}>TOP ARTISTS</Text>
+          </View>
+          <View style={styles.rankingCard}>
+            {topArtists.length === 0 ? (
+              <Text style={styles.emptyText}>No data</Text>
+            ) : (
+              topArtists.map((item, idx) => {
+                const actualRank = calculateActualRank(topArtists, item.count);
+                return (
+                  <RankingItem
+                    key={idx}
+                    rank={actualRank}
+                    name={item.name}
+                    count={item.count}
+                    imageUrl={item.imageUrl || artistImages[item.name]}
+                    imageShape="circle"
+                  />
+                );
+              })
+            )}
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <View style={styles.rankingHeader}>
+            <Text style={styles.sectionTitle}>TOP VENUES</Text>
+          </View>
+          <View style={styles.rankingCard}>
+            {topVenues.length === 0 ? (
+              <Text style={styles.emptyText}>No data</Text>
+            ) : (
+              topVenues.map((item, idx) => {
+                const actualRank = calculateActualRank(topVenues, item.count);
+                return (
+                  <RankingItem key={idx} rank={actualRank} name={item.name} count={item.count} />
+                );
+              })
+            )}
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <View style={styles.rankingHeader}>
+            <Text style={styles.sectionTitle}>TOP SONGS</Text>
+          </View>
+          <View style={styles.rankingCard}>
+            {topSongs.length === 0 ? (
+              <Text style={styles.emptyText}>No data</Text>
+            ) : (
+              topSongs.map((item, idx) => {
+                const actualRank = calculateActualRank(topSongs, item.count);
+                return (
+                  <RankingItem
+                    key={`${item.name}-${idx}`}
+                    rank={actualRank}
+                    name={item.name}
+                    count={item.count}
+                    imageUrl={item.imageUrl || songImages[item.name]}
+                  />
+                );
+              })
+            )}
+          </View>
+        </View>
+      </ScrollView>
     </View>
   );
 };
 
-interface AnimatedCountTextProps {
-  value: number;
-  delay?: number;
-  highlight?: boolean;
-}
-
-const AnimatedCountText: React.FC<AnimatedCountTextProps> = ({ value, delay = 0, highlight }) => {
-  const [displayValue, setDisplayValue] = useState(0);
-  const progress = useSharedValue(0);
-
-  useEffect(() => {
-    setDisplayValue(0);
-    progress.value = 0;
-    progress.value = withDelay(
-      delay,
-      withTiming(1, {
-        duration: PODIUM_ANIM_DURATION,
-        easing: Easing.out(Easing.exp),
-      })
-    );
-  }, [delay, progress, value]);
-
-  const derivedValue = useDerivedValue(() => Math.round(progress.value * value));
-
-  useAnimatedReaction(
-    () => derivedValue.value,
-    (current, previous) => {
-      if (current !== previous) {
-        runOnJS(setDisplayValue)(current);
-      }
-    }
-  );
-
-  return (
-    <Text style={[styles.podiumPercentage, highlight && styles.podiumPercentageHighlight]}>
-      {displayValue}
-      <Text style={styles.podiumPercentSymbol}>%</Text>
-    </Text>
-  );
-};
-
-interface AnimatedNumberProps {
+interface SummaryCardProps {
+  label: string;
   value: number;
 }
 
-const AnimatedNumber: React.FC<AnimatedNumberProps> = ({ value }) => {
-  const [displayValue, setDisplayValue] = useState(0);
-  const progress = useSharedValue(0);
+const SummaryCard: React.FC<SummaryCardProps> = ({ label, value }) => (
+  <View style={styles.summaryCard}>
+    <Text style={styles.summaryValue}>{value}</Text>
+    <Text style={styles.summaryLabel}>{label}</Text>
+  </View>
+);
 
-  useEffect(() => {
-    setDisplayValue(0);
-    progress.value = 0;
-    progress.value = withTiming(1, {
-      duration: 800,
-      easing: Easing.out(Easing.exp),
-    });
-  }, [progress, value]);
-
-  const derivedValue = useDerivedValue(() => Math.round(progress.value * value));
-
-  useAnimatedReaction(
-    () => derivedValue.value,
-    (current, previous) => {
-      if (current !== previous) {
-        runOnJS(setDisplayValue)(current);
-      }
-    }
-  );
-
-  return <Text style={styles.summaryValue}>{displayValue}</Text>;
+const calculateActualRank = (items: TopItem[], count: number): number => {
+  const uniqueCounts = Array.from(new Set(items.map((i) => i.count))).sort((a, b) => b - a);
+  const rankIndex = uniqueCounts.indexOf(count);
+  return rankIndex + 1;
 };
 
-interface ArtistListItemProps {
+interface RankingItemProps {
+  rank: number;
   name: string;
   count: number;
   imageUrl?: string;
+  imageShape?: 'circle' | 'square';
 }
 
-const ArtistListItem: React.FC<ArtistListItemProps> = ({ name, count, imageUrl }) => {
+const RankingItem: React.FC<RankingItemProps> = ({ rank, name, count, imageUrl, imageShape = 'square' }) => {
+  const getRankIcon = (r: number) => {
+    if (r === 1) return MedalFirstPlaceIcon;
+    if (r === 2) return MedalSecondPlaceIcon;
+    if (r === 3) return MedalThirdPlaceIcon;
+    return Medal06Icon;
+  };
+
+  const getRankIconColor = (r: number) => {
+    if (r === 1) return '#A328DD';
+    if (r === 2) return '#C06BEA';
+    if (r === 3) return '#D39AEF';
+    return '#B7B7B7';
+  };
+
   return (
-    <View style={styles.artistRow}>
-      {imageUrl ? (
-        <Image source={{ uri: imageUrl }} style={styles.artistThumb} contentFit="cover" />
-      ) : (
-        <View style={[styles.artistThumb, styles.artistThumbPlaceholder]} />
-      )}
-      <View style={styles.artistNamePill}>
-        <Text style={styles.artistNameText} numberOfLines={1}>
-          {name}
-        </Text>
-      </View>
-      <Text style={styles.artistLiveCount}>{count} Live</Text>
+    <View style={styles.rankingItem}>
+      <HugeiconsIcon icon={getRankIcon(rank)} size={24} color={getRankIconColor(rank)} strokeWidth={2} />
+      {imageUrl !== undefined &&
+        (imageUrl ? (
+          <Image
+            source={{ uri: imageUrl }}
+            style={[styles.artistThumb, imageShape === 'circle' ? styles.artistThumbCircle : styles.artistThumbSquare]}
+            contentFit="cover"
+          />
+        ) : (
+          <View
+            style={[
+              styles.artistThumbPlaceholder,
+              imageShape === 'circle' ? styles.artistThumbCircle : styles.artistThumbSquare,
+            ]}
+          />
+        ))}
+      <Text style={styles.rankingName}>{name}</Text>
+      <Text style={styles.rankingCount}>{count}</Text>
     </View>
   );
 };
@@ -749,623 +594,201 @@ const ArtistListItem: React.FC<ArtistListItemProps> = ({ name, count, imageUrl }
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: theme.colors.background.primary,
-    paddingTop: 0,
+    backgroundColor: '#F8F8F8',
   },
-  backgroundImage: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
-  },
-  backgroundBlur: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
-  },
-  backgroundGradient: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
-  },
-  header: {
-    paddingHorizontal: theme.spacing.xxl,
-    marginBottom: theme.spacing.lg,
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: '900',
-    color: theme.colors.text.primary,
-  },
-  subtitle: {
-    marginTop: theme.spacing.xs,
-    fontSize: theme.typography.fontSize.base,
-    color: theme.colors.text.secondary,
-  },
-  tabRow: {
-    flexDirection: 'row',
-    width: '80%',
-    alignSelf: 'center',
-    padding: 4,
-    paddingHorizontal: 8,
-    marginBottom: theme.spacing.lg,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255, 255, 255, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
+  glassHeaderShell: {
+    backgroundColor: 'rgba(248, 248, 248, 0.62)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.45)',
     overflow: 'hidden',
   },
-  tabIndicator: {
-    position: 'absolute',
-    width: '30%',
-    top: 4,
-    bottom: 4,
-    left: 8,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+  header: {
+    paddingHorizontal: 30,
+    paddingTop: 16,
+    paddingBottom: 12,
   },
-  tabPill: {
-    flex: 1,
-    paddingVertical: theme.spacing.sm,
+  headerTitle: {
+    fontSize: 26,
+    color: TEXT_DARK,
+    fontFamily: 'LINESeedJP_800ExtraBold',
+  },
+  yearSelector: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 30,
+    paddingVertical: 16,
+    gap: 20,
   },
-  tabText: {
-    color: 'rgba(255, 255, 255, 0.75)',
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: theme.typography.fontWeight.bold,
+  yearButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#ffffff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
   },
-  tabTextActive: {
-    color: 'rgba(0, 0, 0, 0.85)',
-    fontWeight: theme.typography.fontWeight.bold,
+  yearButtonDisabled: {
+    opacity: 0.5,
+  },
+  yearDisplay: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: TEXT_DARK,
+    minWidth: 80,
+    textAlign: 'center',
+  },
+  scrollView: {
+    flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: theme.spacing.xxl,
-    paddingBottom: 0,
-    gap: theme.spacing.xxl,
-  },
-  legendsSection: {
-    gap: theme.spacing.xl,
-  },
-  historyLayout: {
-    flex: 1,
-    paddingBottom: 0,
-  },
-  chartArea: {
-    flex: 1,
-    paddingHorizontal: theme.spacing.lg,
-    paddingTop: theme.spacing.md,
-    justifyContent: 'flex-start',
-  },
-  activityChartWrapper: {
-    width: '100%',
-  },
-  detailSheet: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: 0,
-    backgroundColor: '#1b1b1b',
-    borderTopLeftRadius: 40,
-    borderTopRightRadius: 40,
-    padding: theme.spacing.xl,
-    shadowColor: '#6a6a6a',
-    shadowOffset: { width: 0, height: -6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 10,
-  },
-  detailHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginLeft: 18,
-  },
-  detailTitle: {
-    fontSize: 28,
-    fontWeight: 800,
-    color: theme.colors.text.primary,
-  },
-  detailSubtitle: {
-    marginTop: 3,
-    fontSize: 18,
-    fontWeight: 600,
-    color: theme.colors.text.secondary,
-  },
-  detailContentRow: {
-    marginTop: theme.spacing.xs,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: theme.spacing.xs,
-  },
-  detailMainColumn: {
-    flex: 1,
-    marginLeft: 18,
-  },
-  detailMainValue: {
-    fontSize: 88,
-    fontWeight: 900,
-    color: '#FFFFFF',
-    letterSpacing: -1,
-  },
-  detailMainValueGradient: {
-    height: 96,
-    width: '100%',
-  },
-  detailMainLabel: {
-    marginTop: 3,
-    fontSize: theme.typography.fontSize.lg,
-    color: 'rgba(255, 255, 255, 0.85)',
-    fontWeight: theme.typography.fontWeight.semibold,
-  },
-  detailSideColumn: {
-    flex: 1,
-    gap: theme.spacing.lg,
-    paddingTop: theme.spacing.xs,
-  },
-  detailSideItem: {
-    gap: 6,
-    marginLeft: -18,
-  },
-  detailSideValue: {
-    fontSize: 38,
-    fontWeight: theme.typography.fontWeight.bold,
-    color: '#FFFFFF',
-  },
-  detailSideUnit: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: theme.typography.fontWeight.semibold,
-    color: '#FFFFFF',
-  },
-  detailSideValueEmphasis: {
-    fontSize: theme.typography.fontSize.xl,
-    fontWeight: theme.typography.fontWeight.bold,
-    color: '#FFFFFF',
-  },
-  detailSideLabel: {
-    fontSize: theme.typography.fontSize.sm,
-    color: 'rgba(255, 255, 255, 0.6)',
-  },
-  yearlyChartCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing.xl,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    ...theme.shadows.card,
-  },
-  sectionTitle: {
-    fontSize: theme.typography.fontSize.xl,
-    fontWeight: theme.typography.fontWeight.bold,
-    color: theme.colors.text.primary,
-  },
-  sectionSubtitle: {
-    marginTop: theme.spacing.xs,
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-  },
-  chartWrapper: {
-    marginTop: theme.spacing.xl,
-    alignSelf: 'center',
-  },
-  chartLabelYear: {
-    color: '#FFFFFF',
-    fontSize: theme.typography.fontSize.xs,
-  },
-  chartTooltip: {
-    paddingVertical: theme.spacing.xs,
-    paddingHorizontal: theme.spacing.sm,
-    backgroundColor: 'rgba(10, 10, 14, 0.9)',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-  },
-  chartTooltipValue: {
-    color: theme.colors.text.primary,
-    fontWeight: theme.typography.fontWeight.bold,
-    fontSize: theme.typography.fontSize.base,
-    textAlign: 'center',
-  },
-  chartTooltipLabel: {
-    color: theme.colors.text.secondary,
-    fontSize: theme.typography.fontSize.xs,
-    textAlign: 'center',
-    marginTop: 2,
+    paddingHorizontal: 30,
+    paddingTop: 12,
+    gap: 24,
   },
   summaryGrid: {
     flexDirection: 'row',
-    gap: theme.spacing.lg,
+    gap: 12,
   },
-  summaryMainCard: {
+  summaryCard: {
     flex: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.14)',
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 20,
     justifyContent: 'center',
-  },
-  summarySideColumn: {
-    flex: 1,
-    gap: theme.spacing.lg,
-  },
-  summarySmallCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    minHeight: 92,
-    justifyContent: 'center',
-  },
-  summaryLabel: {
-    color: theme.colors.text.secondary,
-    fontSize: theme.typography.fontSize.xs,
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-    marginBottom: theme.spacing.xs,
+    alignItems: 'center',
+    shadowColor: '#d2d2d2',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 8,
   },
   summaryValue: {
-    fontSize: 40,
-    color: theme.colors.text.primary,
-    fontWeight: theme.typography.fontWeight.black,
-    letterSpacing: 1,
-  },
-  summarySubLabel: {
-    marginTop: theme.spacing.xs,
-    color: theme.colors.text.secondary,
-    fontSize: theme.typography.fontSize.sm,
-  },
-  summaryValueSmall: {
-    color: theme.colors.text.primary,
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: theme.typography.fontWeight.semibold,
-  },
-  legendsTitleContainer: {
-    position: 'relative',
-    height: 55,
-    justifyContent: 'center',
-  },
-  legendsTitle: {
-    fontSize: 50,
-    fontWeight: theme.typography.fontWeight.black,
-    color: 'rgba(255, 255, 255, 0.8)',
-    letterSpacing: 1,
-    textAlign: 'center',
-  },
-  legendsTitleGradient: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '100%',
-  },
-  legendsHeadline: {
-    fontSize: 22,
-    fontWeight: theme.typography.fontWeight.bold,
-    color: theme.colors.text.primary,
-    textAlign: 'center',
-    marginTop: theme.spacing.sm,
-  },
-  sectionCard: {
-    backgroundColor: theme.colors.background.secondary,
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing.xl,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    ...theme.shadows.card,
-  },
-  podiumRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'flex-end',
-    gap: PODIUM_GAP,
-    paddingHorizontal: theme.spacing.sm,
-    width: '100%',
-    alignSelf: 'center',
-    position: 'relative',
-  },
-  podiumSideSlot: {
-    position: 'absolute',
-    bottom: 0,
-  },
-  podiumSideSlotLeft: {
-    left: 0,
-  },
-  podiumSideSlotRight: {
-    right: 0,
-  },
-  podiumCenterSlot: {
-    alignItems: 'center',
-  },
-  podiumSlot: {
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-  },
-  podiumSlotHighlight: {
-    opacity: 1,
-  },
-  podiumPill: {
-    width: '100%',
-    borderRadius: 32,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    overflow: 'hidden',
-    justifyContent: 'flex-start',
-  },
-  podiumPillRank2: {
-    width: '84%',
-    alignSelf: 'center',
-  },
-  podiumPillRank3: {
-    width: '84%',
-    alignSelf: 'center',
-  },
-  podiumContent: {
-    paddingHorizontal: theme.spacing.sm,
-    paddingBottom: theme.spacing.xl,
-    alignItems: 'center',
-    gap: theme.spacing.sm,
-  },
-  podiumArtistLabel: {
-    fontSize: theme.typography.fontSize.lg,
+    fontSize: 32,
     fontWeight: '900',
-    color: theme.colors.text.primary,
-    textAlign: 'center',
-    minHeight: 32,
-    marginBottom: theme.spacing.sm,
+    color: TEXT_DARK,
+    marginBottom: 6,
   },
-  podiumImageAnchor: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
+  summaryLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: TEXT_GRAY,
+  },
+  section: {
+    gap: 12,
+  },
+  sectionTitle: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: TEXT_GRAY,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  rankingHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 4,
   },
-  podiumImageAnchorRank2: {
-    top: theme.spacing.sm,
-  },
-  podiumImageAnchorRank3: {
-    top: theme.spacing.sm,
-  },
-  podiumImageAnchorHighlight: {
-    top: theme.spacing.sm,
-  },
-  artistImageFrameGradient: {
-    padding: 2,
-    borderRadius: 26,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  artistImageFrameGradientRank1: {
-    padding: 3,
-    borderRadius: 32,
-  },
-  artistImageFrameGradientRank2: {
-    padding: 2,
-    borderRadius: 26,
-  },
-  artistImageFrameGradientRank3: {
-    padding: 2,
-    borderRadius: 26,
-  },
-  artistImageFrameRank1: {
-    width: 94,
-    height: 94,
-    borderRadius: 32,
-  },
-  artistImageFrameRank2: {
-    width: 68,
-    height: 68,
-    borderRadius: 26,
-  },
-  artistImageFrameRank3: {
-    width: 68,
-    height: 68,
-    borderRadius: 26,
-  },
-  artistImageFrameHighlight: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 6,
-  },
-  artistImageFrame: {
-    width: 68,
-    height: 68,
-    borderRadius: 26,
-    backgroundColor: 'rgba(0, 0, 0, 0.85)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  artistImageRing: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 24,
-    padding: 3,
-    backgroundColor: 'rgba(0, 0, 0, 0.9)',
-  },
-  artistImageRingRank1: {
-    borderRadius: 32,
-    padding: 3,
-  },
-  artistImageRingRank2: {
-    borderRadius: 24,
-    padding: 3,
-  },
-  artistImageRingRank3: {
-    borderRadius: 24,
-    padding: 3,
-  },
-  artistImage: {
-    width: '100%',
-    height: '100%',
+  chartCard: {
+    backgroundColor: '#ffffff',
     borderRadius: 20,
-  },
-  artistImageRank1: {
-    borderRadius: 28,
-  },
-  artistImageRank2: {
-    borderRadius: 20,
-  },
-  artistImageRank3: {
-    borderRadius: 20,
-  },
-  artistImagePlaceholder: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 28,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-  },
-  artistImagePlaceholderRank1: {
-    borderRadius: 28,
-  },
-  artistImagePlaceholderRank2: {
-    borderRadius: 20,
-  },
-  artistImagePlaceholderRank3: {
-    borderRadius: 20,
-  },
-  rankBadge: {
-    position: 'absolute',
-    bottom: 6,
-    right: 6,
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
+    padding: 20,
+    shadowColor: '#d2d2d2',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
     shadowRadius: 8,
-    elevation: 6,
+    elevation: 8,
   },
-  rankBadgeRank1: {
+  rankingCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 20,
+    shadowColor: '#d2d2d2',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 8,
+    gap: 12,
+  },
+  rankingItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  artistThumb: {
     width: 30,
     height: 30,
+    backgroundColor: '#EFEFEF',
+  },
+  artistThumbPlaceholder: {
+    width: 30,
+    height: 30,
+    backgroundColor: '#EFEFEF',
+  },
+  artistThumbCircle: {
     borderRadius: 15,
   },
-  rankBadgeRank2: {
-    width: 25,
-    height: 25,
-    borderRadius: 13,
+  artistThumbSquare: {
+    borderRadius: 8,
   },
-  rankBadgeRank3: {
+  rankBadge: {
     width: 24,
     height: 24,
     borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   rankText: {
-    fontSize: 11,
-    fontWeight: theme.typography.fontWeight.bold,
-    letterSpacing: 1,
-    fontFamily: 'Anton_400Regular',
-    color: '#000',
-    textAlign: 'center',
-  },
-  rankTextRank1: {
-    fontSize: 12,
-  },
-  rankTextRank2: {
-    fontSize: 11,
-  },
-  rankTextRank3: {
-    fontSize: 10,
-  },
-  podiumPercentage: {
-    fontSize: 34,
-    fontWeight: theme.typography.fontWeight.black,
-    fontFamily: 'Anton_400Regular',
-    color: 'rgba(255, 255, 255, 0.85)',
-    letterSpacing: 1,
-    marginTop: theme.spacing.md,
-  },
-  podiumPercentageHighlight: {
-    fontSize: 42,
-    color: theme.colors.text.primary,
-    fontFamily: 'Anton_400Regular',
-  },
-  podiumPercentSymbol: {
-    fontSize: 20,
-    marginLeft: 3,
-  },
-  allArtistsTitle: {
-    fontSize: theme.typography.fontSize.xxxl,
-    fontWeight: theme.typography.fontWeight.black,
-    color: 'rgba(255, 255, 255, 0.8)',
-    letterSpacing: 1,
-    marginTop: theme.spacing.md,
-  },
-  artistList: {
-    gap: theme.spacing.md,
-  },
-  artistRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.md,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderRadius: 18,
-    paddingVertical: theme.spacing.md,
-    paddingHorizontal: theme.spacing.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-  },
-  artistThumb: {
-    width: 52,
-    height: 52,
-    borderRadius: 12,
-    backgroundColor: theme.colors.background.secondary,
-  },
-  artistThumbPlaceholder: {
-    backgroundColor: 'rgba(255, 255, 255, 0.12)',
-  },
-  artistNamePill: {
-    flex: 1,
-    borderRadius: 12,
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-  },
-  artistNameText: {
-    fontSize: 15,
-    color: theme.colors.text.primary,
-    fontWeight: theme.typography.fontWeight.bold,
-  },
-  artistLiveCount: {
-    color: theme.colors.text.primary,
-    fontWeight: theme.typography.fontWeight.bold,
-    fontSize: 15,
-  },
-  emptyContainer: {
-    flex: 1,
-    backgroundColor: theme.colors.background.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: theme.spacing.xxl,
-  },
-  emptyContainerInline: {
-    paddingVertical: theme.spacing.xxl,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: theme.spacing.sm,
-  },
-  emptyTitle: {
-    fontSize: 28,
+    fontSize: 14,
     fontWeight: '900',
-    color: theme.colors.text.primary,
-    marginBottom: theme.spacing.sm,
+  },
+  rankingName: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '600',
+    color: TEXT_DARK,
+  },
+  rankingCount: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: TEXT_DARK,
   },
   emptyText: {
-    fontSize: theme.typography.fontSize.base,
-    color: theme.colors.text.secondary,
+    fontSize: 14,
+    color: TEXT_GRAY,
     textAlign: 'center',
-    lineHeight: 22,
+    paddingVertical: 20,
+  },
+  spendingCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    paddingVertical: 20,
+    paddingHorizontal: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    shadowColor: '#d2d2d2',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  spendingLabel: {
+    fontSize: 11,
+    color: TEXT_GRAY,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  spendingAmount: {
+    fontSize: 28,
+    fontWeight: '900',
+    color: TEXT_DARK,
+  },
+  spendingToggle: {
+    padding: 6,
   },
 });
 

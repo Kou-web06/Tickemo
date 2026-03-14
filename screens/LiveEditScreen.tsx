@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -11,25 +11,35 @@ import {
   Alert,
   Modal,
   KeyboardAvoidingView,
+  ActivityIndicator,
+  Animated,
+  Easing,
+  Keyboard,
+  useWindowDimensions,
 } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { SvgXml } from 'react-native-svg';
-import { Ionicons, MaterialIcons, MaterialCommunityIcons, Feather } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
+import { HugeiconsIcon } from '@hugeicons/react-native';
+import { Add01Icon, MagicWand04Icon, AlertCircleIcon, Delete01Icon } from '@hugeicons/core-free-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
-import PagerView from 'react-native-pager-view';
+import * as Crypto from 'expo-crypto';
 import LottieView from 'lottie-react-native';
-import { useIsFocused } from '@react-navigation/native';
+import TextRecognition, { TextRecognitionScript } from '@react-native-ml-kit/text-recognition';
 import { theme } from '../theme';
 import DateInputField from '../components/DateInputField';
 import ArtistInput from '../components/ArtistInput';
-import SetlistEditor from '../components/SetlistEditor';
+import SetlistInputWithTags from '../components/SetlistInputWithTags';
 import { useResolvedImageUris } from '../hooks/useResolvedImageUri';
 import type { SetlistItem } from '../types/setlist';
 import { useTranslation } from 'react-i18next';
 import { LIVE_TYPE_KEYS, LIVE_TYPE_ICON_MAP, normalizeLiveType, type LiveTypeKey } from '../utils/liveType';
+import { formatSetlistText } from '../components/SetlistEditor';
+import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
 
 interface LiveInfo {
   name: string;
@@ -37,16 +47,17 @@ interface LiveInfo {
   artist?: string;
   artistImageUrls?: string[];
   liveType?: string;
-  artistImageUrl?: string; // アーティスト画像URL
+  artistImageUrl?: string;
   date: Date;
   venue: string;
   seat?: string;
+  ticketPrice?: number;
   startTime: string;
   endTime: string;
-  imageUrls?: string[]; // 最大6枚の画像
+  imageUrls?: string[];
   qrCode?: string;
   memo?: string;
-  detail?: string; // 旧形式（後方互換）
+  detail?: string;
   setlistSongs?: SetlistItem[];
 }
 
@@ -55,63 +66,237 @@ interface Props {
   onSave: (info: LiveInfo) => Promise<void>;
   onCancel: () => void;
   focusMemo?: boolean;
-  successHoldDuration?: number; // Success表示後の待機時間（デフォルト1500ms）
+  successHoldDuration?: number;
 }
 
 const LIVE_TYPES = LIVE_TYPE_KEYS;
+const OCR_IMAGE_QUALITY = 0.55;
 
-const ADD_PHOTO_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
-<g clip-path="url(#clip0_4418_9255)">
-<path d="M9 10C10.1046 10 11 9.10457 11 8C11 6.89543 10.1046 6 9 6C7.89543 6 7 6.89543 7 8C7 9.10457 7.89543 10 9 10Z" stroke="#8c8c8c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-<path d="M13 2H9C4 2 2 4 2 9V15C2 20 4 22 9 22H15C20 22 22 20 22 15V10" stroke="#8c8c8c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-<path d="M15.75 5H21.25" stroke="#8c8c8c" stroke-width="2" stroke-linecap="round" />
-<path d="M18.5 7.75V2.25" stroke="#8c8c8c" stroke-width="2" stroke-linecap="round" />
-<path d="M2.67004 18.9496L7.60004 15.6396C8.39004 15.1096 9.53004 15.1696 10.24 15.7796L10.57 16.0696C11.35 16.7396 12.61 16.7396 13.39 16.0696L17.55 12.4996C18.33 11.8296 19.59 11.8296 20.37 12.4996L22 13.8996" stroke="#8c8c8c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-</g>
-<defs>
-<clipPath id="clip0_4418_9255">
-<rect width="24" height="24" fill="white"/>
-</clipPath>
-</defs>
-</svg>`;
+interface OcrReviewItem {
+  id: string;
+  text: string;
+  isSuspicious: boolean;
+}
+
+interface PerformanceFormItem {
+  id: string;
+  artistName: string;
+  setlist: string;
+  artistImageUrl: string;
+}
+
+interface ParsedSetlistLine {
+  kind: 'song' | 'mc' | 'encore';
+  text: string;
+}
+
+const OCR_DROP_LINE_PATTERNS = [
+  /^(set\s*list|setlist|セットリスト)\s*[:：-]?\s*$/i,
+  /^(date|open|start|door|time|venue|place|ticket|price)\s*[:：].*$/i,
+  /^\d{1,2}:\d{2}(\s*[-~]\s*\d{1,2}:\d{2})?$/,
+  /^[-=_.~]{3,}$/,
+];
+
+const OCR_REVIEW_DUMMY_ITEMS: OcrReviewItem[] = [
+  { id: 'dummy-1', text: 'SE. Intro', isSuspicious: false },
+  { id: 'dummy-2', text: '!!!!!', isSuspicious: true },
+  { id: 'dummy-3', text: 'Moonlight Drive', isSuspicious: false },
+  { id: 'dummy-4', text: '???', isSuspicious: true },
+];
+
+const SETLIST_TAG_LINE_PATTERN = /^---\s*(.+?)\s*---$/;
+
+const parseSetlistLine = (line: string): ParsedSetlistLine | null => {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+
+  const tagMatch = trimmed.match(SETLIST_TAG_LINE_PATTERN);
+  const normalizedRaw = (tagMatch ? tagMatch[1] : trimmed).trim();
+  const normalized = normalizedRaw.toLowerCase();
+
+  if (normalized === 'encore' || normalized === 'アンコール') {
+    return { kind: 'encore', text: 'ENCORE' };
+  }
+
+  if (normalized === 'mc' || normalized === 'se' || normalized.startsWith('mc ') || normalized.startsWith('se ')) {
+    const label = normalizedRaw.toUpperCase();
+    return { kind: 'mc', text: label || 'MC' };
+  }
+
+  return { kind: 'song', text: trimmed };
+};
+
+const parseSetlistTextToItems = (text: string, artistName: string): SetlistItem[] => {
+  const lines = text.split(/\r?\n/).map((line) => parseSetlistLine(line)).filter((line): line is ParsedSetlistLine => Boolean(line));
+
+  return lines.map((line, index) => {
+    if (line.kind === 'encore') {
+      return {
+        id: Crypto.randomUUID(),
+        type: 'encore' as const,
+        title: 'ENCORE',
+        orderIndex: index,
+      };
+    }
+
+    if (line.kind === 'mc') {
+      return {
+        id: Crypto.randomUUID(),
+        type: 'mc' as const,
+        title: line.text,
+        orderIndex: index,
+      };
+    }
+
+    return {
+      id: Crypto.randomUUID(),
+      type: 'song' as const,
+      songId: '',
+      songName: line.text,
+      artistName: artistName || '',
+      albumName: '',
+      artworkUrl: '',
+      orderIndex: index,
+    };
+  });
+};
+
+const normalizeNumericText = (value: string) =>
+  value
+    .replace(/[０-９]/g, (digit) => String(digit.charCodeAt(0) - 0xfee0))
+    .replace(/[^0-9]/g, '');
+
+const parseTicketPrice = (value: string): number | undefined => {
+  const digits = normalizeNumericText(value);
+  if (!digits) return undefined;
+  const parsed = Number(digits);
+  if (!Number.isFinite(parsed)) return undefined;
+  return parsed;
+};
+
+const sanitizeTicketPrice = (value: unknown): number | undefined => {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : undefined;
+  }
+
+  if (typeof value === 'string') {
+    const parsed = parseTicketPrice(value);
+    return parsed;
+  }
+
+  return undefined;
+};
+
+const toTicketPriceText = (value: unknown): string => {
+  const sanitized = sanitizeTicketPrice(value);
+  return sanitized == null ? '' : String(sanitized);
+};
+
+const formatTicketPriceInput = (value: string) => {
+  const parsed = parseTicketPrice(value);
+  return parsed == null ? '' : parsed.toLocaleString();
+};
+
+const ADD_PHOTO_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"><g clip-path="url(#clip0_4418_9255)"><path d="M9 10C10.1046 10 11 9.10457 11 8C11 6.89543 10.1046 6 9 6C7.89543 6 7 6.89543 7 8C7 9.10457 7.89543 10 9 10Z" stroke="#8c8c8c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /><path d="M13 2H9C4 2 2 4 2 9V15C2 20 4 22 9 22H15C20 22 22 20 22 15V10" stroke="#8c8c8c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /><path d="M15.75 5H21.25" stroke="#8c8c8c" stroke-width="2" stroke-linecap="round" /><path d="M18.5 7.75V2.25" stroke="#8c8c8c" stroke-width="2" stroke-linecap="round" /><path d="M2.67004 18.9496L7.60004 15.6396C8.39004 15.1096 9.53004 15.1696 10.24 15.7796L10.57 16.0696C11.35 16.7396 12.61 16.7396 13.39 16.0696L17.55 12.4996C18.33 11.8296 19.59 11.8296 20.37 12.4996L22 13.8996" stroke="#8c8c8c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></g><defs><clipPath id="clip0_4418_9255"><rect width="24" height="24" fill="white"/></clipPath></defs></svg>`;
+
+function TimePickerModal({
+  visible,
+  title,
+  selectedTime,
+  onSelect,
+  onClose,
+}: {
+  visible: boolean;
+  title: string;
+  selectedTime: string;
+  onSelect: (time: string) => void;
+  onClose: () => void;
+}) {
+  const scrollRef = useRef<ScrollView>(null);
+  const timeOptionHeight = 48;
+  const timeOptions: string[] = [];
+  for (let hour = 0; hour < 24; hour++) {
+    timeOptions.push(`${String(hour).padStart(2, '0')}:00`);
+    timeOptions.push(`${String(hour).padStart(2, '0')}:30`);
+  }
+
+  useEffect(() => {
+    if (!visible) return;
+    const index = Math.max(0, timeOptions.indexOf(selectedTime));
+    const targetOffset = index * timeOptionHeight;
+    const timer = setTimeout(() => {
+      scrollRef.current?.scrollTo({ y: targetOffset, animated: false });
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [visible]);
+
+  const { t } = useTranslation();
+
+  return (
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+      <View style={styles.timePickerOverlay}>
+        <View style={styles.timeModalContent}>
+          <View style={styles.timeModalHeader}>
+            <TouchableOpacity onPress={onClose}>
+              <Text style={styles.timeModalCancel}>{t('liveEdit.timePicker.cancel')}</Text>
+            </TouchableOpacity>
+            <Text style={styles.timeModalTitle}>{title}</Text>
+            <TouchableOpacity onPress={onClose}>
+              <Text style={styles.timeModalDone}>{t('liveEdit.timePicker.done')}</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView ref={scrollRef} style={styles.timeOptionsScroll}>
+            {timeOptions.map((time) => (
+              <TouchableOpacity
+                key={time}
+                style={[styles.timeOption, selectedTime === time && styles.timeOptionSelected]}
+                onPress={() => {
+                  onSelect(time);
+                  onClose();
+                }}
+              >
+                <Text style={[styles.timeOptionText, selectedTime === time && styles.timeOptionTextSelected]}>{time}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
 
 export default function LiveEditScreen({ initialData, onSave, onCancel, focusMemo = false, successHoldDuration = 1500 }: Props) {
   const { t } = useTranslation();
-  const liveTypeLabels = useMemo(
-    () => t('liveEdit.liveTypes', { returnObjects: true }) as string[],
-    [t]
+  const insets = useSafeAreaInsets();
+  const liveTypeLabels = useMemo(() => t('liveEdit.liveTypes', { returnObjects: true }) as string[], [t]);
+  const memoPrompts = useMemo(() => t('liveEdit.memoPrompts', { returnObjects: true }) as string[], [t]);
+  const randomPlaceholder = useMemo(
+    () => memoPrompts[Math.floor(Math.random() * memoPrompts.length)] || '',
+    [memoPrompts]
   );
 
-  const memoPrompts = useMemo(
-    () => t('liveEdit.memoPrompts', { returnObjects: true }) as string[],
-    [t]
-  );
-
-  // ランダムなプレースホルダーを決定（マウント時に1回だけ計算）
-  const randomPlaceholder = useMemo(() => {
-    return memoPrompts[Math.floor(Math.random() * memoPrompts.length)] || '';
-  }, [memoPrompts]);
-
-  const areImageUrisEqual = (prev: string[], next: string[]) => {
-    if (prev.length !== next.length) return false;
-    return prev.every((value, index) => value === next[index]);
-  };
-
-  const parseTime = (timeStr?: string, defaultTime: string = '18:00'): string => {
-    if (!timeStr || typeof timeStr !== 'string') {
-      return defaultTime;
-    }
-    // HH:mm形式の検証
+  const parseTime = (timeStr?: string, defaultTime = '18:00'): string => {
+    if (!timeStr || typeof timeStr !== 'string') return defaultTime;
     const match = timeStr.match(/^(\d{1,2}):(\d{2})$/);
-    if (match) {
-      const hour = parseInt(match[1], 10);
-      const minute = parseInt(match[2], 10);
-      if (hour >= 0 && hour < 24 && (minute === 0 || minute === 30)) {
-        return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-      }
+    if (!match) return defaultTime;
+    const hour = parseInt(match[1], 10);
+    const minute = parseInt(match[2], 10);
+    if (hour >= 0 && hour < 24 && (minute === 0 || minute === 30)) {
+      return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
     }
     return defaultTime;
   };
+
+  const createPerformanceId = () => `pf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const initialSetlistText = (initialData?.setlistSongs || [])
+    .map((item) => {
+      if (item.type === 'song') return item.songName;
+      if (item.type === 'mc') return `--- ${item.title} ---`;
+      if (item.type === 'encore') return `--- ${item.title} ---`;
+      return '';
+    })
+    .filter((line) => Boolean(line))
+    .join('\n');
 
   const [name, setName] = useState(initialData?.name || '');
   const [artists, setArtists] = useState<string[]>(
@@ -131,144 +316,238 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
   const [date, setDate] = useState(initialData?.date || new Date());
   const [venue, setVenue] = useState(initialData?.venue || '');
   const [seat, setSeat] = useState(initialData?.seat || '');
+  const [ticketPriceText, setTicketPriceText] = useState(toTicketPriceText(initialData?.ticketPrice));
   const [startTime, setStartTime] = useState(parseTime(initialData?.startTime, '18:00'));
   const [endTime, setEndTime] = useState(parseTime(initialData?.endTime, '20:00'));
-  
-  // 初期データの画像を解決（TicketDetailと同じフックを使用）
-  const resolvedInitialImages = useResolvedImageUris(initialData?.imageUrls);
-  
-  const [imageUrls, setImageUrls] = useState<string[]>([]);
-  
   const [qrCode, setQrCode] = useState(initialData?.qrCode || '');
   const [memo, setMemo] = useState(initialData?.memo || '');
   const [detail, setDetail] = useState(initialData?.detail || '');
-  const [setlistSongs, setSetlistSongs] = useState<SetlistItem[]>(initialData?.setlistSongs || []);
+  const [setlistText, setSetlistText] = useState(initialSetlistText);
+  const [performances, setPerformances] = useState<PerformanceFormItem[]>(() => {
+    const initialArtists = initialData?.artists && initialData.artists.length > 0
+      ? initialData.artists
+      : initialData?.artist
+        ? [initialData.artist]
+        : [''];
+
+    return initialArtists.map((artistName, index) => ({
+      id: createPerformanceId(),
+      artistName,
+      setlist: index === 0 ? initialSetlistText : '',
+      artistImageUrl: initialData?.artistImageUrls?.[index] ?? (index === 0 ? initialData?.artistImageUrl || '' : ''),
+    }));
+  });
+
+  const resolvedInitialImages = useResolvedImageUris(initialData?.imageUrls);
+  const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [showStartTimeModal, setShowStartTimeModal] = useState(false);
   const [showEndTimeModal, setShowEndTimeModal] = useState(false);
-  const [artistDropdownVisibility, setArtistDropdownVisibility] = useState<Record<number, boolean>>({});
-  const [isSongDropdownOpen, setIsSongDropdownOpen] = useState(false);
-  const pagerRef = useRef<PagerView>(null);
-  const memoInputRef = useRef<TextInput>(null);
-  const [currentPage, setCurrentPage] = useState(0);
+  const [showLiveTypeModal, setShowLiveTypeModal] = useState(false);
+  const [artistDropdownVisibility, setArtistDropdownVisibility] = useState<Record<string, boolean>>({});
+  const [isExtractingSetlist, setIsExtractingSetlist] = useState(false);
+  const [showSetlistSourceModal, setShowSetlistSourceModal] = useState(false);
+  const [showSetlistReviewModal, setShowSetlistReviewModal] = useState(false);
+  const [ocrDraftText, setOcrDraftText] = useState('');
+  const [ocrReviewItems, setOcrReviewItems] = useState<OcrReviewItem[]>(OCR_REVIEW_DUMMY_ITEMS);
+  const [setlistSourceAnchor, setSetlistSourceAnchor] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const [showSuccess, setShowSuccess] = useState(false);
   const [successOverlayKey, setSuccessOverlayKey] = useState(0);
-  const successCloseReady = useRef(false);
-  const successAnimationFinished = useRef(false);
+  const isMultiArtistLive = liveType === 'two-man' || liveType === 'festival';
+
+  const memoInputRef = useRef<TextInput>(null);
+  const setlistOcrTriggerRef = useRef<any>(null);
+  const ocrSpinAnim = useRef(new Animated.Value(0)).current;
+  const sourceModalPopAnim = useRef(new Animated.Value(0)).current;
   const successCloseTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasHandledSuccessClose = useRef(false);
+  const hasSuccessMinHoldElapsed = useRef(false);
+  const hasSuccessAnimationFinished = useRef(false);
+  const hasStartedSuccessSequence = useRef(false);
+  const onCancelRef = useRef(onCancel);
   const isSubmittingRef = useRef(false);
-  const isFocused = useIsFocused();
   const hasUserEditedImages = useRef(false);
+  const { width: windowWidth } = useWindowDimensions();
+  const ocrSpinRotate = ocrSpinAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
   const initialDataSignature = useMemo(() => {
     if (!initialData) return 'none';
     return JSON.stringify({
       name: initialData.name ?? '',
       artists: initialData.artists ?? (initialData.artist ? [initialData.artist] : ['']),
+      liveType: initialData.liveType ?? '',
       date: initialData.date ? new Date(initialData.date).toISOString() : '',
       venue: initialData.venue ?? '',
+      seat: initialData.seat ?? '',
+      ticketPrice: sanitizeTicketPrice(initialData.ticketPrice) ?? null,
+      startTime: initialData.startTime ?? '',
+      endTime: initialData.endTime ?? '',
+      memo: initialData.memo ?? '',
+      detail: initialData.detail ?? '',
+      qrCode: initialData.qrCode ?? '',
+      setlistSongs: initialData.setlistSongs ?? [],
       imageUrls: initialData.imageUrls ?? [],
     });
   }, [initialData]);
 
+  const finalizeSuccessAndClose = useCallback(() => {
+    if (hasHandledSuccessClose.current) return;
+    hasHandledSuccessClose.current = true;
+    if (successCloseTimeout.current) clearTimeout(successCloseTimeout.current);
+    setShowSuccess(false);
+    onCancelRef.current();
+  }, []);
+
   useEffect(() => {
-    if (showSuccess) {
-      successCloseReady.current = false;
-      successAnimationFinished.current = false;
-      if (successCloseTimeout.current) {
-        clearTimeout(successCloseTimeout.current);
-      }
-      // アニメーション完了後に余韻を持たせる
-      successCloseTimeout.current = setTimeout(() => {
-        successCloseReady.current = true;
-        setShowSuccess(false);
-        onCancel();
-      }, successHoldDuration);
+    onCancelRef.current = onCancel;
+  }, [onCancel]);
+
+  useEffect(() => {
+    if (!showSuccess) {
+      hasStartedSuccessSequence.current = false;
+      return;
     }
-  }, [showSuccess, successOverlayKey, onCancel]);
+
+    // Avoid resetting state on rerenders while the overlay is visible.
+    if (hasStartedSuccessSequence.current) return;
+    hasStartedSuccessSequence.current = true;
+
+    hasHandledSuccessClose.current = false;
+    hasSuccessMinHoldElapsed.current = false;
+    hasSuccessAnimationFinished.current = false;
+    if (successCloseTimeout.current) clearTimeout(successCloseTimeout.current);
+    successCloseTimeout.current = setTimeout(() => {
+      hasSuccessMinHoldElapsed.current = true;
+      if (hasSuccessAnimationFinished.current) {
+        finalizeSuccessAndClose();
+      }
+    }, successHoldDuration);
+  }, [showSuccess, successHoldDuration, finalizeSuccessAndClose]);
 
   useEffect(() => {
     return () => {
-      if (successCloseTimeout.current) {
-        clearTimeout(successCloseTimeout.current);
-      }
+      if (successCloseTimeout.current) clearTimeout(successCloseTimeout.current);
     };
   }, []);
 
   useEffect(() => {
-    if (focusMemo) {
-      // Memories ページ（index 2）に遷移
-      pagerRef.current?.setPage(2);
-      setCurrentPage(2);
-      // 少し時間をおいてからメモ入力欄をフォーカス
-      const timer = setTimeout(() => {
-        memoInputRef.current?.focus();
-      }, 300);
-      return () => clearTimeout(timer);
-    }
+    if (!focusMemo) return;
+    const timer = setTimeout(() => memoInputRef.current?.focus(), 300);
+    return () => clearTimeout(timer);
   }, [focusMemo]);
 
   useEffect(() => {
     hasUserEditedImages.current = false;
   }, [initialDataSignature]);
 
-  // useResolvedImageUris で解決された画像パスを反映
-  // 編集中の変更を上書きしないよう、ユーザー操作後は反映しない
   useEffect(() => {
-    // データがない場合はスキップ
-    if (!initialData) return;
+    const nextInitialSetlistText = (initialData?.setlistSongs || [])
+      .map((item) => {
+        if (item.type === 'song') return item.songName;
+        if (item.type === 'mc') return `--- ${item.title} ---`;
+        if (item.type === 'encore') return `--- ${item.title} ---`;
+        return '';
+      })
+      .filter((line) => Boolean(line))
+      .join('\n');
 
-    if (hasUserEditedImages.current) return;
+    const nextArtists =
+      initialData?.artists && initialData.artists.length > 0
+        ? initialData.artists
+        : initialData?.artist
+          ? [initialData.artist]
+          : [''];
 
-    // 画像がない場合（空配列）で初期化
+    const nextArtistImageUrls =
+      initialData?.artists && initialData.artists.length > 0
+        ? initialData.artists.map(
+            (_, index) => initialData?.artistImageUrls?.[index] ?? (index === 0 ? initialData?.artistImageUrl || '' : '')
+          )
+        : [initialData?.artistImageUrl || ''];
+
+    setName(initialData?.name || '');
+    setArtists(nextArtists);
+    setArtistImageUrls(nextArtistImageUrls);
+    setLiveType(normalizeLiveType(initialData?.liveType));
+    setArtistImageUrl(initialData?.artistImageUrl || '');
+    setDate(initialData?.date ? new Date(initialData.date) : new Date());
+    setVenue(initialData?.venue || '');
+    setSeat(initialData?.seat || '');
+    setTicketPriceText(toTicketPriceText(initialData?.ticketPrice));
+    setStartTime(parseTime(initialData?.startTime, '18:00'));
+    setEndTime(parseTime(initialData?.endTime, '20:00'));
+    setQrCode(initialData?.qrCode || '');
+    setMemo(initialData?.memo || '');
+    setDetail(initialData?.detail || '');
+    setSetlistText(nextInitialSetlistText);
+    setArtistDropdownVisibility({});
+    setPerformances(
+      nextArtists.map((artistName, index) => ({
+        id: createPerformanceId(),
+        artistName,
+        setlist: index === 0 ? nextInitialSetlistText : '',
+        artistImageUrl: nextArtistImageUrls[index] || '',
+      }))
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialDataSignature]);
+
+  useEffect(() => {
+    if (!isMultiArtistLive) return;
+    setPerformances((prev) => {
+      if (prev.length > 0 && prev.some((entry) => entry.artistName.trim() || entry.setlist.trim())) {
+        return prev;
+      }
+      const firstArtist = artists.find((name) => name.trim().length > 0) ?? '';
+      const firstSetlist = setlistText.trim();
+      const firstArtistImageUrl = artistImageUrls[0] ?? artistImageUrl ?? '';
+      return [{ id: createPerformanceId(), artistName: firstArtist, setlist: firstSetlist, artistImageUrl: firstArtistImageUrl }];
+    });
+  }, [isMultiArtistLive, artists, setlistText, artistImageUrls, artistImageUrl]);
+
+  useEffect(() => {
+    if (!showSetlistSourceModal) return;
+    sourceModalPopAnim.setValue(0);
+    Animated.spring(sourceModalPopAnim, {
+      toValue: 1,
+      friction: 9,
+      tension: 120,
+      useNativeDriver: true,
+    }).start();
+  }, [showSetlistSourceModal, sourceModalPopAnim]);
+
+  useEffect(() => {
+    if (!initialData || hasUserEditedImages.current) return;
     if (!initialData.imageUrls || initialData.imageUrls.length === 0) {
       setImageUrls((prev) => (prev.length > 0 ? [] : prev));
       return;
     }
-
-    // 解決された画像がある場合
     if (resolvedInitialImages && resolvedInitialImages.length > 0) {
-      setImageUrls((prev) => (areImageUrisEqual(prev, resolvedInitialImages) ? prev : resolvedInitialImages));
+      setImageUrls((prev) => {
+        if (prev.length === resolvedInitialImages.length && prev.every((v, i) => v === resolvedInitialImages[i])) {
+          return prev;
+        }
+        return resolvedInitialImages;
+      });
     }
-  }, [resolvedInitialImages, initialDataSignature]);
+  }, [resolvedInitialImages, initialDataSignature, initialData]);
 
   const handleArtistChange = (index: number, value: string, imageUrl?: string) => {
     setArtists((prev) => prev.map((artist, currentIndex) => (currentIndex === index ? value : artist)));
     setArtistImageUrls((prev) => {
       const next = [...prev];
-      while (next.length < artists.length) {
-        next.push('');
-      }
+      while (next.length < artists.length) next.push('');
       next[index] = imageUrl || '';
       return next;
     });
   };
 
-  const handleAddArtist = () => {
-    setArtists((prev) => [...prev, '']);
-    setArtistImageUrls((prev) => [...prev, '']);
-  };
-
-  const handleRemoveArtist = (index: number) => {
-    setArtists((prev) => {
-      if (prev.length <= 1) {
-        return prev;
-      }
-      return prev.filter((_, currentIndex) => currentIndex !== index);
-    });
-    setArtistImageUrls((prev) => {
-      if (prev.length <= 1) {
-        return prev;
-      }
-      return prev.filter((_, currentIndex) => currentIndex !== index);
-    });
-    setArtistDropdownVisibility({});
-  };
-
-  const handleArtistDropdownVisibilityChange = useCallback((index: number, visible: boolean) => {
+  const handleArtistDropdownVisibilityChange = useCallback((key: string, visible: boolean) => {
     setArtistDropdownVisibility((prev) => {
-      if (prev[index] === visible) {
-        return prev;
-      }
-      return { ...prev, [index]: visible };
+      if (prev[key] === visible) return prev;
+      return { ...prev, [key]: visible };
     });
   }, []);
 
@@ -277,178 +556,48 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
     [artists]
   );
 
-  const isBasicValid =
+  const isStreamingLive = liveType === 'streaming';
+  const isEditMode = Boolean(initialData);
+  const hasArtistValue = isMultiArtistLive
+    ? performances.some((entry) => entry.artistName.trim().length > 0)
+    : artists.some((artistName) => artistName.trim().length > 0);
+  const hasDictionaryRegistered = isMultiArtistLive
+    ? performances.every((entry) => {
+        const hasArtistName = entry.artistName.trim().length > 0;
+        if (!hasArtistName) return false;
+        return (entry.artistImageUrl || '').trim().length > 0;
+      })
+    : artists.every((artistName, index) => {
+        const hasArtistName = artistName.trim().length > 0;
+        if (!hasArtistName) return false;
+        return (artistImageUrls[index] || '').trim().length > 0;
+      });
+  const isFormValid =
     name.trim().length > 0 &&
-    artists.some((artistName) => artistName.trim().length > 0) &&
+    hasArtistValue &&
+    hasDictionaryRegistered &&
     venue.trim().length > 0 &&
     Boolean(date);
 
-  const isStreamingLive = liveType === 'streaming';
-
-  const goToPage = (index: number) => {
-    pagerRef.current?.setPage(index);
-    setCurrentPage(index);
-  };
-
-  const handlePageSelected = (event: any) => {
-    const nextIndex = event.nativeEvent.position;
-    if (nextIndex > 0 && !isBasicValid) {
-      Alert.alert(t('liveEdit.alerts.inputError'), t('liveEdit.alerts.requiredFields'));
-      pagerRef.current?.setPage(0);
-      setCurrentPage(0);
-      return;
-    }
-    setCurrentPage(nextIndex);
-  };
-
-  const handleNext = () => {
-    if (currentPage === 0 && !isBasicValid) {
-      Alert.alert(t('liveEdit.alerts.inputError'), t('liveEdit.alerts.requiredFields'));
-      return;
-    }
-    goToPage(Math.min(currentPage + 1, 2));
-  };
-
-  const handleBack = () => {
-    goToPage(Math.max(currentPage - 1, 0));
-  };
-
-  // 必須ラベルコンポーネント
-  const RequiredLabel = ({ label, required = false }: { label: string; required?: boolean }) => (
-    <Text style={styles.sectionLabel}>
-      {label}
-      {required && <Text style={styles.requiredMark}> *</Text>}
-    </Text>
+  const renderLabel = (label: string, required = false) => (
+    <View style={styles.inputLabelRow}>
+      <Text style={styles.inputLabel}>{label}</Text>
+      {required ? <Text style={styles.requiredLabel}>＊</Text> : null}
+    </View>
   );
 
-  // 時間選択モーダルコンポーネント（30分刻み）
-  const TimePickerModal = ({ visible, title, selectedTime, onSelect, onClose }: {
-    visible: boolean;
-    title: string;
-    selectedTime: string;
-    onSelect: (time: string) => void;
-    onClose: () => void;
-  }) => {
-    const scrollRef = useRef<ScrollView>(null);
-    const timeOptionHeight = 48;
-    // 30分刻みの時刻リストを生成 (00:00, 00:30, 01:00, ..., 23:30)
-    const timeOptions: string[] = [];
-    for (let hour = 0; hour < 24; hour++) {
-      timeOptions.push(`${String(hour).padStart(2, '0')}:00`);
-      timeOptions.push(`${String(hour).padStart(2, '0')}:30`);
-    }
-
-    useEffect(() => {
-      if (!visible) return;
-      const index = Math.max(0, timeOptions.indexOf(selectedTime));
-      const targetOffset = index * timeOptionHeight;
-      const timer = setTimeout(() => {
-        scrollRef.current?.scrollTo({ y: targetOffset, animated: false });
-      }, 0);
-      return () => clearTimeout(timer);
-    }, [visible, selectedTime, timeOptions]);
-
-    return (
-      <Modal
-        visible={visible}
-        transparent
-        animationType="slide"
-        onRequestClose={onClose}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.timeModalContent}>
-            <View style={styles.timeModalHeader}>
-              <TouchableOpacity onPress={onClose}>
-                <Text style={styles.timeModalCancel}>{t('liveEdit.timePicker.cancel')}</Text>
-              </TouchableOpacity>
-              <Text style={styles.timeModalTitle}>{title}</Text>
-              <TouchableOpacity onPress={onClose}>
-                <Text style={styles.timeModalDone}>{t('liveEdit.timePicker.done')}</Text>
-              </TouchableOpacity>
-            </View>
-            
-            <ScrollView ref={scrollRef} style={{ maxHeight: 300 }}>
-              {timeOptions.map((time) => (
-                <TouchableOpacity
-                  key={time}
-                  style={[
-                    styles.timeOption,
-                    selectedTime === time && styles.timeOptionSelected,
-                  ]}
-                  onPress={() => {
-                    onSelect(time);
-                    onClose();
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.timeOptionText,
-                      selectedTime === time && styles.timeOptionTextSelected,
-                    ]}
-                  >
-                    {time}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-    );
-  };
-
-  const handlePickImage = async () => {
-    try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert(t('liveEdit.alerts.permissionRequiredTitle'), t('liveEdit.alerts.photoPermissionRequired'));
-        return;
-      }
-      // 既存の制限などを無視して、常に1枚を選択して置換する
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsEditing: true,
-        allowsMultipleSelection: false,
-        aspect: [1, 1], // 正方形
-        base64: false,
-        quality: 1,
-      });
-
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const asset = result.assets[0];
-        const resolvedUri = await resolvePickedImageUri(asset);
-        if (!resolvedUri) {
-          Alert.alert(t('liveEdit.alerts.error'), t('liveEdit.alerts.imageLoadFailed'));
-          return;
-        }
-        // ジャケット画像として1枚だけ保存（配列を置換）
-        hasUserEditedImages.current = true;
-        setImageUrls((prev) => (prev.length === 1 && prev[0] === resolvedUri ? prev : [resolvedUri]));
-      }
-    } catch (error) {
-      console.log('[LiveEditScreen] Image pick failed:', error);
-      Alert.alert(t('liveEdit.alerts.error'), t('liveEdit.alerts.imagePickFailed'));
-    }
-  };
-
-  // 既存のhandleReplaceImageは不要になるが、コードの整合性のため削除してもよい
-  // ここではhandleRemoveImageを引数なしの単純なクリア関数に変更
-
-  const handleRemoveImage = () => {
-    hasUserEditedImages.current = true;
-    setImageUrls([]);
-  };
+  const handleSuccessAnimationFinish = useCallback(() => {
+    hasSuccessAnimationFinished.current = true;
+    if (!hasSuccessMinHoldElapsed.current) return;
+    finalizeSuccessAndClose();
+  }, [finalizeSuccessAndClose]);
 
   const resolvePickedImageUri = async (asset: ImagePicker.ImagePickerAsset): Promise<string> => {
-    if (asset.uri.startsWith('file://')) {
-      return asset.uri;
-    }
+    if (asset.uri.startsWith('file://')) return asset.uri;
     if (asset.assetId) {
       try {
         const info = await MediaLibrary.getAssetInfoAsync(asset.assetId);
-        if (info.localUri) {
-          return info.localUri;
-        }
+        if (info.localUri) return info.localUri;
       } catch (error) {
         console.log('[LiveEditScreen] Failed to resolve asset localUri:', error);
       }
@@ -469,34 +618,367 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
     return asset.uri;
   };
 
+  const handlePickImage = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(t('liveEdit.alerts.permissionRequiredTitle'), t('liveEdit.alerts.photoPermissionRequired'));
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        allowsMultipleSelection: false,
+        aspect: [1, 1],
+        base64: false,
+        quality: 1,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const resolvedUri = await resolvePickedImageUri(result.assets[0]);
+        if (!resolvedUri) {
+          Alert.alert(t('liveEdit.alerts.error'), t('liveEdit.alerts.imageLoadFailed'));
+          return;
+        }
+        hasUserEditedImages.current = true;
+        setImageUrls([resolvedUri]);
+      }
+    } catch (error) {
+      console.log('[LiveEditScreen] Image pick failed:', error);
+      Alert.alert(t('liveEdit.alerts.error'), t('liveEdit.alerts.imagePickFailed'));
+    }
+  };
+
+  const handleRemoveImage = () => {
+    hasUserEditedImages.current = true;
+    setImageUrls([]);
+  };
+
+  const spinOcrIcon = () => {
+    ocrSpinAnim.setValue(0);
+    Animated.timing(ocrSpinAnim, {
+      toValue: 1,
+      duration: 250,
+      easing: Easing.linear,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const isSuspiciousSetlistText = (value: string) => {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) return true;
+    if (trimmed.length < 2) return true;
+
+    const hasReadableChars = /[A-Za-z\u3040-\u30FF\u4E00-\u9FFF]/.test(trimmed);
+    const symbolChars = trimmed.match(/[^A-Za-z0-9\u3040-\u30FF\u4E00-\u9FFF\s]/g)?.length ?? 0;
+    const symbolRatio = symbolChars / Math.max(trimmed.length, 1);
+    const repeatedCharOnly = /^([\W_\u3000\s]|\d)\1+$/.test(trimmed);
+    const looksLikeMetaLine = /^(open|start|door|time|venue|ticket|price|date)\b/i.test(trimmed);
+
+    if (!hasReadableChars) return true;
+    if (symbolRatio > 0.35) return true;
+    if (repeatedCharOnly) return true;
+    if (looksLikeMetaLine) return true;
+
+    return false;
+  };
+
+  const normalizeOcrLine = (line: string) => {
+    let next = line.trim();
+
+    // Remove common setlist indexes like "1.", "01)", "M1:", "①".
+    next = next.replace(/^\s*[①-⑳]\s*/, '');
+    next = next.replace(/^\s*(?:m|mc)?\s*0*\d{1,3}\s*[.)\]】\-:：]\s*/i, '');
+    next = next.replace(/^\s*#?\d{1,3}\s+(?=\S)/, '');
+    next = next.replace(/^\s*[-*・●]\s*/, '');
+
+    return next.trim();
+  };
+
+  const normalizeAndFilterOcrLines = (lines: string[]) => {
+    const seen = new Set<string>();
+    const cleaned: string[] = [];
+
+    lines.forEach((raw) => {
+      const normalized = normalizeOcrLine(raw);
+      if (!normalized) return;
+      if (OCR_DROP_LINE_PATTERNS.some((pattern) => pattern.test(normalized))) return;
+
+      const dedupeKey = normalized.toLowerCase();
+      if (seen.has(dedupeKey)) return;
+      seen.add(dedupeKey);
+      cleaned.push(normalized);
+    });
+
+    return cleaned;
+  };
+
+  const buildReviewItemsFromLines = (lines: string[]): OcrReviewItem[] => {
+    return lines.map((line, index) => ({
+      id: `ocr-${Date.now()}-${index}`,
+      text: line,
+      isSuspicious: isSuspiciousSetlistText(line),
+    }));
+  };
+
+  const processSetlistImage = async (imageUri: string) => {
+    setIsExtractingSetlist(true);
+    try {
+      const result = await TextRecognition.recognize(imageUri, TextRecognitionScript.JAPANESE);
+      const extractedText = result?.text?.trim() ?? '';
+      const lines = normalizeAndFilterOcrLines(formatSetlistText(extractedText));
+
+      if (lines.length === 0) {
+        Alert.alert(t('liveEdit.alerts.error'), t('liveEdit.setlistEditor.alerts.noSongToAdd'));
+        return null;
+      }
+      return lines;
+    } catch (error) {
+      console.log('[LiveEditScreen] OCR failed:', error);
+      Alert.alert(t('liveEdit.alerts.error'), t('liveEdit.setlistEditor.alerts.ocrFailed'));
+      return null;
+    } finally {
+      setIsExtractingSetlist(false);
+    }
+  };
+
+  const handleSetlistOcrFromGallery = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert(t('liveEdit.setlistEditor.alerts.permissionRequired'), t('liveEdit.setlistEditor.alerts.photoLibraryRequired'));
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: false,
+      quality: OCR_IMAGE_QUALITY,
+    });
+
+    if (result.canceled || !result.assets?.[0]?.uri) return;
+    const lines = await processSetlistImage(result.assets[0].uri);
+    if (!lines) return;
+    const items = buildReviewItemsFromLines(lines);
+    setOcrReviewItems(items.length > 0 ? items : OCR_REVIEW_DUMMY_ITEMS);
+    setOcrDraftText(lines.join('\n'));
+    setShowSetlistReviewModal(true);
+  };
+
+  const handleSetlistOcrFromCamera = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert(t('liveEdit.setlistEditor.alerts.permissionRequired'), t('liveEdit.setlistEditor.alerts.cameraRequired'));
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images'],
+      allowsEditing: false,
+      quality: OCR_IMAGE_QUALITY,
+    });
+
+    if (result.canceled || !result.assets?.[0]?.uri) return;
+    const lines = await processSetlistImage(result.assets[0].uri);
+    if (!lines) return;
+    const items = buildReviewItemsFromLines(lines);
+    setOcrReviewItems(items.length > 0 ? items : OCR_REVIEW_DUMMY_ITEMS);
+    setOcrDraftText(lines.join('\n'));
+    setShowSetlistReviewModal(true);
+  };
+
+  const handleSetlistOcrPress = () => {
+    if (isExtractingSetlist) return;
+    spinOcrIcon();
+    const triggerNode = setlistOcrTriggerRef.current;
+    if (triggerNode?.measureInWindow) {
+      triggerNode.measureInWindow((x: number, y: number, width: number, height: number) => {
+        setSetlistSourceAnchor({ x, y, width, height });
+        setShowSetlistSourceModal(true);
+      });
+      return;
+    }
+    setSetlistSourceAnchor({ x: Math.max(windowWidth - 60, 0), y: 210, width: 24, height: 24 });
+    setShowSetlistSourceModal(true);
+  };
+
+  const handleConfirmOcrDraft = () => {
+    const lines = formatSetlistText(ocrReviewItems.map((item) => item.text).join('\n'));
+    if (lines.length === 0) {
+      Alert.alert(t('liveEdit.alerts.error'), t('liveEdit.setlistEditor.alerts.noSongToAdd'));
+      return;
+    }
+
+    setSetlistText((prev) => {
+      const currentLines = formatSetlistText(prev);
+      const merged = [...currentLines, ...lines];
+      return merged.join('\n');
+    });
+
+    setShowSetlistReviewModal(false);
+    setOcrDraftText('');
+    setOcrReviewItems(OCR_REVIEW_DUMMY_ITEMS);
+  };
+
+  const handleCancelOcrReview = () => {
+    setShowSetlistReviewModal(false);
+    setOcrDraftText('');
+    setOcrReviewItems(OCR_REVIEW_DUMMY_ITEMS);
+  };
+
+  const handleReviewItemChange = (id: string, nextText: string) => {
+    setOcrReviewItems((prev) =>
+      prev.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              text: nextText,
+              isSuspicious: isSuspiciousSetlistText(nextText),
+            }
+          : item
+      )
+    );
+  };
+
+  const handleDeleteReviewItem = (id: string) => {
+    setOcrReviewItems((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const handleAddPerformance = () => {
+    setPerformances((prev) => [
+      ...prev,
+      { id: createPerformanceId(), artistName: '', setlist: '', artistImageUrl: '' },
+    ]);
+  };
+
+  const handleChangePerformance = (id: string, key: 'artistName' | 'setlist' | 'artistImageUrl', value: string) => {
+    setPerformances((prev) =>
+      prev.map((entry) => (entry.id === id ? { ...entry, [key]: value } : entry))
+    );
+  };
+
+  const handlePerformanceArtistChange = (id: string, value: string, imageUrl?: string) => {
+    setPerformances((prev) =>
+      prev.map((entry) =>
+        entry.id === id
+          ? {
+              ...entry,
+              artistName: value,
+              artistImageUrl: imageUrl || '',
+            }
+          : entry
+      )
+    );
+  };
+
+  const handleDeletePerformance = (id: string) => {
+    setPerformances((prev) => {
+      if (prev.length <= 1) return prev;
+      return prev.filter((entry) => entry.id !== id);
+    });
+  };
+
+  if (showSetlistReviewModal) {
+    return (
+      <KeyboardAvoidingView style={styles.ocrReviewScreen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <StatusBar barStyle="dark-content" />
+
+        <View style={[styles.ocrReviewHeader, { paddingTop: insets.top + 10 }]}>
+          <TouchableOpacity style={styles.ocrReviewCloseButton} onPress={handleCancelOcrReview}>
+            <Ionicons name="close" size={24} color="#7A7A7A" />
+          </TouchableOpacity>
+          <Text style={styles.ocrReviewHeaderTitle}>読み取った結果の確認</Text>
+          <View style={styles.ocrReviewHeaderSpacer} />
+        </View>
+
+        <View style={styles.ocrReviewSummaryWrap}>
+          <Text style={styles.ocrReviewSummaryTitle}>{`${ocrReviewItems.length}曲を読み取りました`}</Text>
+          <Text style={styles.ocrReviewSummarySub}>タップで編集</Text>
+        </View>
+
+        <DraggableFlatList
+          data={ocrReviewItems}
+          keyExtractor={(item) => item.id}
+          onDragEnd={({ data }) => setOcrReviewItems(data)}
+          activationDistance={12}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: insets.bottom + 250 }}
+          renderItem={({ item, getIndex, drag, isActive }: RenderItemParams<OcrReviewItem>) => {
+            const rawIndex = getIndex?.();
+            const fallbackIndex = ocrReviewItems.findIndex((row) => row.id === item.id);
+            const safeIndex = Number.isFinite(rawIndex as number) ? (rawIndex as number) : fallbackIndex;
+            const displayIndex = safeIndex >= 0 ? safeIndex + 1 : 1;
+
+            return (
+              <ScaleDecorator>
+                <View
+                  style={[
+                    styles.ocrReviewCard,
+                    item.isSuspicious && styles.ocrReviewCardSuspicious,
+                    isActive && styles.ocrReviewCardActive,
+                  ]}
+                >
+                  <Text style={styles.ocrReviewIndex}>{String(displayIndex).padStart(2, '0')}</Text>
+                <TextInput
+                  style={[styles.ocrReviewInput, item.isSuspicious && styles.ocrReviewInputSuspicious]}
+                  value={item.text}
+                  onChangeText={(value) => handleReviewItemChange(item.id, value)}
+                  placeholder="曲名を入力"
+                  placeholderTextColor="#BDBDBD"
+                />
+                {item.isSuspicious ? (
+                  <HugeiconsIcon icon={AlertCircleIcon} size={18} color="#FF3B30" strokeWidth={1.9} />
+                ) : null}
+                <TouchableOpacity onLongPress={drag} delayLongPress={120} style={styles.ocrReviewDragHandle}>
+                  <MaterialIcons name="drag-indicator" size={20} color="#CCCCCC" style={styles.ocrReviewDragIcon} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => handleDeleteReviewItem(item.id)}
+                  style={[styles.ocrReviewDeleteButton, item.isSuspicious && styles.ocrReviewDeleteButtonSuspicious]}
+                >
+                  <HugeiconsIcon icon={Delete01Icon} size={18} color={item.isSuspicious ? '#FF3B30' : '#A9A9A9'} strokeWidth={1.9} />
+                </TouchableOpacity>
+                </View>
+              </ScaleDecorator>
+            );
+          }}
+        />
+
+        <View style={[styles.ocrReviewBottomCtaWrap, { paddingBottom: Math.max(14, insets.bottom + 6) }]}>
+          <TouchableOpacity style={styles.ocrReviewBottomCta} onPress={handleConfirmOcrDraft}>
+            <Text style={styles.ocrReviewBottomCtaText}>この内容で追加</Text>
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    );
+  }
+
   const handleSave = async () => {
-    const validArtistEntries = artists
-      .map((artistName, index) => ({
-        artistName: artistName.trim(),
-        artistImageUrl: (artistImageUrls[index] ?? '').trim(),
-      }))
-      .filter((entry) => entry.artistName !== '');
+    if (!isFormValid || isSubmittingRef.current) return;
+
+    const validArtistEntries = isMultiArtistLive
+      ? performances
+          .map((entry) => ({ artistName: entry.artistName.trim(), artistImageUrl: (entry.artistImageUrl || '').trim() }))
+          .filter((entry) => entry.artistName !== '')
+      : artists
+          .map((artistName, index) => ({
+            artistName: artistName.trim(),
+            artistImageUrl: (artistImageUrls[index] ?? '').trim(),
+          }))
+          .filter((entry) => entry.artistName !== '');
 
     const filteredArtists = validArtistEntries.map((entry) => entry.artistName);
     const filteredArtistImageUrls = validArtistEntries.map((entry) => entry.artistImageUrl);
     const primaryArtistImageUrl = filteredArtistImageUrls[0] || '';
 
-    if (!name || filteredArtists.length === 0 || !venue) {
-      Alert.alert(t('liveEdit.alerts.error'), t('liveEdit.alerts.requiredFieldsShort'));
-      return;
-    }
+    const nextSetlistSongs: SetlistItem[] = isMultiArtistLive
+      ? performances.flatMap((entry) => parseSetlistTextToItems(entry.setlist, entry.artistName.trim() || primaryArtist || ''))
+      : parseSetlistTextToItems(setlistText, primaryArtist || '');
 
-    if (imageUrls.length === 0) {
-      Alert.alert(t('liveEdit.alerts.error'), t('liveEdit.alerts.coverRequired'));
-      return;
-    }
-
-    if (isSubmittingRef.current) {
-      return;
-    }
+    const parsedTicketPrice = parseTicketPrice(ticketPriceText);
 
     isSubmittingRef.current = true;
-
     try {
       await onSave({
         name,
@@ -508,143 +990,61 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
         date,
         venue,
         seat: seat || '',
+        ticketPrice: parsedTicketPrice,
         startTime: startTime || '18:00',
         endTime: endTime || '20:00',
         imageUrls,
         qrCode: qrCode || '',
         memo: memo || '',
         detail: detail || '',
-        setlistSongs,
+        setlistSongs: nextSetlistSongs,
       });
 
-      // アニメーション完了前に画面が閉じないようにする
       setSuccessOverlayKey((prev) => prev + 1);
       setShowSuccess(true);
-    } catch (error) {
+    } catch {
       isSubmittingRef.current = false;
-      return;
     }
   };
 
-  const handleClosePress = useCallback(() => {
+  const handleClosePress = () => {
     Alert.alert(
       t('liveEdit.alerts.discardConfirmTitle'),
       t('liveEdit.alerts.discardConfirmMessage'),
       [
-        {
-          text: t('liveEdit.alerts.continueEditing'),
-          style: 'cancel',
-        },
-        {
-          text: t('liveEdit.alerts.discard'),
-          style: 'destructive',
-          onPress: onCancel,
-        },
+        { text: t('liveEdit.alerts.continueEditing'), style: 'cancel' },
+        { text: t('liveEdit.alerts.discard'), style: 'destructive', onPress: onCancel },
       ],
       { cancelable: true }
     );
-  }, [onCancel, t]);
+  };
+
+  // TimePickerModal はファイルトップレベルで定義済み
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <StatusBar barStyle="dark-content" />
 
-      {/* ヘッダー */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={handleClosePress} style={styles.headerButton}>
-          <Ionicons name="close" size={28} color="#000" />
+      <BlurView tint="light" intensity={80} style={styles.header}>
+        <TouchableOpacity onPress={handleClosePress} style={styles.headerCloseButton}>
+          <Ionicons name="close" size={28} color="#B7B7B7" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{t('liveEdit.headerTitle')}</Text>
+        <Text style={styles.headerTitle}>{initialData ? 'Edit live record' : 'Add live record'}</Text>
         <View style={styles.headerSpacer} />
-      </View>
+      </BlurView>
 
-      <View style={styles.stepHeader}>
-        <View style={styles.stepHeaderRow}>
-          <Text style={styles.stepHeaderLabel}>Step {currentPage + 1}/3</Text>
-          <Text style={styles.stepHeaderTitle}>
-            {currentPage === 0 ? t('liveEdit.pages.basic') : currentPage === 1 ? t('liveEdit.pages.setlist') : t('liveEdit.pages.other')}
-          </Text>
-        </View>
-        <View style={styles.progressTrack}>
-          <View style={[styles.progressFill, { width: `${((currentPage + 1) / 3) * 100}%` }]} />
-        </View>
-      </View>
-
-      <PagerView
-        ref={pagerRef}
-        style={styles.pager}
-        initialPage={0}
-        onPageSelected={handlePageSelected}
-        scrollEnabled={false}
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        nestedScrollEnabled
+        scrollEnabled={!Object.values(artistDropdownVisibility).some(Boolean)}
       >
-        <View key="basic" style={styles.page}>
-          <ScrollView
-            style={styles.pageScroll}
-            contentContainerStyle={styles.pageContent}
-            showsVerticalScrollIndicator={false}
-            scrollEnabled={!Object.values(artistDropdownVisibility).some(Boolean)}
-            keyboardShouldPersistTaps="handled"
-          >
-            {/* ライブ名 */}
-            <View style={styles.section}>
-              <RequiredLabel label={t('liveEdit.labels.liveName')} required />
-              <View style={styles.inputContainer}>
-                <View style={styles.inputBlur}>
-                  <TextInput
-                    style={styles.input}
-                    value={name}
-                    onChangeText={setName}
-                    placeholder={t('liveEdit.placeholders.liveName')}
-                    placeholderTextColor="#CCCCCC"
-                  />
-                </View>
-              </View>
-
-              <View style={styles.liveTypeWrap}>
-                <Text style={styles.liveTypeLabel}>{t('liveEdit.labels.liveType')}</Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.liveTypeScrollContent}
-                >
-                  {LIVE_TYPES.map((type) => {
-                    const selected = liveType === type;
-                    const labelIndex = LIVE_TYPES.indexOf(type);
-                    const displayLabel = liveTypeLabels[labelIndex] ?? type;
-                    return (
-                      <TouchableOpacity
-                        key={type}
-                        activeOpacity={0.85}
-                        style={[styles.liveTypeChip, selected && styles.liveTypeChipSelected]}
-                        onPress={() => setLiveType(type)}
-                      >
-                        {type === 'streaming' ? (
-                          <Feather
-                            name="radio"
-                            size={14}
-                            color={selected ? '#FFFFFF' : '#B6B6B6'}
-                          />
-                        ) : (
-                          <MaterialCommunityIcons
-                            name={LIVE_TYPE_ICON_MAP[type] as keyof typeof MaterialCommunityIcons.glyphMap}
-                            size={14}
-                            color={selected ? '#FFFFFF' : '#B6B6B6'}
-                          />
-                        )}
-                        <Text style={[styles.liveTypeChipText, selected && styles.liveTypeChipTextSelected]}>{displayLabel}</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              </View>
-            </View>
-
-            {/* アーティスト名 */}
-            <View style={[styles.section, { zIndex: 1000 }]}>
-              <RequiredLabel label={t('liveEdit.labels.artistName')} required />
+        <View style={styles.sectionBlock}>
+          {!isMultiArtistLive && (
+            <>
+              {renderLabel('アーティスト名', true)}
               {artists.map((artistName, index) => (
                 <View key={`artist-${index}`} style={[styles.artistFieldContainer, { zIndex: 1000 - index }]}>
                   <ArtistInput
@@ -652,262 +1052,338 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
                     imageUrl={artistImageUrls[index] || ''}
                     onChange={(value, imageUrl) => handleArtistChange(index, value, imageUrl)}
                     placeholder={t('liveEdit.placeholders.artistSearch')}
-                    onDropdownVisibilityChange={(visible) => handleArtistDropdownVisibilityChange(index, visible)}
+                    onDropdownVisibilityChange={(visible) => handleArtistDropdownVisibilityChange(`artist-${index}`, visible)}
                   />
-                  {artists.length >= 2 && (
-                    <TouchableOpacity
-                      style={styles.artistRemoveButton}
-                      onPress={() => handleRemoveArtist(index)}
-                    >
-                      <Text style={styles.artistRemoveButtonText}>削除</Text>
-                    </TouchableOpacity>
-                  )}
                 </View>
               ))}
-              <TouchableOpacity style={styles.artistAddButton} onPress={handleAddArtist}>
-                <Text style={styles.artistAddButtonText}>＋ アーティストを追加</Text>
-              </TouchableOpacity>
-            </View>
+            </>
+          )}
 
-            {/* 日付 */}
-            <View style={styles.section}>
-              <RequiredLabel label={t('liveEdit.labels.date')} required />
-              <DateInputField
-                value={date}
-                onChange={setDate}
-              />
-            </View>
-
-            {/* 時間 */}
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>{t('liveEdit.labels.startTime')}</Text>
-              <TouchableOpacity
-                style={styles.inputContainer}
-                onPress={() => setShowStartTimeModal(true)}
-              >
-                <View style={styles.inputBlur}>
-                  <View style={styles.timeButton}>
-                    <Ionicons name="time-outline" size={20} color="#666666" />
-                    <Text style={styles.timeDisplay}>
-                      {startTime || '18:00'}
-                    </Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>{t('liveEdit.labels.endTime')}</Text>
-              <TouchableOpacity
-                style={styles.inputContainer}
-                onPress={() => setShowEndTimeModal(true)}
-              >
-                <View style={styles.inputBlur}>
-                  <View style={styles.timeButton}>
-                    <Ionicons name="time-outline" size={20} color="#666666" />
-                    <Text style={styles.timeDisplay}>
-                      {endTime || '20:00'}
-                    </Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            </View>
-
-            {/* 会場 */}
-            <View style={styles.section}>
-              <RequiredLabel
-                label={isStreamingLive ? t('liveEdit.labels.platform') : t('liveEdit.labels.venue')}
-                required
-              />
-              <View style={styles.inputContainer}>
-                <View style={styles.inputBlur}>
-                  <TextInput
-                    style={styles.input}
-                    value={venue}
-                    onChangeText={setVenue}
-                    placeholder={isStreamingLive ? t('liveEdit.placeholders.platform') : t('liveEdit.placeholders.venue')}
-                    placeholderTextColor="#CCCCCC"
-                  />
-                </View>
-              </View>
-            </View>
-
-            {/* 座席 */}
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>
-                {isStreamingLive ? t('liveEdit.labels.watchEnvironment') : t('liveEdit.labels.seat')}
-              </Text>
-              <View style={styles.inputContainer}>
-                <View style={styles.inputBlur}>
-                  <TextInput
-                    style={styles.input}
-                    value={seat}
-                    onChangeText={setSeat}
-                    placeholder={isStreamingLive ? t('liveEdit.placeholders.watchEnvironment') : t('liveEdit.placeholders.seat')}
-                    placeholderTextColor="#CCCCCC"
-                  />
-                </View>
-              </View>
-            </View>
-
-            <View style={{ height: 20 }} />
-          </ScrollView>
-
-          <TimePickerModal
-            visible={showStartTimeModal}
-            title={t('liveEdit.timePicker.startTitle')}
-            selectedTime={startTime}
-            onSelect={setStartTime}
-            onClose={() => setShowStartTimeModal(false)}
+          {renderLabel('イベント名', true)}
+          <TextInput
+            style={styles.baseInput}
+            value={name}
+            onChangeText={setName}
+            placeholder={t('liveEdit.placeholders.liveName')}
+            placeholderTextColor="#CCCCCC"
           />
 
-          <TimePickerModal
-            visible={showEndTimeModal}
-            title={t('liveEdit.timePicker.endTitle')}
-            selectedTime={endTime}
-            onSelect={setEndTime}
-            onClose={() => setShowEndTimeModal(false)}
-          />
+          {renderLabel('イベントの種類')}
+          <TouchableOpacity style={styles.liveTypeSelector} activeOpacity={0.8} onPress={() => setShowLiveTypeModal(true)}>
+            <MaterialCommunityIcons
+              name={LIVE_TYPE_ICON_MAP[liveType] as keyof typeof MaterialCommunityIcons.glyphMap}
+              size={18}
+              color="#9A9A9A"
+              style={styles.liveTypeLeftIcon}
+            />
+            <Text style={styles.liveTypeSelectedText}>
+              {liveTypeLabels[LIVE_TYPES.indexOf(liveType)] ?? liveType}
+            </Text>
+            <MaterialIcons name="unfold-more" size={22} color="#9A9A9A" style={styles.liveTypeRightIcon} />
+          </TouchableOpacity>
         </View>
 
-        <View key="setlist" style={styles.page}>
-          <View
-            style={styles.pageScroll}
-          >
-            {/* SET LIST */}
-            <View style={[styles.section, { zIndex: 50, minHeight: 300 }]}>
-              <Text style={styles.sectionLabel}>{t('liveEdit.labels.setList')}</Text>
-              <SetlistEditor
-                artistName={primaryArtist}
-                initialSongs={setlistSongs}
-                onChange={setSetlistSongs}
-                onDropdownVisibilityChange={setIsSongDropdownOpen}
-              />
-            </View>
+        <View style={styles.sectionBlock}>
+          {renderLabel('日付', true)}
+          <DateInputField value={date} onChange={setDate} />
 
-            <View style={{ height: 20 }} />
+          <View style={styles.timeRowWrap}>
+            <View style={styles.timeColumn}>
+              <Text style={styles.inputLabel}>開場</Text>
+              <TouchableOpacity style={styles.baseInput} onPress={() => setShowStartTimeModal(true)}>
+                <Text style={styles.timeText}>{startTime || '16:00'}</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.timeArrow}>{'------------->'}</Text>
+            <View style={styles.timeColumn}>
+              <Text style={styles.inputLabel}>開演</Text>
+              <TouchableOpacity style={styles.baseInput} onPress={() => setShowEndTimeModal(true)}>
+                <Text style={styles.timeText}>{endTime || '18:00'}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 
-        <View key="memories" style={styles.page}>
-          <ScrollView
-            style={styles.pageScroll}
-            contentContainerStyle={styles.pageContent}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            {/* ジャケット画像（1枚） */}
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>{t('liveEdit.labels.coverArt')}</Text>
-              
-              {imageUrls.length > 0 ? (
-                <View style={styles.jacketContainer}>
-                  <Image
-                    source={{ uri: imageUrls[0] }}
-                    style={styles.jacketImage}
-                    contentFit="cover"
-                  />
-                  <TouchableOpacity
-                    style={styles.jacketRemoveButton}
-                    onPress={handleRemoveImage}
-                  >
-                    <Ionicons name="close-circle" size={30} color="#ff4444" />
-                  </TouchableOpacity>
+        <View style={styles.sectionBlock}>
+          {renderLabel('会場', true)}
+          <TextInput
+            style={styles.baseInput}
+            value={venue}
+            onChangeText={setVenue}
+            placeholder={isStreamingLive ? t('liveEdit.placeholders.platform') : t('liveEdit.placeholders.venue')}
+            placeholderTextColor="#CCCCCC"
+          />
+
+          <Text style={styles.inputLabel}>座席</Text>
+          <TextInput
+            style={styles.baseInput}
+            value={seat}
+            onChangeText={setSeat}
+            placeholder={isStreamingLive ? t('liveEdit.placeholders.watchEnvironment') : t('liveEdit.placeholders.seat')}
+            placeholderTextColor="#CCCCCC"
+          />
+
+          <Text style={styles.inputLabel}>料金</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+            <TextInput
+              style={[styles.baseInput, { flex: 1, textAlign: 'right', marginBottom: 0 }]}
+              value={formatTicketPriceInput(ticketPriceText)}
+              onChangeText={(text) => {
+                setTicketPriceText(normalizeNumericText(text));
+              }}
+              keyboardType="number-pad"
+              placeholder="0"
+              placeholderTextColor="#CCCCCC"
+            />
+            <Text style={{ fontSize: 16, color: '#555555', marginLeft: 8, marginBottom: 12 }}>円</Text>
+          </View>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+            {[3000, 5000, 8000, 10000, 15000].map((preset) => (
+              <TouchableOpacity
+                key={preset}
+                onPress={() => setTicketPriceText(String(preset))}
+                style={[
+                  { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#DDDDDD', backgroundColor: '#FFFFFF' },
+                  ticketPriceText === String(preset) && { backgroundColor: '#222222', borderColor: '#222222' },
+                ]}
+              >
+                <Text style={[
+                  { fontSize: 14, color: '#444444' },
+                  ticketPriceText === String(preset) && { color: '#FFFFFF', fontWeight: '600' },
+                ]}>
+                  {preset.toLocaleString()}円
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+        </View>
+
+        {isMultiArtistLive ? (
+          <>
+            {performances.map((performance, index) => (
+              <View key={performance.id} style={styles.performanceBlock}>
+                <View style={styles.performanceHeaderRow}>
+                  <Text style={styles.performanceTitle}>{`Artist ${index + 1}`}</Text>
+                  {performances.length > 1 ? (
+                    <TouchableOpacity onPress={() => handleDeletePerformance(performance.id)} style={styles.performanceDeleteButton}>
+                      <HugeiconsIcon icon={Delete01Icon} size={18} color="#999999" strokeWidth={1.9} />
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={styles.performanceDeletePlaceholder} />
+                  )}
                 </View>
-              ) : (
-                <TouchableOpacity 
-                  style={styles.emptyJacketContainer} 
-                  onPress={handlePickImage}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.emptyJacketContent}>
-                    <SvgXml xml={ADD_PHOTO_ICON_SVG} width={48} height={48} />
-                    <Text style={styles.emptyJacketTitle}>
-                      {t('liveEdit.jacket.emptyTitle')}
-                    </Text>
-                    <Text style={styles.emptyJacketSubtitle}>
-                      {t('liveEdit.jacket.emptySubtitle')}
-                    </Text>
-                  </View>
+
+                {renderLabel('アーティスト名', true)}
+                <ArtistInput
+                  value={performance.artistName}
+                  imageUrl={performance.artistImageUrl}
+                  onChange={(value, imageUrl) => handlePerformanceArtistChange(performance.id, value, imageUrl)}
+                  placeholder={t('liveEdit.placeholders.artistSearch')}
+                  onDropdownVisibilityChange={(visible) => handleArtistDropdownVisibilityChange(`performance-${performance.id}`, visible)}
+                />
+
+                <View style={styles.performanceSetlistWrap}>
+                  <SetlistInputWithTags
+                    title="セットリスト"
+                    value={performance.setlist}
+                    onChangeText={(value) => handleChangePerformance(performance.id, 'setlist', value)}
+                    placeholder={t('liveEdit.setlistEditor.placeholders.lineByLineInput')}
+                    minHeight={150}
+                  />
+                </View>
+              </View>
+            ))}
+
+            <TouchableOpacity style={styles.addPerformanceButton} onPress={handleAddPerformance} activeOpacity={0.85}>
+              <Text style={styles.addPerformanceButtonText}>+ 別のアーティストを追加</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <View style={styles.sectionBlock}>
+            <SetlistInputWithTags
+              title="セットリスト"
+              value={setlistText}
+              onChangeText={setSetlistText}
+              placeholder={t('liveEdit.setlistEditor.placeholders.lineByLineInput')}
+              minHeight={150}
+              headerRight={
+                <TouchableOpacity ref={setlistOcrTriggerRef} onPress={handleSetlistOcrPress} disabled={isExtractingSetlist}>
+                  {isExtractingSetlist ? (
+                    <ActivityIndicator size="small" color="#8315B1" />
+                  ) : (
+                    <Animated.View style={{ transform: [{ rotate: ocrSpinRotate }] }}>
+                      <HugeiconsIcon icon={MagicWand04Icon} size={20} color="#9A9A9A" strokeWidth={2.0} />
+                    </Animated.View>
+                  )}
                 </TouchableOpacity>
-              )}
+              }
+            />
+          </View>
+        )}
+
+        <View style={styles.sectionBlock}>
+          <Text style={styles.inputLabel}>感想</Text>
+          <TextInput
+            ref={memoInputRef}
+            style={[styles.baseInput, styles.multilineMemo]}
+            value={memo}
+            onChangeText={setMemo}
+            placeholder={randomPlaceholder}
+            placeholderTextColor="#CCCCCC"
+            multiline
+            scrollEnabled
+            textAlignVertical="top"
+          />
+
+          <Text style={styles.inputLabel}>URL</Text>
+          <TextInput
+            style={styles.baseInput}
+            value={qrCode}
+            onChangeText={setQrCode}
+            placeholder={t('liveEdit.placeholders.qrCode')}
+            placeholderTextColor="#CCCCCC"
+            autoCapitalize="none"
+            keyboardType="url"
+          />
+
+          <Text style={styles.inputLabel}>カバーアート</Text>
+          {imageUrls.length > 0 ? (
+            <View style={styles.jacketContainer}>
+              <Image source={{ uri: imageUrls[0] }} style={styles.jacketImage} contentFit="cover" />
+              <TouchableOpacity style={styles.jacketRemoveButton} onPress={handleRemoveImage}>
+                <Ionicons name="close-circle" size={28} color="#ff4444" />
+              </TouchableOpacity>
             </View>
-
-            {/* QRコード */}
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>{t('liveEdit.labels.qrCode')}</Text>
-              <View style={styles.inputContainer}>
-                <View style={styles.inputBlur}>
-                  <TextInput
-                    style={styles.input}
-                    value={qrCode}
-                    onChangeText={setQrCode}
-                    placeholder={t('liveEdit.placeholders.qrCode')}
-                    placeholderTextColor="#CCCCCC"
-                    autoCapitalize="none"
-                    keyboardType="url"
-                  />
-                </View>
-              </View>
-            </View>
-
-            {/* 思い出（メモ）*/}
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>{t('liveEdit.labels.memories')}</Text>
-              <View style={styles.inputContainer}>
-                <View style={styles.inputBlur}>
-                  <TextInput
-                    ref={memoInputRef}
-                    style={[styles.input, styles.multilineInput]}
-                    value={memo}
-                    onChangeText={setMemo}
-                    placeholder={randomPlaceholder}
-                    placeholderTextColor="#CCCCCC"
-                    multiline
-                    numberOfLines={5}
-                    textAlignVertical="top"
-                  />
-                </View>
-              </View>
-            </View>
-
-            <View style={{ height: 20 }} />
-          </ScrollView>
-        </View>
-      </PagerView>
-
-      <View style={styles.footerNav}>
-        <View style={styles.footerButtons}>
-          {currentPage > 0 ? (
-            <TouchableOpacity style={styles.navButton} onPress={handleBack}>
-              <Text style={styles.navButtonText}>{t('liveEdit.nav.back')}</Text>
-            </TouchableOpacity>
           ) : (
-            <View style={styles.navButtonPlaceholder} />
-          )}
-
-          {currentPage < 2 ? (
-            <TouchableOpacity
-              style={[
-                styles.navButton,
-                styles.navButtonPrimary,
-                currentPage === 0 && !isBasicValid && styles.navButtonDisabled,
-              ]}
-              onPress={handleNext}
-              disabled={currentPage === 0 && !isBasicValid}
-            >
-              <Text style={styles.navButtonPrimaryText}>{t('liveEdit.nav.next')}</Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={[styles.navButton, styles.navButtonPrimary]}
-              onPress={handleSave}
-            >
-              <Text style={styles.navButtonPrimaryText}>{t('liveEdit.nav.save')}</Text>
+            <TouchableOpacity style={styles.emptyJacketContainer} onPress={handlePickImage} activeOpacity={0.7}>
+              <View style={styles.emptyJacketContent}>
+                <HugeiconsIcon icon={Add01Icon} size={30} color="#A3A3A3" strokeWidth={3.0} />
+              </View>
             </TouchableOpacity>
           )}
         </View>
+      </ScrollView>
+
+      <View style={styles.bottomCtaWrap}>
+        <TouchableOpacity
+          style={[styles.bottomCta, !isFormValid && styles.bottomCtaDisabled]}
+          onPress={handleSave}
+          disabled={!isFormValid}
+        >
+          <Text style={styles.bottomCtaText}>{isEditMode ? 'Save' : 'Add New Live'}</Text>
+        </TouchableOpacity>
       </View>
+
+      <TimePickerModal
+        visible={showStartTimeModal}
+        title={t('liveEdit.timePicker.startTitle')}
+        selectedTime={startTime}
+        onSelect={setStartTime}
+        onClose={() => setShowStartTimeModal(false)}
+      />
+      <TimePickerModal
+        visible={showEndTimeModal}
+        title={t('liveEdit.timePicker.endTitle')}
+        selectedTime={endTime}
+        onSelect={setEndTime}
+        onClose={() => setShowEndTimeModal(false)}
+      />
+
+      <Modal visible={showLiveTypeModal} transparent animationType="none" onRequestClose={() => setShowLiveTypeModal(false)}>
+        <TouchableOpacity style={styles.liveTypePickerOverlay} activeOpacity={1} onPress={() => setShowLiveTypeModal(false)}>
+          <View style={styles.liveTypePickerContent}>
+            <Text style={styles.liveTypePickerTitle}>イベントの種類</Text>
+            <ScrollView style={styles.liveTypePickerScroll}>
+              {LIVE_TYPES.map((type, index) => {
+                const selected = liveType === type;
+                return (
+                  <TouchableOpacity
+                    key={type}
+                    style={[styles.liveTypePickerItem, selected && styles.liveTypePickerItemSelected]}
+                    onPress={() => {
+                      setLiveType(normalizeLiveType(type));
+                      setShowLiveTypeModal(false);
+                    }}
+                  >
+                    <MaterialCommunityIcons
+                      name={LIVE_TYPE_ICON_MAP[type] as keyof typeof MaterialCommunityIcons.glyphMap}
+                      size={16}
+                      color={selected ? '#8315B1' : '#808080'}
+                    />
+                    <Text style={[styles.liveTypePickerItemText, selected && styles.liveTypePickerItemTextSelected]}>
+                      {liveTypeLabels[index] ?? type}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      <Modal
+        visible={showSetlistSourceModal}
+        transparent
+        animationType="none"
+        onRequestClose={() => setShowSetlistSourceModal(false)}
+      >
+        <View style={styles.setlistOcrSourceOverlay}>
+          <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setShowSetlistSourceModal(false)} />
+          <Animated.View
+            style={[
+              styles.setlistOcrSourceCard,
+              {
+                left: Math.min(Math.max(12, setlistSourceAnchor.x + setlistSourceAnchor.width - 250), Math.max(12, windowWidth - 262)),
+                top: setlistSourceAnchor.y + setlistSourceAnchor.height + 50,
+                opacity: sourceModalPopAnim,
+                transform: [
+                  {
+                    translateY: sourceModalPopAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [-10, 0],
+                    }),
+                  },
+                  {
+                    scale: sourceModalPopAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.96, 1],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            <Text style={styles.setlistOcrSourceTitle}>まとめて登録（β版）</Text>
+
+            <TouchableOpacity
+              style={styles.setlistOcrSourceButton}
+              onPress={() => {
+                setShowSetlistSourceModal(false);
+                void handleSetlistOcrFromCamera();
+              }}
+            >
+              <MaterialIcons name="photo-camera" size={18} color="#7D7D7D" />
+              <Text style={styles.setlistOcrSourceButtonText}>{t('liveEdit.setlistEditor.popover.takePhoto')}</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.setlistOcrSourceButton}
+              onPress={() => {
+                setShowSetlistSourceModal(false);
+                void handleSetlistOcrFromGallery();
+              }}
+            >
+              <MaterialIcons name="photo-library" size={18} color="#7D7D7D" />
+              <Text style={styles.setlistOcrSourceButtonText}>{t('liveEdit.setlistEditor.popover.chooseFromAlbum')}</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.setlistOcrSourceCancelButton} onPress={() => setShowSetlistSourceModal(false)}>
+              <Text style={styles.setlistOcrSourceCancelText}>{t('liveEdit.setlistEditor.review.cancel')}</Text>
+            </TouchableOpacity>
+          </Animated.View>
+        </View>
+      </Modal>
 
       {showSuccess && (
         <View style={styles.checkedOverlay} pointerEvents="none">
@@ -917,13 +1393,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
             autoPlay
             loop={false}
             speed={1.5}
-            onAnimationFinish={() => {
-              successAnimationFinished.current = true;
-              if (successCloseReady.current) {
-                setShowSuccess(false);
-                onCancel();
-              }
-            }}
+            onAnimationFinish={handleSuccessAnimationFinish}
             style={styles.checkedAnimation}
           />
         </View>
@@ -935,336 +1405,299 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F8F8',
-    paddingBottom: theme.spacing.xxxl,
+    backgroundColor: '#FFFFFF',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: 30,
+    paddingTop: 20,
+    paddingHorizontal: 16,
     paddingBottom: 12,
-    paddingHorizontal: 20,
-    backgroundColor: '#F8F8F8',
+    backgroundColor: 'rgba(248, 248, 248, 0.52)',
+    overflow: 'hidden',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.45)',
   },
-  headerButton: {
-    padding: 8,
+  headerCloseButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#F3F3F3',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#000',
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#2F2F2F',
   },
   headerSpacer: {
-    width: 44,
-  },
-  pager: {
-    flex: 1,
-  },
-  page: {
-    flex: 1,
-  },
-  pageScroll: {
-    flex: 1,
-  },
-  pageContent: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 120,
+    width: 48,
   },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 300,
-  },
-  stepHeader: {
-    paddingHorizontal: 38,
-    paddingBottom: 18,
-  },
-  stepHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  stepHeaderLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#666666',
-    letterSpacing: 0.6,
-  },
-  stepHeaderTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#000000',
-  },
-  progressTrack: {
-    height: 6,
-    borderRadius: 999,
-    backgroundColor: '#E3E3E3',
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 999,
-    backgroundColor: '#111111',
-  },
-  footerNav: {
-    paddingHorizontal: 24,
-    paddingTop: 12,
-    paddingBottom: 20,
-    backgroundColor: '#F8F8F8',
-    borderTopWidth: 1,
-    borderTopColor: '#F8F8F8',
-  },
-  footerButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  navButton: {
-    minWidth: 120,
-    paddingVertical: 12,
     paddingHorizontal: 16,
-    borderRadius: 22,
-    backgroundColor: '#EFEFEF',
+    paddingTop: 6,
+    paddingBottom: 120,
+  },
+  sectionBlock: {
+    backgroundColor: '#F7F7F7',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+  },
+  performanceBlock: {
+    backgroundColor: '#F7F7F7',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+  },
+  performanceHeaderRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
   },
-  navButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333333',
-  },
-  navButtonPrimary: {
-    backgroundColor: '#111111',
-  },
-  navButtonPrimaryText: {
-    fontSize: 14,
+  performanceTitle: {
+    fontSize: 15,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: '#444444',
   },
-  navButtonDisabled: {
-    backgroundColor: '#BDBDBD',
+  performanceDeleteButton: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 16,
+    backgroundColor: '#EFEFEF',
   },
-  navButtonPlaceholder: {
-    width: 120,
+  performanceDeletePlaceholder: {
+    width: 32,
+    height: 32,
   },
-  section: {
-    marginBottom: 28,
+  performanceSetlistWrap: {
+    marginTop: 20,
   },
-  liveTypeWrap: {
-    marginTop: 12,
+  addPerformanceButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 2,
+    borderColor: '#A226D9',
+    borderStyle: 'dashed',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 40,
+    opacity: 0.6,
   },
-  liveTypeLabel: {
+  addPerformanceButtonText: {
+    color: '#A226D9',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  inputLabel: {
+    color: '#808080',
     fontSize: 12,
     fontWeight: '700',
-    color: '#888888',
-    marginLeft: 4,
-    marginBottom: 8,
+    marginBottom: 6,
+    marginTop: 4,
   },
-  liveTypeScrollContent: {
-    paddingHorizontal: 2,
-    gap: 8,
-  },
-  liveTypeChip: {
+  inputLabelRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    borderRadius: 20,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    backgroundColor: '#ffffff',
+  },
+  requiredLabel: {
+    color: '#A226D9',
+    fontSize: 8,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  baseInput: {
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#d4d4d4',
+    borderColor: '#EAEAEA',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: '#222222',
+    marginBottom: 12,
   },
-  liveTypeChipSelected: {
-    borderRadius: 30,    
-    backgroundColor: '#111111',
-    borderColor: '#111111',
+  liveTypeSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#EAEAEA',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 8,
   },
-  liveTypeChipText: {
+  liveTypeLeftIcon: {
+    marginRight: 10,
+  },
+  liveTypeSelectedText: {
+    flex: 1,
+    fontSize: 16,
+    color: '#222222',
+    fontWeight: '600',
+  },
+  liveTypeRightIcon: {
+    marginLeft: 8,
+  },
+  liveTypePickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  liveTypePickerContent: {
+    width: '78%',
+    maxWidth: 340,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 30,
+    padding: 25,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.16,
+    shadowRadius: 14,
+    elevation: 10,
+  },
+  liveTypePickerTitle: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#B6B6B6',
+    color: '#808080',
+    marginBottom: 10,
   },
-  liveTypeChipTextSelected: {
-    color: '#FFFFFF',
+  liveTypePickerScroll: {
+    maxHeight: 250,
   },
-  sectionLabel: {
-    fontSize: 14,
+  liveTypePickerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+  },
+  liveTypePickerItemSelected: {
+    backgroundColor: '#F6EBFB',
+  },
+  liveTypePickerItemText: {
+    fontSize: 15,
     fontWeight: '700',
-    color: '#999999',
-    marginBottom: 8,
-    marginLeft: 24,
+    color: '#444444',
   },
-  requiredMark: {
-    color: '#D6007A',
-    fontWeight: '400',
-    fontSize: 18,
+  liveTypePickerItemTextSelected: {
+    color: '#8315B1',
   },
   artistFieldContainer: {
     marginBottom: 10,
   },
-  artistRemoveButton: {
-    alignSelf: 'flex-end',
-    marginTop: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 14,
-    backgroundColor: '#EFEFEF',
-  },
-  artistRemoveButtonText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#555555',
-  },
-  artistAddButton: {
-    alignSelf: 'flex-start',
+  timeRowWrap: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
     marginTop: 4,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 16,
-    backgroundColor: '#111111',
+    marginBottom: 4,
   },
-  artistAddButtonText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  inputContainer: {
-    borderRadius: 25,
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  inputBlur: {
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  input: {
-    fontSize: 16,
-    color: '#000',
-  },
-  multilineInput: {
-    minHeight: 100,
-  },
-  caption: {
-    fontSize: 12,
-    color: '#777',
-    marginBottom: 10,
-    marginLeft: 4,
-  },
-  warningContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 5,
-    marginTop: 10,
-    marginLeft: 4,
-  },
-  warningText: {
-    fontSize: 11,
-    color: '#FF453A',
+  timeColumn: {
     flex: 1,
-    lineHeight: 16,
   },
-  imageRow: {
-    flexDirection: 'row',
-    gap: 14,
-    paddingVertical: 6,
+  timeArrow: {
+    color: '#707070',
+    fontSize: 13,
+    marginHorizontal: 8,
+    marginBottom: 22,
   },
-  imageCard: {
-    width: 140,
-    height: 140,
-    borderRadius: 14,
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+  timeText: {
+    fontSize: 16,
+    color: '#222222',
+  },
+  multilineMemo: {
+    minHeight: 90,
+    maxHeight: 240,
+    paddingTop: 12,
+  },
+  jacketContainer: {
+    width: 86,
+    height: 86,
+    borderRadius: 12,
     overflow: 'hidden',
     position: 'relative',
+    backgroundColor: '#F7F7F7',
   },
-  imagePreview: {
+  jacketImage: {
     width: '100%',
     height: '100%',
   },
-  jacketBadge: {
+  jacketRemoveButton: {
     position: 'absolute',
-    top: 8,
-    left: 8,
-    paddingHorizontal: 6,
-    paddingVertical: 6,
-    borderRadius: 18,
-    backgroundColor: '#535353',
+    top: 4,
+    right: 4,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
   },
-  removeButtonOverlay: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 30,
-    height: 30,
-    borderRadius: 24,
-    backgroundColor: 'rgba(0,0,0,0.60)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  addImageCard: {
-    width: 140,
-    height: 140,
-    borderRadius: 14,
-    borderWidth: 1,
+  emptyJacketContainer: {
+    width: 86,
+    height: 86,
+    borderRadius: 12,
+    borderWidth: 2,
     borderStyle: 'dashed',
-    borderColor: '#DDD',
+    borderColor: '#A3A3A3',
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
   },
-  addImageText: {
-    fontSize: 14,
-    color: '#777',
+  emptyJacketContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bottomCtaWrap: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 22,
+  },
+  bottomCta: {
+    backgroundColor: '#A226D9',
+    borderRadius: 30,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  bottomCtaDisabled: {
+    opacity: 0.4,
+  },
+  bottomCtaText: {
+    color: '#FFFFFF',
+    fontSize: 18,
     fontWeight: '700',
   },
-  addImageSub: {
-    fontSize: 12,
-    color: '#999',
-  },
-  dateButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  dateText: {
-    fontSize: 16,
-    color: '#000',
-  },
-  timeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  timeDisplay: {
-    fontSize: 16,
-    color: '#000',
-    fontWeight: '500',
-  },
-  modalOverlay: {
+  timePickerOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   timeModalContent: {
     backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '70%',
+    borderRadius: 18,
+    width: '82%',
+    maxWidth: 360,
     paddingTop: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 10,
+  },
+  timeOptionsScroll: {
+    maxHeight: 220,
   },
   timeModalHeader: {
     flexDirection: 'row',
@@ -1278,11 +1711,11 @@ const styles = StyleSheet.create({
   timeModalTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#000',
+    color: '#000000',
   },
   timeModalCancel: {
     fontSize: 14,
-    color: '#999',
+    color: '#999999',
   },
   timeModalDone: {
     fontSize: 14,
@@ -1300,30 +1733,11 @@ const styles = StyleSheet.create({
   },
   timeOptionText: {
     fontSize: 16,
-    color: '#666',
+    color: '#666666',
     textAlign: 'center',
   },
   timeOptionTextSelected: {
     color: '#D6007A',
-    fontWeight: '600',
-  },
-  pickerContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  picker: {
-    width: '100%',
-    height: Platform.OS === 'ios' ? 200 : 60,
-  },
-  pickerItem: {
-    color: '#000',
-    fontSize: 16,
     fontWeight: '600',
   },
   checkedOverlay: {
@@ -1337,63 +1751,258 @@ const styles = StyleSheet.create({
     width: 300,
     height: 300,
   },
-  // Jacket Image Styles
-  jacketContainer: {
-    width: '100%',
-    aspectRatio: 1,
-    borderRadius: 16,
-    overflow: 'hidden',
-    position: 'relative',
-    backgroundColor: '#F7F7F7',
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-    elevation: 4,
+  setlistOcrSourceOverlay: {
+    flex: 1,
+    backgroundColor: 'transparent',
   },
-  jacketImage: {
-    width: '100%',
-    height: '100%',
-  },
-  jacketRemoveButton: {
+  setlistOcrSourceCard: {
     position: 'absolute',
-    top: 12,
-    right: 12,
-    backgroundColor: '#fff',
+    width: 250,
     borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    padding: 16,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.14,
+    shadowRadius: 18,
+    elevation: 10,
   },
-  emptyJacketContainer: {
-    width: '100%',
-    aspectRatio: 1,
-    borderRadius: 16,
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    borderColor: '#CCC',
-    backgroundColor: '#FAFAFA',
-    justifyContent: 'center',
+  setlistOcrSourceTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#2F2F2F',
+    marginBottom: 12,
+  },
+  setlistOcrSourceButton: {
+    flexDirection: 'row',
     alignItems: 'center',
-  },
-  emptyJacketContent: {
-    alignItems: 'center',
-    padding: 24,
-  },
-  emptyJacketTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#333',
-    textAlign: 'center',
-    marginTop: 16,
+    gap: 10,
+    borderRadius: 14,
+    backgroundColor: '#F6F6F6',
+    paddingHorizontal: 14,
+    paddingVertical: 13,
     marginBottom: 8,
   },
-  emptyJacketSubtitle: {
+  setlistOcrSourceButtonText: {
     fontSize: 14,
-    color: '#888',
-    textAlign: 'center',
-    lineHeight: 20,
+    color: '#3B3B3B',
+    fontWeight: '700',
+  },
+  setlistOcrSourceCancelButton: {
+    marginTop: 4,
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  setlistOcrSourceCancelText: {
+    color: '#8A8A8A',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  setlistReviewOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  setlistReviewCard: {
+    width: '100%',
+    maxWidth: 390,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.14,
+    shadowRadius: 18,
+    elevation: 10,
+  },
+  setlistReviewTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#2F2F2F',
+  },
+  setlistReviewNote: {
+    marginTop: 6,
+    marginBottom: 12,
+    fontSize: 12,
+    color: '#7A7A7A',
+    lineHeight: 18,
+  },
+  setlistReviewInput: {
+    minHeight: 220,
+    maxHeight: 320,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E6E6E6',
+    backgroundColor: '#FAFAFA',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: '#222222',
+  },
+  setlistReviewKeyboardButton: {
+    alignSelf: 'flex-end',
+    marginTop: 8,
+    marginBottom: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 2,
+  },
+  setlistReviewKeyboardButtonText: {
+    fontSize: 12,
+    color: '#8A8A8A',
+    fontWeight: '700',
+  },
+  setlistReviewButtonRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  setlistReviewButton: {
+    flex: 1,
+    borderRadius: 14,
+    paddingVertical: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  setlistReviewCancelButton: {
+    backgroundColor: '#EFEFEF',
+  },
+  setlistReviewConfirmButton: {
+    backgroundColor: '#8315B1',
+  },
+  setlistReviewCancelText: {
+    fontSize: 14,
+    color: '#646464',
+    fontWeight: '700',
+  },
+  setlistReviewConfirmText: {
+    fontSize: 14,
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  ocrReviewScreen: {
+    flex: 1,
+    backgroundColor: '#F8F8F8',
+  },
+  ocrReviewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    backgroundColor: '#F8F8F8',
+  },
+  ocrReviewCloseButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F0F0F0',
+  },
+  ocrReviewHeaderTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#333333',
+  },
+  ocrReviewHeaderSpacer: {
+    width: 42,
+  },
+  ocrReviewSummaryWrap: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 12,
+  },
+  ocrReviewSummaryTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#333333',
+  },
+  ocrReviewSummarySub: {
+    marginTop: 6,
+    fontSize: 14,
+    color: '#888888',
+    fontWeight: '600',
+  },
+  ocrReviewScroll: {
+    flex: 1,
+  },
+  ocrReviewCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 12,
+    marginHorizontal: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  ocrReviewCardSuspicious: {
+    backgroundColor: '#FFF3F2',
+    borderWidth: 1,
+    borderColor: '#FFD5D1',
+  },
+  ocrReviewCardActive: {
+    opacity: 0.95,
+  },
+  ocrReviewIndex: {
+    width: 30,
+    fontSize: 14,
+    color: '#888888',
+    fontWeight: '700',
+  },
+  ocrReviewInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#333333',
+    paddingVertical: 0,
+    marginRight: 8,
+  },
+  ocrReviewInputSuspicious: {
+    color: '#FF3B30',
+  },
+  ocrReviewDragIcon: {
+    marginLeft: 0,
+    marginRight: 0,
+  },
+  ocrReviewDragHandle: {
+    marginLeft: 8,
+    marginRight: 2,
+    padding: 2,
+  },
+  ocrReviewDeleteButton: {
+    marginLeft: 4,
+    padding: 4,
+  },
+  ocrReviewDeleteButtonSuspicious: {
+    backgroundColor: '#FFE7E4',
+    borderRadius: 8,
+  },
+  ocrReviewBottomCtaWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#F8F8F8',
+    paddingTop: 8,
+  },
+  ocrReviewBottomCta: {
+    backgroundColor: '#A226D9',
+    borderRadius: 30,
+    paddingVertical: 16,
+    marginHorizontal: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ocrReviewBottomCtaText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
   },
 });

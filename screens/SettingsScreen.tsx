@@ -8,43 +8,30 @@ import {
   Image,
   Alert,
   Linking,
-  Modal,
-  Share,
-  Switch,
-  TextInput,
-  ActivityIndicator,
-  Animated,
-  Easing,
-  PanResponder,
-  Clipboard,
-  ImageSourcePropType,
   DeviceEventEmitter,
-  Platform,
   useWindowDimensions,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import * as WebBrowser from 'expo-web-browser';
 import { Asset } from 'expo-asset';
 import { useFocusEffect } from '@react-navigation/native';
-import { useFonts, Anton_400Regular } from '@expo-google-fonts/anton';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Feather, AntDesign, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
-import Svg, { Path, Defs, Rect, RadialGradient, Stop } from 'react-native-svg';
+import { MaterialIcons } from '@expo/vector-icons';
+import { HugeiconsIcon } from '@hugeicons/react-native';
+import { Edit01Icon } from '@hugeicons/core-free-icons';
+import Svg, { Path } from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { captureRef } from 'react-native-view-shot';
-import * as MediaLibrary from 'expo-media-library';
 import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
-import QRCode from 'react-native-qrcode-svg';
+import { BlurView } from 'expo-blur';
 import { useTranslation } from 'react-i18next';
 // import changeIcon from 'react-native-change-icon';
-import { theme } from '../theme';
 import { useRecords } from '../contexts/RecordsContext';
 import { useAppStore } from '../store/useAppStore';
-import { getShareCardSource } from '../utils/statusSvgs';
 import { isTestflightMode } from '../utils/appMode';
 import { normalizeStoredImageUri, resolveLocalImageUri, resolveStoredImageUri } from '../lib/imageUpload';
 import { pullImageFromCloud } from '../lib/icloudImageSync';
+import { useFonts, LINESeedJP_400Regular, LINESeedJP_700Bold, LINESeedJP_800ExtraBold } from '@expo-google-fonts/line-seed-jp';
 
 interface SettingItem {
   id: string;
@@ -58,37 +45,6 @@ interface SettingSection {
   data: SettingItem[];
 }
 
-type ShareStats = {
-  fanLevel: 'ROOKIE' | 'EXPERT' | 'MASTER' | 'LEGEND';
-  totalCheckIns: number;
-  nextLevel: string;
-  remainingLives: number;
-  progressPercentage: number;
-  sinceDate: string;
-  topArtist: string;
-  topArtistCount: number;
-  topArtistImageUrl?: string;
-  lastSeenLiveName: string;
-  pastRecords?: Array<{ date: string; [key: string]: any }>;
-};
-
-interface MyPageShareModalProps {
-  visible: boolean;
-  onClose: () => void;
-  shareCardSource: ImageSourcePropType;
-  shareText: string;
-  stats: ShareStats;
-  profile: {
-    displayName: string;
-    avatarUrl: string;
-    joinedAt: string;
-  };
-  xHandle: string;
-  instagramHandle: string;
-  onUpdateXHandle: (value: string) => void;
-  onUpdateInstagramHandle: (value: string) => void;
-}
-
 // SVGアセットルート
 // Note: statusSvgUrisをはcontent内のuseMemoで管理し、レンダリング時の总次訴がその時だけならうえで
 
@@ -97,15 +53,17 @@ const APP_STORE_REVIEW_URL = `${APP_STORE_URL}?action=write-review`;
 
 export default function SettingsScreen({ navigation }: any) {
   const { t } = useTranslation();
+  const [fontsLoaded] = useFonts({
+    LINESeedJP_400Regular,
+    LINESeedJP_700Bold,
+    LINESeedJP_800ExtraBold,
+  });
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { records, clearRecords } = useRecords();
   const userProfile = useAppStore((state) => state.userProfile);
   const hasHydrated = useAppStore((state) => state.hasHydrated);
   const membershipType = useAppStore((state) => state.membershipType);
-  const [shareModalVisible, setShareModalVisible] = useState(false);
-  const [xHandle, setXHandle] = useState('');
-  const [instagramHandle, setInstagramHandle] = useState('');
   const [firstLaunchAt, setFirstLaunchAt] = useState('');
   const [resolvedProfileAvatarUri, setResolvedProfileAvatarUri] = useState('');
   const scrollViewRef = useRef<ScrollView>(null);
@@ -144,16 +102,15 @@ export default function SettingsScreen({ navigation }: any) {
   ];
 
   const contentHorizontalPadding = Math.max(16, Math.min(28, windowWidth * 0.05));
-  const contentTopPadding = Math.max(24, Math.min(68, windowHeight * 0.015));
+  const contentTopPadding = Math.max(14, Math.min(24, windowHeight * 0.02));
   const contentBottomPadding = Math.max(insets.bottom + 60, Math.min(140, windowHeight * 0.14));
   const titleFontSize = Math.max(26, Math.min(34, windowWidth * 0.08));
-  const shareButtonSize = Math.max(40, Math.min(48, windowWidth * 0.11));
   const paywallBannerMinHeight = Math.max(110, Math.min(150, windowHeight * 0.16));
   const paywallBannerImageWidth = Math.max(120, Math.min(170, windowWidth * 0.36));
   const paywallBannerImageHeight = paywallBannerImageWidth * 0.8;
-  const sectionTopSpacing = Math.max(24, Math.min(30, windowHeight * 0.04));
-  const rowVerticalPadding = Math.max(16, Math.min(22, windowHeight * 0.022));
-  const footerTopMargin = Math.max(56, Math.min(100, windowHeight * 0.1));
+  const sectionTopSpacing = Math.max(18, Math.min(26, windowHeight * 0.032));
+  const rowVerticalPadding = Math.max(14, Math.min(19, windowHeight * 0.02));
+  const footerTopMargin = Math.max(44, Math.min(76, windowHeight * 0.085));
 
   const resolveProfileAvatar = useCallback(async () => {
     if (!hasHydrated) return;
@@ -225,141 +182,13 @@ export default function SettingsScreen({ navigation }: any) {
     };
   }, [firstLaunchAt, resolvedProfileAvatarUri, userProfile]);
 
-  // 統計情報
-  const stats = useMemo(() => {
-    const formatDate = (dateStr: string) => {
-      if (!dateStr) return '';
-      const parsed = new Date(dateStr.replace(/\./g, '-'));
-      if (Number.isNaN(parsed.getTime())) return dateStr;
-      const y = parsed.getFullYear();
-      const m = `${parsed.getMonth() + 1}`.padStart(2, '0');
-      const d = `${parsed.getDate()}`.padStart(2, '0');
-      return `${y}.${m}.${d}`;
-    };
-
-    const parseDate = (dateStr: string) => new Date(dateStr.replace(/\./g, '-'));
-
-    // 全てのレコードをカウント（過去・未来含む）
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    // ヒートマップ/参戦済み判定：過去のレコードのみ
-    const pastRecords = records.filter((record) => {
-      const recordDate = new Date(record.date.replace(/\./g, '-'));
-      recordDate.setHours(0, 0, 0, 0);
-      return recordDate <= today;
-    });
-
-    // 統計計算用：参戦済みレコードのみ
-    const totalCheckIns = pastRecords.length;
-    let daysSinceStart = 0;
-    let sinceDate = '';
-    if (records.length > 0) {
-      // 日付順にソートして最古のレコードを取得
-      const sortedRecords = [...records].sort((a, b) => {
-        const dateA = new Date(a.date.replace(/\./g, '-'));
-        const dateB = new Date(b.date.replace(/\./g, '-'));
-        return dateA.getTime() - dateB.getTime();
-      });
-      const oldestRecord = sortedRecords[0];
-      sinceDate = formatDate(oldestRecord.date);
-      const startDate = new Date(formatDate(oldestRecord.date).replace(/\./g, '-'));
-      const diffTime = Math.abs(today.getTime() - startDate.getTime());
-      daysSinceStart = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    }
-
-    let fanLevel: ShareStats['fanLevel'] = 'ROOKIE';
-    let nextLevel = 'EXPERT';
-    let remainingLives = 5;
-    let progressPercentage = 0;
-    
-    if (totalCheckIns >= 15) {
-      fanLevel = 'LEGEND';
-      nextLevel = 'LEGEND';
-      remainingLives = 0;
-      progressPercentage = 100;
-    } else if (totalCheckIns >= 10) {
-      fanLevel = 'MASTER';
-      nextLevel = 'LEGEND';
-      remainingLives = 15 - totalCheckIns;
-      progressPercentage = ((totalCheckIns - 10) / 5) * 100;
-    } else if (totalCheckIns >= 5) {
-      fanLevel = 'EXPERT';
-      nextLevel = 'MASTER';
-      remainingLives = 10 - totalCheckIns;
-      progressPercentage = ((totalCheckIns - 5) / 5) * 100;
-    } else {
-      fanLevel = 'ROOKIE';
-      nextLevel = 'EXPERT';
-      remainingLives = 5 - totalCheckIns;
-      progressPercentage = (totalCheckIns / 5) * 100;
-    }
-
-    // アーティストごとの参戦回数を集計（参戦済みのみ）
-    const artistCounts: { [key: string]: number } = {};
-    pastRecords.forEach((record) => {
-      const artist = record.artist || t('settings.common.unknown');
-      artistCounts[artist] = (artistCounts[artist] || 0) + 1;
-    });
-
-    // 最多参戦アーティストを特定
-    let topArtist = '';
-    let topArtistCount = 0;
-    let topArtistImageUrl = '';
-    Object.entries(artistCounts).forEach(([artist, count]) => {
-      if (count > topArtistCount) {
-        topArtist = artist;
-        topArtistCount = count;
-        // そのアーティストの参戦済みレコードから画像URLを取得
-        const artistRecord = pastRecords.find(r => r.artist === artist);
-        topArtistImageUrl = artistRecord?.artistImageUrl || '';
-      }
-    });
-
-    const validRecords = records.filter((record) => !Number.isNaN(parseDate(record.date).getTime()));
-    const lastSeenRecord = [...validRecords]
-      .filter((record) => {
-        const recordDate = parseDate(record.date);
-        recordDate.setHours(0, 0, 0, 0);
-        return recordDate <= today;
-      })
-      .sort((a, b) => parseDate(b.date).getTime() - parseDate(a.date).getTime())[0]
-      ?? [...validRecords].sort((a, b) => parseDate(b.date).getTime() - parseDate(a.date).getTime())[0];
-
-    return {
-      totalCheckIns,
-      days: daysSinceStart,
-      sinceDate,
-      fanLevel,
-      nextLevel,
-      remainingLives,
-      progressPercentage,
-      pastRecords,
-      topArtist,
-      topArtistCount,
-      topArtistImageUrl,
-      lastSeenLiveName: lastSeenRecord?.liveName || '',
-    };
-  }, [records]);
-
-  const shareCardSource = useMemo(
-    () => getShareCardSource(stats.fanLevel),
-    [stats.fanLevel]
-  );
-
-  const shareSummary = useMemo(
-    () => t('settings.share.profileSummary'),
-    [t]
-  );
-
   useEffect(() => {
-    loadSocialHandles();
     loadFirstLaunchDate();
   }, []);
 
   useEffect(() => {
     Asset.loadAsync([
-      require('../assets/paywall/paywallBackground.png'),
+      require('../assets/paywallPass.png'),
       require('../assets/paywall/Plus.logo.png'),
     ]).catch(() => {
       // noop
@@ -372,17 +201,6 @@ export default function SettingsScreen({ navigation }: any) {
     }
   }, [profile.avatarUrl]);
 
-  const loadSocialHandles = async () => {
-    try {
-      const entries = await AsyncStorage.multiGet(['@sns_x', '@sns_instagram']);
-      const map = Object.fromEntries(entries);
-      setXHandle(map['@sns_x'] || '');
-      setInstagramHandle(map['@sns_instagram'] || '');
-    } catch (error) {
-      console.log('Failed to load social handles:', error);
-    }
-  };
-
   const loadFirstLaunchDate = async () => {
     try {
       const stored = await AsyncStorage.getItem('@has_launched');
@@ -391,23 +209,6 @@ export default function SettingsScreen({ navigation }: any) {
       }
     } catch (error) {
       console.log('Failed to load first launch date:', error);
-    }
-  };
-
-
-  const updateSocialHandle = async (key: '@sns_x' | '@sns_instagram', value: string) => {
-    try {
-      // ローカル状態を更新
-      if (key === '@sns_x') {
-        setXHandle(value);
-      } else {
-        setInstagramHandle(value);
-      }
-      await AsyncStorage.setItem(key, value);
-    } catch (error) {
-      console.log('Failed to save social handle:', error);
-      // フォールバック：ローカルに保存
-      await AsyncStorage.setItem(key, value);
     }
   };
 
@@ -447,54 +248,33 @@ export default function SettingsScreen({ navigation }: any) {
     );
   };
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView
-        ref={scrollViewRef}
-        style={{ flex: 1 }}
-        contentContainerStyle={[
-          styles.content,
-          {
-            paddingHorizontal: contentHorizontalPadding,
-            paddingTop: contentTopPadding,
-            paddingBottom: contentBottomPadding,
-          },
-        ]}
-      >
-        <View style={[styles.titleRow, { marginBottom: Math.max(22, Math.min(34, windowHeight * 0.035)) }]}>
-          <Text style={[styles.title, { fontSize: titleFontSize }]}>{t('settings.title')}</Text>
-          <TouchableOpacity
-            style={[
-              styles.shareButton,
-              {
-                width: shareButtonSize,
-                height: shareButtonSize,
-                borderRadius: shareButtonSize / 2,
-              },
-            ]}
-            activeOpacity={0.8}
-            onPress={() => setShareModalVisible(true)}
-          >
-            <Svg width={22} height={22} viewBox="0 0 24 24" fill="#000">
-              <Path
-                d="M12 22.75C6.07 22.75 1.25 17.93 1.25 12C1.25 6.07 6.07 1.25 12 1.25C12.41 1.25 12.75 1.59 12.75 2C12.75 2.41 12.41 2.75 12 2.75C6.9 2.75 2.75 6.9 2.75 12C2.75 17.1 6.9 21.25 12 21.25C17.1 21.25 21.25 17.1 21.25 12C21.25 11.59 21.59 11.25 22 11.25C22.41 11.25 22.75 11.59 22.75 12C22.75 17.93 17.93 22.75 12 22.75Z"
-                fill="black"
-              />
-              <Path
-                d="M12.9999 11.7502C12.8099 11.7502 12.6199 11.6802 12.4699 11.5302C12.1799 11.2402 12.1799 10.7602 12.4699 10.4702L20.6699 2.27023C20.9599 1.98023 21.4399 1.98023 21.7299 2.27023C22.0199 2.56023 22.0199 3.04023 21.7299 3.33023L13.5299 11.5302C13.3799 11.6802 13.1899 11.7502 12.9999 11.7502Z"
-                fill="black"
-              />
-              <Path
-                d="M22 7.58C21.59 7.58 21.25 7.24 21.25 6.83V2.75H17.17C16.76 2.75 16.42 2.41 16.42 2C16.42 1.59 16.76 1.25 17.17 1.25H22C22.41 1.25 22.75 1.59 22.75 2V6.83C22.75 7.24 22.41 7.58 22 7.58Z"
-                fill="black"
-              />
-            </Svg>
-          </TouchableOpacity>
-        </View>
+  if (!fontsLoaded) {
+    return null;
+  }
 
+  return (
+    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
+      <BlurView tint="light" intensity={80} style={[styles.glassHeader, { paddingTop: insets.top + 8 }]}>
+        <View style={[styles.titleRow, { marginBottom: 0 }]}> 
+          <Text style={[styles.title, { fontSize: titleFontSize }]}>My page</Text>
+        </View>
+      </BlurView>
+
+      <View style={{ flex: 1 }}>
+        <ScrollView
+          ref={scrollViewRef}
+          style={{ flex: 1 }}
+          contentContainerStyle={[
+            styles.content,
+            {
+              paddingHorizontal: contentHorizontalPadding,
+              paddingTop: Math.max(12, contentTopPadding),
+              paddingBottom: contentBottomPadding,
+            },
+          ]}
+        >
         <View style={styles.bentoCardContainer}>
           <UserProfileHeader
-            stats={stats}
             profile={profile}
             onPressEdit={() => {
                 navigation.navigate('ProfileEdit');
@@ -648,900 +428,12 @@ export default function SettingsScreen({ navigation }: any) {
             </Text>
           </View>
         </View>
-      </ScrollView>
-
-      <MyPageShareModal
-        visible={shareModalVisible}
-        onClose={() => setShareModalVisible(false)}
-        shareCardSource={shareCardSource}
-        shareText={shareSummary}
-        stats={{
-          fanLevel: stats.fanLevel as ShareStats['fanLevel'],
-          totalCheckIns: stats.totalCheckIns,
-          nextLevel: stats.nextLevel,
-          remainingLives: stats.remainingLives,
-          progressPercentage: stats.progressPercentage,
-          sinceDate: stats.sinceDate,
-          topArtist: stats.topArtist,
-          topArtistCount: stats.topArtistCount,
-          pastRecords: stats.pastRecords,
-          lastSeenLiveName: stats.lastSeenLiveName,
-        }}
-        profile={profile}
-        xHandle={xHandle}
-        instagramHandle={instagramHandle}
-        onUpdateXHandle={(value) => updateSocialHandle('@sns_x', value)}
-        onUpdateInstagramHandle={(value) => updateSocialHandle('@sns_instagram', value)}
-      />
+        </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
 
-const MyPageShareModal: React.FC<MyPageShareModalProps> = ({
-  visible,
-  onClose,
-  shareCardSource,
-  shareText,
-  stats,
-  profile,
-  xHandle,
-  instagramHandle,
-  onUpdateXHandle,
-  onUpdateInstagramHandle,
-}) => {
-  const { t } = useTranslation();
-  const membershipType = useAppStore((state) => state.membershipType);
-  const isPremium = membershipType === 'plus' || membershipType === 'lifetime';
-  const [fontsLoaded] = useFonts({
-    Anton_400Regular,
-  });
-  const [socialsExpanded, setSocialsExpanded] = useState(false);
-  const viewRef = useRef<View>(null);
-  const translateY = useRef(new Animated.Value(1)).current;
-  const dragY = useRef(new Animated.Value(0)).current;
-  const prevVisibleRef = useRef(visible);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [selectedAction, setSelectedAction] = useState<'save' | 'copy' | 'twitter' | null>(null);
-
-  const outputWidth = 600;
-  const outputHeight = 900;
-  const displayScale = 0.45; // プレビュー表示用の縮小率
-
-  useEffect(() => {
-    if (visible && !prevVisibleRef.current) {
-      translateY.setValue(1);
-      dragY.setValue(0);
-    }
-    prevVisibleRef.current = visible;
-  }, [visible, translateY, dragY]);
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gestureState) => gestureState.dy > 5,
-      onPanResponderMove: (_, gestureState) => {
-        if (gestureState.dy > 0) {
-          dragY.setValue(gestureState.dy);
-        }
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dy > 150) {
-          Animated.timing(dragY, {
-            toValue: 800,
-            duration: 200,
-            useNativeDriver: true,
-          }).start(() => onClose());
-        } else {
-          Animated.spring(dragY, {
-            toValue: 0,
-            useNativeDriver: true,
-            tension: 100,
-            friction: 10,
-          }).start();
-        }
-      },
-    })
-  ).current;
-
-  const captureCard = async (): Promise<string | null> => {
-    if (!viewRef.current) {
-      Alert.alert(t('settings.common.errorTitle'), t('settings.alerts.previewNotReady'));
-      return null;
-    }
-
-    try {
-      if (Platform.OS === 'android') {
-        const uri = await captureRef(viewRef, {
-          format: 'png',
-          quality: 1,
-          result: 'tmpfile',
-        });
-        return uri;
-      }
-      // iOSの場合はこれで綺麗に撮れることが多いが、viewRefのstyleにbackgroundColor: transparentがないと角が白くなる可能性がある
-      // そこで、captureRefのオプションではなく、View階層で調整済み。
-      // ただし、snapshotContentContainer: true にすると中身だけ撮れる場合がある
-      const uri = await captureRef(viewRef, {
-        format: 'png',
-        quality: 1,
-        result: 'tmpfile',
-      });
-      return uri;
-    } catch (error) {
-      console.error('Capture error:', error);
-      Alert.alert(t('settings.common.errorTitle'), t('settings.alerts.imageGenerateFailed'));
-      return null;
-    }
-  };
-
-  const runWithProcessing = async (
-    action: 'save' | 'copy' | 'twitter',
-    task: () => Promise<void>,
-  ) => {
-    setSelectedAction(action);
-    setIsProcessing(true);
-    try {
-      await task();
-    } catch (error) {
-      console.error('Share modal error:', error);
-      Alert.alert(t('settings.common.errorTitle'), t('settings.alerts.processingFailed'));
-    } finally {
-      setIsProcessing(false);
-      setSelectedAction(null);
-    }
-  };
-
-  const handleCopyLink = async () => {
-    await runWithProcessing('copy', async () => {
-      const uri = await captureCard();
-      if (!uri) return;
-
-      Clipboard.setString(uri);
-      Alert.alert(t('settings.common.doneTitle'), t('settings.alerts.copiedImageLink'));
-    });
-  };
-
-  const handleSaveImage = async () => {
-    await runWithProcessing('save', async () => {
-      const uri = await captureCard();
-      if (!uri) return;
-
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert(t('settings.common.errorTitle'), t('settings.alerts.mediaPermissionRequired'));
-        return;
-      }
-
-      await MediaLibrary.saveToLibraryAsync(uri);
-      Alert.alert(t('settings.common.doneTitle'), t('settings.alerts.savedToCameraRoll'));
-      onClose();
-    });
-  };
-
-  const captureAndSaveToLibrary = async (): Promise<string | null> => {
-    const uri = await captureCard();
-    if (!uri) return null;
-
-    const { status } = await MediaLibrary.requestPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert(t('settings.common.errorTitle'), t('settings.alerts.mediaPermissionRequired'));
-      return null;
-    }
-
-    await MediaLibrary.saveToLibraryAsync(uri);
-    return uri;
-  };
-
-  const handleShareToX = async () => {
-    await runWithProcessing('twitter', async () => {
-      const uri = await captureAndSaveToLibrary();
-      if (!uri) return;
-
-      const result = await Share.share({
-        url: uri,
-        message: shareText,
-        title: 'Tickemo',
-      });
-
-      if (result.action === Share.sharedAction) {
-        onClose();
-      }
-    });
-  };
-
-
-  const formatHandle = (value: string) => {
-    const trimmed = value.trim();
-    if (!trimmed) return '-';
-    return trimmed.startsWith('@') ? trimmed : `@${trimmed}`;
-  };
-
-  const displayXHandle = socialsExpanded ? formatHandle(xHandle) : '-';
-  const displayInstagramHandle = socialsExpanded ? formatHandle(instagramHandle) : '-';
-
-  const formatJoinedDate = (value?: string) => {
-    if (!value) return '-';
-    const joinedDate = new Date(value);
-    if (Number.isNaN(joinedDate.getTime())) return value;
-    const y = joinedDate.getFullYear();
-    const m = `${joinedDate.getMonth() + 1}`.padStart(2, '0');
-    const d = `${joinedDate.getDate()}`.padStart(2, '0');
-    return `${y}/${m}/${d}`;
-  };
-
-  const profileInitials = (profile.displayName || 'U')
-    .split(' ')
-    .map((part) => part.trim()[0])
-    .filter(Boolean)
-    .slice(0, 2)
-    .join('')
-    .toUpperCase();
-
-  // フォント読み込み中はnullを返す
-  if (!fontsLoaded) {
-    return null;
-  }
-
-  return (
-    <Modal
-      visible={visible}
-      animationType="none"
-      presentationStyle="overFullScreen"
-      transparent
-      onRequestClose={onClose}
-      onShow={() => {
-        Animated.timing(translateY, {
-          toValue: 0,
-          duration: 420,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }).start();
-      }}
-    >
-      <View style={shareStyles.overlay}>
-        <Animated.View
-          style={[
-            shareStyles.container,
-            {
-              transform: [
-                {
-                  translateY: Animated.add(
-                    translateY.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [0, 800],
-                    }),
-                    dragY,
-                  ),
-                },
-              ],
-            },
-          ]}
-          {...panResponder.panHandlers}
-        >
-          <View style={shareStyles.handleBarContainer}>
-            <View style={shareStyles.handleBar} />
-          </View>
-
-          <View style={shareStyles.sheetContent}>
-            <View style={shareStyles.sheetHeader}>
-              <Text style={shareStyles.sheetTitle}>{t('settings.share.preview')}</Text>
-            </View>
-
-            <View style={shareStyles.previewArea}>
-              
-              <View
-                collapsable={false}
-                style={{
-                  position: 'absolute',
-                  top: '-3%',
-                  left: '8%',
-                  width: outputWidth * 0.9 + 80,
-                  height: outputHeight * 0.9 + 80,
-                  marginTop: -(outputHeight * displayScale) / 2 - 40,
-                  marginLeft: -(outputWidth * displayScale) / 2 - 40,
-                  backgroundColor: 'transparent',
-                }}
-              >
-                <Svg
-                  width={outputWidth * 0.9 + 80}
-                  height={outputHeight * 0.9 + 80}
-                  style={{ position: 'absolute', top: 0, left: 0 }}
-                >
-                  <Defs>
-                    <RadialGradient id="shareShadow" cx="50%" cy="50%" rx="50%" ry="50%">
-                      <Stop offset="60%" stopColor="rgba(0,0,0,0)" />
-                      <Stop offset="100%" stopColor="rgba(0,0,0,0.22)" />
-                    </RadialGradient>
-                  </Defs>
-                  <Rect
-                    x={28}
-                    y={34}
-                    width={outputWidth * 0.9 + 24}
-                    height={outputHeight * 0.9 + 24}
-                    rx={60}
-                    fill="url(#shareShadow)"
-                  />
-                </Svg>
-                <View
-                  style={{
-                    margin: 40,
-                    width: outputWidth * 0.9,
-                    height: outputHeight * 0.9,
-                    borderRadius: 50,
-                    backgroundColor: 'transparent', // 透明に変更して影用の背景を表示させない（実際には外側のSVGが影）
-                  }}
-                >
-                  <View
-                    style={{
-                      width: '100%',
-                      height: '100%',
-                      backgroundColor: '#fff', // カード背景を白に設定
-                    }}
-                  >
-                    <View
-                      ref={viewRef}
-                      collapsable={false}
-                      style={{
-                        width: outputWidth,
-                        height: outputHeight,
-                        transform: [{ scale: displayScale }],
-                        transformOrigin: 'center center',
-                        backgroundColor: '#fff', // カード背景を白に設定
-                        borderRadius: 28,
-                        overflow: 'hidden',
-                      }}
-                    >
-                      <ExpoImage
-                        source={shareCardSource}
-                        style={shareStyles.cardBackground}
-                        contentFit="cover"
-                      />
-
-                  <View style={shareStyles.cardContent}>
-                    <Text style={shareStyles.totalLivesBackdrop}>
-                      {stats.totalCheckIns}
-                    </Text>
-                    <View style={shareStyles.profileHeader}>
-                      {isPremium ? (
-                        <LinearGradient
-                          colors={['#8FE58C', '#8872F8']}
-                          start={{ x: 0, y: 0 }}
-                          end={{ x: 1, y: 1 }}
-                          style={shareStyles.profileAvatarWrapPremium}
-                        >
-                          <View style={shareStyles.profileAvatarWrapInner}>
-                            {profile.avatarUrl ? (
-                              <ExpoImage
-                                source={{ uri: profile.avatarUrl }}
-                                style={shareStyles.profileAvatar}
-                                contentFit="cover"
-                                cachePolicy="memory-disk"
-                              />
-                            ) : (
-                              <View style={shareStyles.profileAvatarFallback}>
-                                <Text style={shareStyles.profileAvatarInitials}>
-                                  {profileInitials || 'U'}
-                                </Text>
-                              </View>
-                            )}
-                          </View>
-                        </LinearGradient>
-                      ) : (
-                        <View
-                          style={[
-                            shareStyles.profileAvatarWrap,
-                            { borderColor: rankAccentColorMap[stats.fanLevel] },
-                          ]}
-                        >
-                          {profile.avatarUrl ? (
-                            <ExpoImage
-                              source={{ uri: profile.avatarUrl }}
-                              style={shareStyles.profileAvatar}
-                              contentFit="cover"
-                              cachePolicy="memory-disk"
-                            />
-                          ) : (
-                            <View style={shareStyles.profileAvatarFallback}>
-                              <Text style={shareStyles.profileAvatarInitials}>
-                                {profileInitials || 'U'}
-                              </Text>
-                            </View>
-                          )}
-                        </View>
-                      )}
-                      <View style={shareStyles.profileInfo}>
-                        <Text style={shareStyles.profileName} numberOfLines={1}>
-                          {profile.displayName || 'User'}
-                        </Text>
-                        <Text style={shareStyles.profileMeta} numberOfLines={1}>
-                          Joined {formatJoinedDate(profile.joinedAt)}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={shareStyles.socialSection}>
-                      <View style={shareStyles.socialRow}>
-                        <View style={shareStyles.socialItem}>
-                          <Image
-                            source={require('../assets/shareCard/cardParts/xIcon.png')}
-                            style={[shareStyles.socialIcon, { borderRadius: 8 }]}
-                          />
-                          <Text style={shareStyles.socialHandle}>
-                            {displayXHandle}
-                          </Text>
-                          {socialsExpanded && xHandle.trim() ? (
-                            <Image
-                              source={require('../assets/shareCard/cardParts/scribble.png')}
-                              style={shareStyles.socialScribbleX}
-                            />
-                          ) : null}
-                        </View>
-                      </View>
-                      <View style={shareStyles.socialRow}>
-                        <View style={shareStyles.socialItem}>
-                          <Image
-                            source={require('../assets/shareCard/cardParts/instagramIcon.png')}
-                            style={shareStyles.socialIcon}
-                          />
-                          <Text style={shareStyles.socialHandle}>
-                            {displayInstagramHandle}
-                          </Text>
-                          {socialsExpanded && instagramHandle.trim() ? (
-                            <Image
-                              source={require('../assets/shareCard/cardParts/scribble.png')}
-                              style={shareStyles.socialScribbleInstagram}
-                            />
-                          ) : null}
-                        </View>
-                      </View>
-                    </View>
-
-                    <View style={shareStyles.statusSection}>
-                      <View style={shareStyles.statusItem}>
-                          <Text style={shareStyles.statusLabel}>{t('settings.share.statusLastSeen')}</Text>
-                        <Text style={shareStyles.statusValue} numberOfLines={1}>
-                          {stats.lastSeenLiveName || '-'}
-                        </Text>
-                      </View>
-                      <View style={shareStyles.statusItem}>
-                          <Text style={shareStyles.statusLabel}>{t('settings.share.statusMostLoved')}</Text>
-                        <Text style={shareStyles.statusValue} numberOfLines={1}>
-                          {stats.topArtist || '-'}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={shareStyles.storeQrWrap}>
-                      <QRCode
-                        value={APP_STORE_URL}
-                        size={74}
-                        ecl="M"
-                        backgroundColor="white"
-                        color="black"
-                      />
-                    </View>
-                  </View>
-                    </View>
-                  </View>
-                </View>
-              </View>
-            </View>
-
-            <View style={shareStyles.socialSettingsContainer}>
-              <View style={shareStyles.socialSettingsLeft}>
-                <Text style={shareStyles.socialSettingsTitle}>{t('settings.share.socials')}</Text>
-                <Switch
-                  value={socialsExpanded}
-                  onValueChange={setSocialsExpanded}
-                  trackColor={{ false: '#E5E5E5', true: '#34C759' }}
-                  thumbColor="#FFFFFF"
-                />
-              </View>
-              <View style={shareStyles.socialSettingsRight}>
-                <View
-                  style={[
-                    shareStyles.socialSettingsBody,
-                    !socialsExpanded && { height: 0, overflow: 'hidden' }
-                  ]}
-                >
-                  <View style={shareStyles.socialSettingsRow}>
-                    <Image
-                      source={require('../assets/shareCard/cardParts/xIcon.png')}
-                      style={[shareStyles.settingsIcon, {  borderRadius: 6}]}
-                    />
-                    <TextInput
-                      style={shareStyles.socialSettingsInput}
-                      placeholder="@tickemo_app"
-                      placeholderTextColor="#C7C7CC"
-                      value={xHandle}
-                      onChangeText={onUpdateXHandle}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                    />
-                  </View>
-                  <View style={shareStyles.socialSettingsRow}>
-                    <Image
-                      source={require('../assets/shareCard/cardParts/instagramIcon.png')}
-                      style={shareStyles.settingsIcon}
-                    />
-                    <TextInput
-                      style={shareStyles.socialSettingsInput}
-                      placeholder="@tickemo_app"
-                      placeholderTextColor="#C7C7CC"
-                      value={instagramHandle}
-                      onChangeText={onUpdateInstagramHandle}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                    />
-                  </View>
-                </View>
-              </View>
-            </View>
-          </View>
-
-          <View style={shareStyles.actionBar}>
-            <TouchableOpacity
-              style={shareStyles.actionButtonWrapper}
-              onPress={handleSaveImage}
-              disabled={isProcessing}
-            >
-              <View style={shareStyles.actionButtonCircle}>
-                {isProcessing && selectedAction === 'save' ? (
-                  <ActivityIndicator color="#666" size="small" />
-                ) : (
-                  <Feather name="download" size={24} color="#333" />
-                )}
-              </View>
-              <Text style={shareStyles.actionButtonLabel}>{t('settings.share.actionSaveImage')}</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={shareStyles.actionButtonWrapper}
-              onPress={handleCopyLink}
-              disabled={isProcessing}
-            >
-              <View style={shareStyles.actionButtonCircle}>
-                {isProcessing && selectedAction === 'copy' ? (
-                  <ActivityIndicator color="#666" size="small" />
-                ) : (
-                  <AntDesign name="link" size={24} color="#333" />
-                )}
-              </View>
-              <Text style={shareStyles.actionButtonLabel}>{t('settings.share.actionCopyImageLink')}</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={shareStyles.actionButtonWrapper}
-              onPress={handleShareToX}
-              disabled={isProcessing}
-            >
-              <View style={[shareStyles.actionButtonCircle, { backgroundColor: '#1c1c1c' }]}>
-                {isProcessing && selectedAction === 'twitter' ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Image source={require('../assets/x.logo.white.png')} style={{ width: 18, height: 18 }} />
-                )}
-              </View>
-              <Text style={shareStyles.actionButtonLabel}>{t('settings.share.actionShareX')}</Text>
-            </TouchableOpacity>
-
-          </View>
-        </Animated.View>
-      </View>
-    </Modal>
-  );
-};
-
-const shareStyles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.6)',
-  },
-  container: {
-    height: '90%',
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    overflow: 'hidden',
-  },
-  handleBarContainer: {
-    width: '100%',
-    paddingVertical: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-    zIndex: 2,
-  },
-  handleBar: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#DDD',
-  },
-  sheetContent: {
-    flex: 1,
-  },
-  sheetHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 24,
-    paddingTop: 12,
-    position: 'relative',
-    zIndex: 2,
-    backgroundColor: '#FFFFFF',
-  },
-  sheetTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#000',
-  },
-  closeButton: {
-    padding: 6,
-  },
-  previewArea: {
-    flex: 1,
-    position: 'relative',
-    backgroundColor: 'transparent',
-  },
-  cardBackground: {
-    width: '100%',
-    height: '100%',
-  },
-  cardContent: {
-    position: 'absolute',
-    top: -60,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingHorizontal: 58,
-    paddingTop: 160,
-    paddingBottom: 140,
-  },
-  totalLivesBackdrop: {
-    position: 'absolute',
-    right: 135,
-    top: 350,
-    fontSize: 190,
-    fontWeight: '900',
-    color: '#cacaca',
-    opacity: 0.3,
-    transform: [{ rotate: '6deg' }],
-    letterSpacing: 0.5,
-  },
-  profileHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 18,
-  },
-  profileAvatarWrap: {
-    width: 152,
-    height: 152,
-    borderRadius: 76,
-    borderWidth: 5,
-    borderColor: '#4DC9D8',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-    marginRight: 25,
-    marginLeft: -20,
-  },
-  profileAvatarWrapPremium: {
-    width: 152,
-    height: 152,
-    borderRadius: 76,
-    padding: 5,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 25,
-    marginLeft: -20,
-  },
-  profileAvatarWrapInner: {
-    width: 142,
-    height: 142,
-    borderRadius: 71,
-    padding: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
-  },
-  profileAvatar: {
-    width: 140,
-    height: 140,
-    borderRadius: 71,
-  },
-  profileAvatarFallback: {
-    width: 140,
-    height: 140,
-    borderRadius: 71,
-    backgroundColor: '#1F1F1F',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  profileAvatarInitials: {
-    color: '#FFFFFF',
-    fontSize: 22,
-    fontWeight: '800',
-  },
-  profileInfo: {
-    flex: 1,
-  },
-  profileName: {
-    fontSize: 36,
-    fontWeight: '900',
-    color: '#2F2F2F',
-  },
-  profileMeta: {
-    marginTop: 14,
-    fontSize: 25,
-    fontFamily: 'Anton_400Regular',
-    fontWeight: '800',
-    color: '#8E8E93',
-    letterSpacing: 0.4,
-  },
-  rankTitle: {
-    fontSize: 120,
-    color: '#3d3d3d',
-    fontFamily: 'Anton_400Regular',
-    letterSpacing: 1.2,
-  },
-  socialSection: {
-    marginTop: 25,
-    marginBottom: 22,
-    alignSelf: 'flex-start',
-  },
-  socialRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 25,
-  },
-  socialItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    position: 'relative',
-  },
-  socialIcon: {
-    width: 28,
-    height: 28,
-    resizeMode: 'contain',
-    marginRight: 30,
-  },
-  socialHandle: {
-    fontSize: 28,
-    fontFamily: 'Inter',
-    fontWeight: '800',
-    color: '#494949',
-  },
-  socialScribbleX: {
-    position: 'absolute',
-    left: -85,
-    top: -24,
-    width: 210,
-    height: 90,
-    resizeMode: 'contain',
-    opacity: 0.8,
-  },
-  socialScribbleInstagram: {
-    position: 'absolute',
-    left: -90,
-    top: -24,
-    width: 210,
-    height: 90,
-    resizeMode: 'contain',
-    opacity: 0.8,
-  },
-  statusSection: {
-    marginTop: 16,
-    marginLeft: -10,
-    gap: 18,
-  },
-  storeQrWrap: {
-    position: 'absolute',
-    left: 55,
-    bottom: 75,
-    padding: 8,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-  },
-  statusItem: {
-    alignItems: 'flex-start',
-  },
-  statusLabel: {
-    fontSize: 23,
-    fontFamily: 'Inter',
-    fontWeight: '800',
-    color: '#9A9A9A',
-    letterSpacing: 0.6,
-  },
-  statusValue: {
-    fontSize: 26,
-    fontFamily: 'Inter',
-    fontWeight: '900',
-    color: '#5c5c5c',
-    marginTop: 4,
-    maxWidth: 410,
-  },
-  actionBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    paddingVertical: 20,
-    paddingBottom: 50,
-    backgroundColor: '#FFF',
-  },
-  actionButtonWrapper: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionButtonCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#F5F5F5',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 6,
-  },
-  actionButtonLabel: {
-    fontSize: 10,
-    fontWeight: '500',
-    color: '#666',
-    textAlign: 'center',
-  },
-  socialSettingsContainer: {
-    height: 75,
-    flexDirection: 'row',
-    gap: 16,
-    alignItems: 'flex-start',
-    marginTop: 24,
-    paddingHorizontal: 40,
-  },
-  socialSettingsLeft: {
-    width: 80,
-    alignItems: 'flex-start',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  socialSettingsRight: {
-    flex: 1,
-  },
-  socialSettingsTitle: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#8E8E93',
-    letterSpacing: 0.8,
-  },
-  socialSettingsBody: {
-    gap: 12,
-  },
-  socialSettingsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  settingsIcon: {
-    width: 24,
-    height: 24,
-    resizeMode: 'contain',
-  },
-  socialSettingsLabel: {
-    width: 50,
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-  },
-  socialSettingsInput: {
-    flex: 1,
-    height: 32,
-    borderRadius: 18,
-    backgroundColor: '#f8f8f8',
-    paddingHorizontal: 14,
-    fontSize: 14,
-    color: '#1C1C1E',
-  },
-  
-});
 
 const formatJoinedAt = (value?: string) => {
   if (!value) return '-';
@@ -1563,15 +455,7 @@ const formatJoinedAt = (value?: string) => {
   return `${y}/${m}/${d}`;
 };
 
-const rankAccentColorMap: Record<ShareStats['fanLevel'], string> = {
-  ROOKIE: '#22D3EE',
-  EXPERT: '#DFCCAA',
-  MASTER: '#D7E0E9',
-  LEGEND: '#F4EAC6',
-};
-
 const UserProfileHeader: React.FC<{
-  stats: ShareStats;
   profile: {
     displayName: string;
     username: string;
@@ -1579,9 +463,8 @@ const UserProfileHeader: React.FC<{
     joinedAt: string;
   };
   onPressEdit: () => void;
-}> = ({ stats, profile, onPressEdit }) => {
+}> = ({ profile, onPressEdit }) => {
   const membershipType = useAppStore((state) => state.membershipType);
-  const rankColor = rankAccentColorMap[stats.fanLevel];
   const joinedText = formatJoinedAt(profile.joinedAt);
   const displayName = profile.displayName || 'User';
   const username = profile.username || '@user';
@@ -1622,32 +505,8 @@ const UserProfileHeader: React.FC<{
                 )}
               </View>
             </LinearGradient>
-          ) : stats.fanLevel === 'LEGEND' ? (
-            <LinearGradient
-              colors={['#F5E097', '#8E8361']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.avatarRingLegend}
-            >
-              <View style={styles.avatarRingInner}>
-                {profile.avatarUrl ? (
-                  <ExpoImage
-                    source={{ uri: profile.avatarUrl }}
-                    style={styles.avatarImage}
-                    contentFit="cover"
-                    cachePolicy="memory-disk"
-                    priority="high"
-                    transition={0}
-                  />
-                ) : (
-                  <View style={styles.avatarFallback}>
-                    <Text style={styles.avatarInitials}>{initials || 'U'}</Text>
-                  </View>
-                )}
-              </View>
-            </LinearGradient>
           ) : (
-            <View style={[styles.avatarRing, { borderColor: rankColor }]}> 
+            <View style={styles.avatarRing}>
               {profile.avatarUrl ? (
                 <ExpoImage
                   source={{ uri: profile.avatarUrl }}
@@ -1665,7 +524,6 @@ const UserProfileHeader: React.FC<{
           <View style={styles.profileText}>
             <View style={styles.nameRow}>
               <Text style={styles.displayName}>{displayName}</Text>
-              <View style={[styles.rankDot, { backgroundColor: rankColor }]} />
               {isPremium ? (
                 <LinearGradient
                   colors={['#8FE58C', '#8872F8']}
@@ -1685,78 +543,8 @@ const UserProfileHeader: React.FC<{
           </View>
         </View>
         <TouchableOpacity style={styles.profileEditButton} onPress={onPressEdit}>
-          <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-            <Path
-              d="M11 2H9C4 2 2 4 2 9V15C2 20 4 22 9 22H15C20 22 22 20 22 15V13"
-              stroke="#2F2F2F"
-              strokeWidth={2.5}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-            <Path
-              d="M16.04 3.01928L8.16 10.8993C7.86 11.1993 7.56 11.7893 7.5 12.2193L7.07 15.2293C6.91 16.3193 7.68 17.0793 8.77 16.9293L11.78 16.4993C12.2 16.4393 12.79 16.1393 13.1 15.8393L20.98 7.95928C22.34 6.59928 22.98 5.01928 20.98 3.01928C18.98 1.01928 17.4 1.65928 16.04 3.01928Z"
-              stroke="#2F2F2F"
-              strokeWidth={2.5}
-              strokeMiterlimit={10}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-            <Path
-              d="M14.91 4.15039C15.58 6.54039 17.45 8.41039 19.85 9.09039"
-              stroke="#2F2F2F"
-              strokeWidth={2.5}
-              strokeMiterlimit={10}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </Svg>
+          <HugeiconsIcon icon={Edit01Icon} size={18} color="#2F2F2F" strokeWidth={2.2} />
         </TouchableOpacity>
-      </View>
-
-      <View
-        style={[
-          styles.rankCard,
-          stats.fanLevel === 'LEGEND' && styles.rankCardLegend,
-        ]}
-      >
-        {stats.fanLevel === 'LEGEND' && (
-          <LinearGradient
-            colors={['#f3d66c', '#faefc8', '#8E8361']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.rankCardGradient}
-          />
-        )}
-        <View style={styles.rankInfo}>
-          <Text style={styles.rankCurrentLabel}>現在のランク</Text>
-          <Text style={styles.rankName}>{stats.fanLevel}</Text>
-          {stats.fanLevel !== 'LEGEND' && (
-            <>
-              <Text style={styles.rankNextText}>次のランクまで {stats.remainingLives} Live</Text>
-              <View style={styles.rankProgressBarBackground}>
-                <View
-                  style={[
-                    styles.rankProgressBarFill,
-                    { width: `${stats.progressPercentage}%` },
-                  ]}
-                />
-              </View>
-            </>
-          )}
-        </View>
-        <ExpoImage
-          source={
-            stats.fanLevel === 'ROOKIE'
-              ? require('../assets/status/rookie.png')
-              : stats.fanLevel === 'EXPERT'
-                ? require('../assets/status/expert.png')
-                : stats.fanLevel === 'MASTER'
-                  ? require('../assets/status/master.png')
-                  : require('../assets/status/legend.png')
-          }
-          style={styles.rankIllustration}
-          contentFit="contain"
-        />
       </View>
     </View>
   );
@@ -1770,35 +558,29 @@ const styles = StyleSheet.create({
     zIndex: 9000,
     elevation: 30,
   },
+  glassHeader: {
+    backgroundColor: 'rgba(248, 248, 248, 0.62)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.45)',
+    overflow: 'hidden',
+    paddingHorizontal: 20,
+    paddingBottom: 10,
+  },
   content: {
     paddingHorizontal: 20,
-    paddingTop: 70,
+    paddingTop: 28,
     paddingBottom: 120,
   },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 30,
+    justifyContent: 'flex-start',
+    marginBottom: 20,
   },
   title: {
-    fontSize: 30,
-    fontWeight: '800',
-    color: '#000000',
-    letterSpacing: -0.5,
-  },
-  shareButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 24,
-    backgroundColor: 'transparent',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#d2d2d2',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 6,
+    fontSize: 26,
+    color: '#333333',
+    fontWeight: '800'
   },
   paywallBannerTouchable: {
     marginTop: 25,
@@ -1861,7 +643,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0,
     shadowRadius: 0,
     elevation: 0,
-    marginBottom: 10,
+    marginBottom: 0,
     overflow: 'hidden',
   },
   bentoCardBackground: {
@@ -1943,11 +725,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#2D2D2D',
   },
-  rankDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 4,
-  },
   plusBadge: {
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -1994,74 +771,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  rankCard: {
-    backgroundColor: '#252525',
-    borderRadius: 26,
-    paddingHorizontal: 28,
-    paddingVertical: 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    minHeight: 100,
-    maxHeight: 150,
-    overflow: 'hidden',
-  },
-  rankCardLegend: {
-    backgroundColor: 'transparent',
-  },
-  rankCardGradient: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  rankInfo: {
-    flex: 1,
-    paddingRight: 100,
-  },
-  rankCurrentLabel: {
-    marginTop: 3,
-    fontSize: 12,
-    color: '#B8B8B8',
-  },
-  rankName: {
-    fontSize: 28,
-    fontWeight: '900',
-    fontFamily: 'Anton_400Regular',
-    color: '#FFFFFF',
-    letterSpacing: 1.2,
-  },
-  rankNextText: {
-    marginTop: 6,
-    fontSize: 12,
-    color: '#B8B8B8',
-  },
-  rankProgressBarBackground: {
-    marginTop: 10,
-    height: 8,
-    width: '80%',
-    borderRadius: 10,
-    backgroundColor: '#2E2E2E',
-    overflow: 'hidden',
-  },
-  rankProgressBarFill: {
-    height: '100%',
-    borderRadius: 10,
-    backgroundColor: '#FFFFFF',
-  },
-  rankIllustration: {
-    position: 'absolute',
-    right: -4,
-    bottom: -14,
-    width: 140,
-    height: 140,
-  },
   sectionWrapper: {
-    marginTop: 35,
+    marginTop: 22,
   },
   sectionLabel: {
     fontSize: 14,
-    fontWeight: '400',
+    fontWeight: '500',
     color: '#9A9A9A',
-    marginBottom: 14,
-    marginLeft: 18,
+    marginBottom: 10,
+    marginLeft: 8,
   },
   card: {
     backgroundColor: '#FFFFFF',
@@ -2076,7 +794,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingVertical: 20,
     borderBottomWidth: 0.5,
     borderBottomColor: '#E8E8E8',
@@ -2093,8 +811,9 @@ const styles = StyleSheet.create({
     color: '#FF3B30',
   },
   rowRight: {
-    flexDirection: 'column',
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
   },
   rowValue: {
     fontSize: 10,
@@ -2172,20 +891,23 @@ const styles = StyleSheet.create({
 // ================ FAQ Screen Component ================
 export function FAQScreen({ navigation }: any) {
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
   const faqData = t('settings.faq.sections', { returnObjects: true }) as Array<{
     category: string;
     items: Array<{ question: string; answer: string }>;
   }>;
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F8F8' }}>
-      <View style={faqStyles.header}>
-        <TouchableOpacity style={faqStyles.backButton} onPress={() => navigation.goBack()}>
-          <MaterialIcons name="arrow-back-ios" size={22} color="#000" />
-        </TouchableOpacity>
-        <Text style={faqStyles.headerTitle}>{t('settings.faq.header')}</Text>
-        <View style={{ width: 44 }} />
-      </View>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F8F8' }} edges={['left', 'right', 'bottom']}>
+      <BlurView tint="light" intensity={80} style={[faqStyles.glassHeader, { paddingTop: insets.top + 8 }]}>
+        <View style={faqStyles.header}>
+          <TouchableOpacity style={faqStyles.backButton} onPress={() => navigation.goBack()}>
+            <MaterialIcons name="arrow-back-ios" size={22} color="#000" />
+          </TouchableOpacity>
+          <Text style={faqStyles.headerTitle}>{t('settings.faq.header')}</Text>
+          <View style={{ width: 44 }} />
+        </View>
+      </BlurView>
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={faqStyles.content}>
         {faqData.map((section, sectionIndex) => (
@@ -2215,6 +937,12 @@ export function FAQScreen({ navigation }: any) {
 }
 
 const faqStyles = StyleSheet.create({
+  glassHeader: {
+    backgroundColor: 'rgba(248, 248, 248, 0.62)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.45)',
+    overflow: 'hidden',
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -19,6 +19,7 @@ import { ChekiRecord } from '../contexts/RecordsContext';
 import { FallbackQRCode } from './FallbackQRCode';
 import { NO_IMAGE_URI } from '../hooks/useResolvedImageUri';
 import TiltTicketCard from './TiltTicketCard';
+import { DummyJacket } from './DummyJacket';
 
 export type TicketMaterial = 'paper' | 'matte' | 'holo';
 export type StickerType =
@@ -59,14 +60,7 @@ interface SnapResult {
 }
 
 const STICKER_IMAGES: Record<Exclude<StickerType, 'none'>, any> = {
-  sticker1: require('../assets/shareStickers/sticker1.png'),
-  sticker2: require('../assets/shareStickers/sticker2.png'),
-  sticker3: require('../assets/shareStickers/sticker3.png'),
-  sticker4: require('../assets/shareStickers/sticker4.png'),
-  sticker5: require('../assets/shareStickers/sticker5.png'),
-  sticker6: require('../assets/shareStickers/sticker6.png'),
-  sticker7: require('../assets/shareStickers/sticker7.png'),
-  sticker8: require('../assets/shareStickers/sticker8.png'),
+  // Sticker images have been removed
 };
 
 const TICKET_SHAPE_PATH_D =
@@ -496,7 +490,7 @@ const EditableTicketPreview: React.FC<EditableTicketPreviewProps> = ({
 
   return (
     <View style={styles.ticketCardContainer}>
-      <TiltTicketCard maxTiltDeg={30}>
+      <View>
         <View
           style={{
             width: outputWidth * displayScale,
@@ -518,12 +512,16 @@ const EditableTicketPreview: React.FC<EditableTicketPreviewProps> = ({
           >
             <View style={{ width: outputWidth, height: outputHeight, backgroundColor: 'transparent', justifyContent: 'center', alignItems: 'flex-start' }}>
               {captureBlurBackground && (
-                <Image
-                  source={{ uri: coverUri ?? NO_IMAGE_URI }}
-                  style={StyleSheet.absoluteFillObject}
-                  contentFit="cover"
-                  blurRadius={60}
-                />
+                coverUri && coverUri !== NO_IMAGE_URI ? (
+                  <Image
+                    source={{ uri: coverUri }}
+                    style={StyleSheet.absoluteFillObject}
+                    contentFit="cover"
+                    blurRadius={60}
+                  />
+                ) : (
+                  <DummyJacket style={StyleSheet.absoluteFillObject} iconSize={48} />
+                )
               )}
 
               <View style={{ width: ticketWidth, height: ticketHeight }}>
@@ -580,11 +578,15 @@ const EditableTicketPreview: React.FC<EditableTicketPreviewProps> = ({
                       elevation: 8,
                     }}
                   >
-                    <Image
-                      source={{ uri: coverUri ?? NO_IMAGE_URI }}
-                      style={{ width: '100%', height: '100%' }}
-                      contentFit="cover"
-                    />
+                    {coverUri && coverUri !== NO_IMAGE_URI ? (
+                      <Image
+                        source={{ uri: coverUri }}
+                        style={{ width: '100%', height: '100%' }}
+                        contentFit="cover"
+                      />
+                    ) : (
+                      <DummyJacket style={{ width: '100%', height: '100%' }} iconSize={Math.max(20, imageSize * 0.34)} />
+                    )}
                   </View>
 
                   {(record.liveName || '-').length <= 8 ? (
@@ -883,7 +885,7 @@ const EditableTicketPreview: React.FC<EditableTicketPreviewProps> = ({
             </View>
           </View>
         </View>
-      </TiltTicketCard>
+      </View>
     </View>
   );
 };

@@ -235,7 +235,7 @@ const styles = StyleSheet.create({
   },
   inputBlur: {
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 18,
   },
   searchRow: {
     flexDirection: 'row',

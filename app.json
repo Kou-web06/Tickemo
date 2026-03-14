@@ -2,7 +2,7 @@
   "expo": {
     "name": "Tickemo",
     "slug": "Tickemo",
-    "version": "1.2.3",
+    "version": "2.2.3",
     "buildNumber": "19",
     "orientation": "portrait",
     "icon": "./assets/app-icon/icon1.png",
@@ -47,8 +47,7 @@
           "iCloud.com.anonymous.Tickemo"
         ],
         "com.apple.developer.ubiquity-kvstore-identifier": "$(TeamIdentifierPrefix)com.anonymous.Tickemo"
-      },
-      "googleMobileAdsAppId": "ca-app-pub-2769977162057386~9124706504"
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -69,8 +68,7 @@
         "android.permission.READ_MEDIA_IMAGES",
         "android.permission.READ_MEDIA_VIDEO",
         "android.permission.READ_MEDIA_AUDIO"
-      ],
-      "googleMobileAdsAppId": "ca-app-pub-2769977162057386~9124706504"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -94,13 +92,6 @@
             "useFrameworks": "static",
             "deploymentTarget": "16.0"
           }
-        }
-      ],
-      [
-        "react-native-google-mobile-ads",
-        {
-          "androidAppId": "ca-app-pub-2769977162057386~9124706504",
-          "iosAppId": "ca-app-pub-2769977162057386~9124706504"
         }
       ],
       "expo-sqlite",

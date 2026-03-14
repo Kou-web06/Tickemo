@@ -10,6 +10,7 @@ export interface ChekiRecord {
   date: string;        // DBカラム: event_date (YYYY-MM-DD)
   venue?: string;
   seat?: string;
+  ticketPrice?: number;   // 料金（円）
   startTime?: string;  // DBカラム: start_time
   endTime?: string;    // DBカラム: end_time
   imagePath?: string;  // DBカラム: image_path (Storageのパス)

@@ -7,6 +7,7 @@ import TextTicker from 'react-native-text-ticker';
 import { ChekiRecord } from '../contexts/RecordsContext';
 import { NO_IMAGE_URI, useResolvedImageUri } from '../hooks/useResolvedImageUri';
 import { buildTicketArtistDisplay } from '../utils/artistDisplay';
+import { DummyJacket } from '../components/DummyJacket';
 
 interface TicketCardProps {
   record: ChekiRecord;
@@ -23,6 +24,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({ record, width, isAnimati
   const liveName = record.liveName || '-';
   const isLongName = liveName.length >= 8;
   const coverUri = useResolvedImageUri(record.imageUrls?.[0], record.imageAssetIds?.[0]);
+  const hasCoverImage = Boolean(coverUri && coverUri !== NO_IMAGE_URI);
   const artistDisplay = buildTicketArtistDisplay(record.artists, record.artist);
 
   const backgroundSlideAnim = useRef(new Animated.Value(0)).current;
@@ -139,11 +141,15 @@ export const TicketCard: React.FC<TicketCardProps> = ({ record, width, isAnimati
         ]}
       >
         <View style={styles.jacketContainer}>
-          <Image
-            source={{ uri: coverUri ?? NO_IMAGE_URI }}
-            style={styles.image}
-            contentFit="cover"
-          />
+          {hasCoverImage ? (
+            <Image
+              source={{ uri: coverUri as string }}
+              style={styles.image}
+              contentFit="cover"
+            />
+          ) : (
+            <DummyJacket style={styles.image} />
+          )}
         </View>
       </Animated.View>
 
@@ -248,8 +254,8 @@ const styles = StyleSheet.create({
   container: {
     marginBottom: 12,
     shadowColor: '#1b1b1b',
-    shadowOffset: { width: 5, height: 10 },
-    shadowOpacity: 0.3,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.18,
     shadowRadius: 8,
     elevation: 10,
   },
@@ -276,8 +282,8 @@ const styles = StyleSheet.create({
     top: 8,
     shadowColor: '#000',
     shadowOffset: { width: 10, height: 10 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
     elevation: 8,
     zIndex: 10,
   },

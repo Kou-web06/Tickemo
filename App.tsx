@@ -5,17 +5,15 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import PagerView from 'react-native-pager-view';
 import { useFonts, Anton_400Regular } from '@expo-google-fonts/anton';
 import CollectionScreen from './screens/CollectionScreen';
-import CountdownScreen from './screens/CountdownScreen';
+import CalendarScreen from './screens/CalendarScreen';
 import StatisticsScreen from './screens/StatisticsScreen';
 import SettingsScreen, { FAQScreen } from './screens/SettingsScreen';
 import ProfileEditScreen from './screens/ProfileEditScreen';
 import ICloudSyncScreen from './screens/ICloudSyncScreen';
 import { PaywallScreen } from './screens';
 import { FloatingTabBar } from './components/FloatingTabBar';
-import { AdmobBanner } from './components/AdmobBanner';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { theme } from './theme';
@@ -107,12 +105,48 @@ function SettingsStackScreen() {
 // ================ Root App Component ================
 function AppContent() {
   const { t } = useTranslation();
-  const [currentPage, setCurrentPage] = useState(1); // デフォルトを中央のタブに設定
-  const pagerRef = useRef<PagerView>(null);
+  const [currentPage, setCurrentPage] = useState(0); // デフォルトをCollectionタブに設定
+  const [activeTabIndex, setActiveTabIndex] = useState(0);
+  const [visitedPages, setVisitedPages] = useState<Record<number, boolean>>({ 0: true, 1: true, 2: true, 3: true });
+  const [pageWidth, setPageWidth] = useState(APP_MAX_WIDTH);
+  const [tabTransition, setTabTransition] = useState<null | { from: number; to: number; direction: 1 | -1 }>(null);
+  const tabSlideProgress = useRef(new Animated.Value(0)).current;
   const { isTabBarVisible } = useTabBar();
-  const isPremium = useAppStore((state) => state.isPremium);
-  const [isBannerVisible, setIsBannerVisible] = useState(true);
   const settingsNavigationRef = useRef<any>(null);
+
+  const moveToPage = (index: number, animated = true) => {
+    if (index === activeTabIndex && !tabTransition) return;
+    if (tabTransition) return;
+
+    if (!animated) {
+      setActiveTabIndex(index);
+      setCurrentPage(index);
+      setVisitedPages((prev) => (prev[index] ? prev : { ...prev, [index]: true }));
+      return;
+    }
+
+    const fromPage = currentPage;
+    const direction: 1 | -1 = index > fromPage ? 1 : -1;
+
+    setActiveTabIndex(index);
+    setVisitedPages((prev) => (prev[index] ? prev : { ...prev, [index]: true }));
+    setTabTransition({ from: fromPage, to: index, direction });
+    tabSlideProgress.setValue(0);
+    Animated.timing(tabSlideProgress, {
+      toValue: 1,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) {
+        setCurrentPage(index);
+      } else {
+        setActiveTabIndex(fromPage);
+        setCurrentPage(fromPage);
+      }
+      setTabTransition(null);
+    });
+  };
 
   // タブレット検出と警告（起動時のみ）
   useEffect(() => {
@@ -136,8 +170,7 @@ function AppContent() {
         recordId: data.recordId,
         kind: data.kind,
       });
-      setCurrentPage(0); // Collection画面へ
-      pagerRef.current?.setPage(0);
+      moveToPage(0, false); // Collection画面へ
       return;
     }
 
@@ -147,8 +180,7 @@ function AppContent() {
         recordId: data.recordId,
         kind: data.kind,
       });
-      setCurrentPage(2); // Statistics画面へ
-      pagerRef.current?.setPage(2);
+      moveToPage(2, false); // Statistics画面へ
       return;
     }
 
@@ -158,26 +190,20 @@ function AppContent() {
         recordId: data.recordId,
         kind: data.kind,
       });
-      setCurrentPage(0); // Collection画面へ
-      pagerRef.current?.setPage(0);
+      moveToPage(0, false); // Collection画面へ
       return;
     }
   };
 
   usePushNotifications(handleNotificationTap);
 
-  const handlePageSelected = (e: any) => {
-    setCurrentPage(e.nativeEvent.position);
-  };
-
   const handleTabPress = (index: number) => {
-    setCurrentPage(index); // 即座に状態を更新
-    pagerRef.current?.setPage(index);
+    moveToPage(index);
   };
 
   const routes = [
     { key: 'home', name: 'Home' },
-    { key: 'countdown', name: 'Countdown' },
+    { key: 'calendar', name: 'Calendar' },
     { key: 'statistics', name: 'Statistics' },
     { key: 'settings', name: 'Settings' },
   ];
@@ -193,21 +219,8 @@ function AppContent() {
   }, {} as any);
 
   useEffect(() => {
-    const subscription = DeviceEventEmitter.addListener('app:bannerVisibility', (visible?: boolean) => {
-      if (typeof visible === 'boolean') {
-        setIsBannerVisible(visible);
-      }
-    });
-
-    return () => {
-      subscription.remove();
-    };
-  }, []);
-
-  useEffect(() => {
     const subscription = DeviceEventEmitter.addListener('app:goToHome', () => {
-      setCurrentPage(0);
-      pagerRef.current?.setPage(0);
+      moveToPage(0, false);
     });
 
     return () => {
@@ -215,60 +228,126 @@ function AppContent() {
     };
   }, []);
 
-  useEffect(() => {
-    if (currentPage !== 3) {
-      setIsBannerVisible(true);
+  const getPageLayerStyle = (index: number) => {
+    if (!tabTransition) {
+      return [styles.pageLayer, index === currentPage ? styles.pageVisible : styles.pageHidden];
     }
-  }, [currentPage]);
 
+    if (index === tabTransition.from) {
+      return [
+        styles.pageLayer,
+        {
+          opacity: 1,
+          zIndex: 2,
+          transform: [
+            {
+              translateX: tabSlideProgress.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, -tabTransition.direction * pageWidth],
+              }),
+            },
+          ],
+        },
+      ];
+    }
+
+    if (index === tabTransition.to) {
+      return [
+        styles.pageLayer,
+        {
+          opacity: 1,
+          zIndex: 1,
+          transform: [
+            {
+              translateX: tabSlideProgress.interpolate({
+                inputRange: [0, 1],
+                outputRange: [tabTransition.direction * pageWidth, 0],
+              }),
+            },
+          ],
+        },
+      ];
+    }
+
+    return [styles.pageLayer, styles.pageHidden];
+  };
+
+  const getPagePointerEvents = (index: number): 'auto' | 'none' => {
+    if (!tabTransition) {
+      return index === currentPage ? 'auto' : 'none';
+    }
+    return index === tabTransition.to ? 'auto' : 'none';
+  };
+
+  const shouldRenderPage = (index: number) => {
+    if (visitedPages[index]) return true;
+    if (!tabTransition) return false;
+    return index === tabTransition.from || index === tabTransition.to;
+  };
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: theme.colors.background.primary }}>
       <View style={styles.container}>
-        <PagerView
-          ref={pagerRef}
-          style={styles.pagerView}
-          initialPage={1}
-          onPageSelected={handlePageSelected}
-          scrollEnabled={false}
-          overScrollMode="never"
-          keyboardDismissMode="on-drag"
+        <View
+          style={styles.pageStack}
+          onLayout={(e) => {
+            const width = e.nativeEvent.layout.width;
+            if (width > 0 && width !== pageWidth) {
+              setPageWidth(width);
+            }
+          }}
         >
-          <View key="home" style={styles.page}>
-            <NavigationContainer independent={true}>
-              <CollectionScreen />
-            </NavigationContainer>
-          </View>
-          <View key="countdown" style={styles.page}>
-            <NavigationContainer independent={true}>
-              <CountdownScreen />
-            </NavigationContainer>
-          </View>
-          <View key="statistics" style={styles.page}>
-            <NavigationContainer independent={true}>
-              <StatisticsScreen />
-            </NavigationContainer>
-          </View>
-          <View key="settings" style={styles.page}>
-            <NavigationContainer independent={true} ref={settingsNavigationRef}>
-              <SettingsStackScreen />
-            </NavigationContainer>
-          </View>
-        </PagerView>
+          <Animated.View
+            style={getPageLayerStyle(0)}
+            pointerEvents={getPagePointerEvents(0)}
+          >
+            {shouldRenderPage(0) ? (
+              <NavigationContainer independent={true}>
+                <CollectionScreen />
+              </NavigationContainer>
+            ) : null}
+          </Animated.View>
 
-        {/* バナー広告 */}
-        {!isPremium && isBannerVisible && (
-          <View style={styles.bannerContainer}>
-            <AdmobBanner />
-          </View>
-        )}
+          <Animated.View
+            style={getPageLayerStyle(1)}
+            pointerEvents={getPagePointerEvents(1)}
+          >
+            {shouldRenderPage(1) ? (
+              <NavigationContainer independent={true}>
+                <CalendarScreen />
+              </NavigationContainer>
+            ) : null}
+          </Animated.View>
+
+          <Animated.View
+            style={getPageLayerStyle(2)}
+            pointerEvents={getPagePointerEvents(2)}
+          >
+            {shouldRenderPage(2) ? (
+              <NavigationContainer independent={true}>
+                <StatisticsScreen />
+              </NavigationContainer>
+            ) : null}
+          </Animated.View>
+
+          <Animated.View
+            style={getPageLayerStyle(3)}
+            pointerEvents={getPagePointerEvents(3)}
+          >
+            {shouldRenderPage(3) ? (
+              <NavigationContainer independent={true} ref={settingsNavigationRef}>
+                <SettingsStackScreen />
+              </NavigationContainer>
+            ) : null}
+          </Animated.View>
+        </View>
 
         {/* フローティングタブバー */}
         {isTabBarVisible && (
           <View style={styles.tabBarContainer}>
             <FloatingTabBar
               state={{
-                index: currentPage,
+                index: activeTabIndex,
                 routes: routes,
               }}
               descriptors={descriptors}
@@ -276,7 +355,11 @@ function AppContent() {
                 navigate: (name: string) => {
                   const index = routes.findIndex((route) => route.name === name);
                   if (index >= 0) {
-                    if (index === currentPage && name === 'Settings') {
+                    if (index === activeTabIndex && name === 'Calendar') {
+                      DeviceEventEmitter.emit('calendar:scrollToToday');
+                    }
+
+                    if (index === activeTabIndex && name === 'Settings') {
                       if (settingsNavigationRef.current?.canGoBack?.()) {
                         settingsNavigationRef.current.dispatch(StackActions.popToTop());
                       }
@@ -545,28 +628,25 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     backgroundColor: theme.colors.background.primary,
   },
-  pagerView: {
+  pageStack: {
     flex: 1,
+  },
+  pageLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  pageVisible: {
+    opacity: 1,
+  },
+  pageHidden: {
+    opacity: 0,
   },
   page: {
     flex: 1,
   },
   tabBarContainer: {
     position: 'absolute',
-    bottom: 30,
-    left: 0,
-    right: 0,
-  },
-  bannerContainer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
     bottom: 0,
-    height: 50,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-    zIndex: 2000,
-    elevation: 20,
+    left: 0,
+    right: 0,
   },
 });

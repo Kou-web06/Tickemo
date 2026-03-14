@@ -3,7 +3,8 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TouchableWithoutF
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import { Image } from 'expo-image';
 import { FontAwesome, Ionicons, Octicons, MaterialIcons, MaterialCommunityIcons, Feather } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
+import { HugeiconsIcon } from '@hugeicons/react-native';
+import { Share06Icon, Edit01Icon, Settings03Icon, Delete01Icon, Ticket03Icon } from '@hugeicons/core-free-icons';
 import Svg, { Path, Rect, Defs, Pattern, Use, Image as SvgImage } from 'react-native-svg';
 import QRCode from 'react-native-qrcode-svg';
 import TextTicker from 'react-native-text-ticker';
@@ -17,6 +18,7 @@ import { NO_IMAGE_URI } from '../hooks/useResolvedImageUri';
 import { useTranslation } from 'react-i18next';
 import { LIVE_TYPE_ICON_MAP, normalizeLiveType, getLiveTypeLabel } from '../utils/liveType';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { DummyJacket } from './DummyJacket';
 
 interface TicketDetailProps {
   record: ChekiRecord;
@@ -33,6 +35,7 @@ interface LiveInfo {
   date: Date;
   venue: string;
   seat?: string;
+  ticketPrice?: number;
   startTime: string;
   endTime: string;
   imageUrl?: string;
@@ -45,6 +48,23 @@ interface LiveInfo {
 
 const isPersistedImageUri = (uri: string) => {
   return uri.startsWith('Tickemo/') || uri.startsWith('http://') || uri.startsWith('https://');
+};
+
+const sanitizeTicketPrice = (value: unknown): number | undefined => {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : undefined;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value
+      .replace(/[０-９]/g, (digit) => String(digit.charCodeAt(0) - 0xfee0))
+      .replace(/[^0-9]/g, '');
+    if (!normalized) return undefined;
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  return undefined;
 };
 
 const TICKET_BASE_LAYOUT = {
@@ -110,9 +130,8 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
   const toYPct = (value: number): `${number}%` => `${(value / baseHeight) * 100}%`;
   const qrSize = (TICKET_BASE_LAYOUT.qrSize / baseWidth) * ticketWidth;
   const titleTickerWidthPct = toXPct(TICKET_BASE_LAYOUT.titleTickerWidth);
-  const topBarTop = Math.max(insets.top, windowHeight * 0.010);
-  const topBarLeft = windowWidth * 0.5;
-  const topBarRight = windowWidth * 0.01 * -1;
+  const topBarBottom = Math.max(insets.bottom + 20, windowHeight * 0.045);
+  const topBarRight = Math.max(16, windowWidth * 0.04);
   const qrTopPct = toYPct(TICKET_BASE_LAYOUT.qrTop);
   const qrLeftPct = toXPct((baseWidth - TICKET_BASE_LAYOUT.qrSize) / 2);
   const qrWidthPct = toXPct(TICKET_BASE_LAYOUT.qrSize);
@@ -138,7 +157,10 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
   const isStreamingLiveType = normalizedLiveType === 'streaming';
   const liveTypeLabel = getLiveTypeLabel(normalizedLiveType, liveTypeLabels);
   const liveTypeIconName = (LIVE_TYPE_ICON_MAP[normalizedLiveType] ?? 'account') as keyof typeof MaterialCommunityIcons.glyphMap;
+  const ticketPriceValue = sanitizeTicketPrice(record.ticketPrice);
+  const ticketPriceLabel = ticketPriceValue === undefined ? '-' : `¥${ticketPriceValue.toLocaleString('ja-JP')}`;
   const coverUri = resolveLocalImageUri(record.imageUrls?.[0] ?? record.imagePath ?? '');
+  const hasCoverImage = Boolean(coverUri && coverUri !== NO_IMAGE_URI);
   const fullArtistText = useMemo(() => {
     const artists = (record.artists && record.artists.length > 0 ? record.artists : [record.artist || ''])
       .map((artist) => artist.trim())
@@ -156,6 +178,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
     date: new Date(record.date.replace(/\./g, '-')),
     venue: record.venue || '',
     seat: record.seat,
+    ticketPrice: sanitizeTicketPrice(record.ticketPrice),
     startTime: record.startTime || '18:00',
     endTime: record.endTime || '20:00',
     imageUrls: record.imageUrls,
@@ -163,7 +186,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
     memo: record.memo,
     detail: record.detail,
     setlistSongs: setlistSongs,
-  }), [record.liveName, record.artists, record.artist, record.artistImageUrls, record.artistImageUrl, record.liveType, record.date, record.venue, record.seat, record.startTime, record.endTime, record.imageUrls, record.qrCode, record.memo, record.detail, setlistSongs]);
+  }), [record.liveName, record.artists, record.artist, record.artistImageUrls, record.artistImageUrl, record.liveType, record.date, record.venue, record.seat, record.ticketPrice, record.startTime, record.endTime, record.imageUrls, record.qrCode, record.memo, record.detail, setlistSongs]);
 
   const translateY = useRef(new Animated.Value(1000)).current;
   // jacketTranslateXはtranslateYからinterpolateで算出
@@ -305,6 +328,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
         date: formatDate(info.date),
         venue: info.venue,
         seat: info.seat,
+        ticketPrice: sanitizeTicketPrice(info.ticketPrice) ?? sanitizeTicketPrice(record.ticketPrice),
         startTime: info.startTime,
         endTime: info.endTime,
         imageUrls: finalImageUrls,
@@ -387,8 +411,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
             style={[
               styles.topBar,
               {
-                top: topBarTop,
-                left: topBarLeft,
+                bottom: topBarBottom,
                 right: topBarRight,
               },
               {
@@ -403,34 +426,21 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
             ]}
           >
             <TouchableOpacity style={styles.topBarButton} onPress={handleSharePress}>
-              <BlurView intensity={10} tint="dark" style={styles.topBarButtonBlur}>
-                <Svg width={24} height={24} viewBox="0 0 24 24" fill="#fff">
-                  <Path
-                    d="M12 22.75C6.07 22.75 1.25 17.93 1.25 12C1.25 6.07 6.07 1.25 12 1.25C12.41 1.25 12.75 1.59 12.75 2C12.75 2.41 12.41 2.75 12 2.75C6.9 2.75 2.75 6.9 2.75 12C2.75 17.1 6.9 21.25 12 21.25C17.1 21.25 21.25 17.1 21.25 12C21.25 11.59 21.59 11.25 22 11.25C22.41 11.25 22.75 11.59 22.75 12C22.75 17.93 17.93 22.75 12 22.75Z"
-                    fill="white"
-                  />
-                  <Path
-                    d="M12.9999 11.7502C12.8099 11.7502 12.6199 11.6802 12.4699 11.5302C12.1799 11.2402 12.1799 10.7602 12.4699 10.4702L20.6699 2.27023C20.9599 1.98023 21.4399 1.98023 21.7299 2.27023C22.0199 2.56023 22.0199 3.04023 21.7299 3.33023L13.5299 11.5302C13.3799 11.6802 13.1899 11.7502 12.9999 11.7502Z"
-                    fill="white"
-                  />
-                  <Path
-                    d="M22 7.58C21.59 7.58 21.25 7.24 21.25 6.83V2.75H17.17C16.76 2.75 16.42 2.41 16.42 2C16.42 1.59 16.76 1.25 17.17 1.25H22C22.41 1.25 22.75 1.59 22.75 2V6.83C22.75 7.24 22.41 7.58 22 7.58Z"
-                    fill="white"
-                  />
-                </Svg>
-              </BlurView>
+              <View style={styles.topBarButtonInner}>
+                <HugeiconsIcon icon={Share06Icon} size={24} color="#FFFFFF" strokeWidth={2.0} />
+              </View>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.topBarButton} onPress={handleEditPress}>
-              <BlurView intensity={10} tint="dark" style={styles.topBarButtonBlur}>
-                <FontAwesome name="sliders" size={26} color="#FFF" />
-              </BlurView>
+              <View style={styles.topBarButtonInner}>
+                <HugeiconsIcon icon={Edit01Icon} size={24} color="#FFFFFF" strokeWidth={2.0} />
+              </View>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.topBarButton} onPress={handleDeletePress}>
-              <BlurView intensity={10} tint="dark" style={styles.topBarButtonBlur}>
-                <Octicons name="trash" size={25} color="#FF6B6B" />
-              </BlurView>
+              <View style={styles.topBarButtonInner}>
+                <HugeiconsIcon icon={Delete01Icon} size={24} color="#FF6B6B" strokeWidth={2.0} />
+              </View>
             </TouchableOpacity>
           </Animated.View>
 
@@ -515,11 +525,15 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
                   ]}
                 >
                   <View style={styles.jacketOverlay}>
-                    <Image
-                      source={{ uri: coverUri ?? NO_IMAGE_URI }}
-                      style={styles.jacketImage}
-                      contentFit="cover"
-                    />
+                    {hasCoverImage ? (
+                      <Image
+                        source={{ uri: coverUri }}
+                        style={styles.jacketImage}
+                        contentFit="cover"
+                      />
+                    ) : (
+                      <DummyJacket style={styles.jacketImage} iconSize={22} />
+                    )}
                   </View>
                 </Animated.View>
 
@@ -570,6 +584,10 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
                         <MaterialCommunityIcons name={liveTypeIconName} size={18} color="#A1A1A1" />
                       )}
                       <Text style={styles.liveTypeText}>{liveTypeLabel}</Text>
+                      <View style={styles.ticketPriceInlineRow}>
+                        <HugeiconsIcon icon={Ticket03Icon} size={16} color="#A1A1A1" strokeWidth={2.0} />
+                        <Text style={styles.ticketPriceInlineText}>{ticketPriceLabel}</Text>
+                      </View>
                     </View>
                     <Text
                       style={[styles.artistName, { top: artistTopPct, left: titleLeftPct, right: artistRightPct }]}
@@ -586,7 +604,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <Text style={[styles.infoLabel, { width: infoLabelWidthPct, textAlign: 'right' }]}>START</Text>
-                        <Text style={[styles.infoValue, { flex: 1, textAlign: 'left' }]}>{record.startTime || '18:00'}</Text>
+                        <Text style={[styles.infoValue, { flex: 1, textAlign: 'left' }]}>{record.endTime || '18:00'}</Text>
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <Text style={[styles.infoLabel, { width: infoLabelWidthPct, textAlign: 'right' }]}>VENUE</Text>
@@ -675,7 +693,10 @@ export const TicketDetailOld: React.FC<TicketDetailProps> = ({ record, onBack })
   const liveTypeLabels = t('liveEdit.liveTypes', { returnObjects: true }) as string[];
   const liveTypeLabel = getLiveTypeLabel(normalizedLiveType, liveTypeLabels);
   const liveTypeIconName = (LIVE_TYPE_ICON_MAP[normalizedLiveType] ?? 'account') as keyof typeof MaterialCommunityIcons.glyphMap;
+  const ticketPriceValue = sanitizeTicketPrice(record.ticketPrice);
+  const ticketPriceLabel = ticketPriceValue === undefined ? '-' : `¥${ticketPriceValue.toLocaleString('ja-JP')}`;
   const coverUri = resolveLocalImageUri(record.imageUrls?.[0] ?? record.imagePath ?? '');
+  const hasCoverImage = Boolean(coverUri && coverUri !== NO_IMAGE_URI);
   const fullArtistText = useMemo(() => {
     const artists = (record.artists && record.artists.length > 0 ? record.artists : [record.artist || ''])
       .map((artist) => artist.trim())
@@ -791,11 +812,15 @@ export const TicketDetailOld: React.FC<TicketDetailProps> = ({ record, onBack })
                 ]}
               >
                 <View style={styles.jacketOverlay}>
-                  <Image
-                      source={{ uri: coverUri ?? NO_IMAGE_URI }}
-                    style={styles.jacketImage}
-                    contentFit="cover"
-                  />
+                  {hasCoverImage ? (
+                    <Image
+                      source={{ uri: coverUri }}
+                      style={styles.jacketImage}
+                      contentFit="cover"
+                    />
+                  ) : (
+                    <DummyJacket style={styles.jacketImage} iconSize={18} />
+                  )}
                 </View>
               </Animated.View>
 
@@ -812,6 +837,10 @@ export const TicketDetailOld: React.FC<TicketDetailProps> = ({ record, onBack })
                       <MaterialCommunityIcons name={liveTypeIconName} size={18} color="#A1A1A1" />
                     )}
                     <Text style={styles.liveTypeText}>{liveTypeLabel}</Text>
+                    <View style={styles.ticketPriceInlineRow}>
+                      <HugeiconsIcon icon={Ticket03Icon} size={16} color="#A1A1A1" strokeWidth={2.0} />
+                      <Text style={styles.ticketPriceInlineText}>{ticketPriceLabel}</Text>
+                    </View>
                   </View>
                   <Text
                     style={[styles.artistName, (record.liveName || '').length >= 12 && { top: 75 }]}
@@ -880,32 +909,32 @@ const styles = StyleSheet.create({
   },
   topBar: {
     position: 'absolute',
-    top: 90,
-    left: 180,
-    right: -3,
+    right: 16,
+    bottom: 28,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 35,
-    paddingHorizontal: 2,
-    paddingVertical: 2,
-    shadowColor: '#323232',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+    backgroundColor: 'rgba(0, 0, 0, 0.80)',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.34,
+    shadowRadius: 14,
+    elevation: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    borderColor: 'rgba(255, 255, 255, 0.12)',
     zIndex: 100,
   },
   topBarButton: {
     overflow: 'hidden',
-    borderRadius: 30,
+    borderRadius: 24,
   },
-  topBarButtonBlur: {
-    backgroundColor: 'transparent',
+  topBarButtonInner: {
     paddingHorizontal: 10,
     paddingVertical: 10,
+    borderRadius: 24,
   },
   contentContainer: {
     position: 'absolute',
@@ -989,6 +1018,17 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   liveTypeText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#A1A1A1',
+  },
+  ticketPriceInlineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginLeft: 12,
+  },
+  ticketPriceInlineText: {
     fontSize: 14,
     fontWeight: '700',
     color: '#A1A1A1',

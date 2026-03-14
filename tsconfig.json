@@ -5,9 +5,13 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "types": [
+      "@hugeicons/core-free-icons",
+      "@hugeicons/react-native"
+    ]
   },
   "include": [
     "**/*.ts",

@@ -82,7 +82,6 @@ export default function SettingsScreen({ navigation }: any) {
     {
       title: t('settings.sections.aboutApp'),
       data: [
-        { id: 'apple-music', label: t('settings.items.appleMusic'), value: '' },
         { id: 'terms', label: t('settings.items.terms') },
         { id: 'privacy', label: t('settings.items.privacy') },
       ],
@@ -189,7 +188,6 @@ export default function SettingsScreen({ navigation }: any) {
   useEffect(() => {
     Asset.loadAsync([
       require('../assets/paywallPass.png'),
-      require('../assets/paywall/Plus.logo.png'),
     ]).catch(() => {
       // noop
     });
@@ -378,12 +376,6 @@ export default function SettingsScreen({ navigation }: any) {
                           t('settings.alerts.aboutMessage'),
                           [{ text: t('settings.common.ok') }]
                         );
-                      } else if (item.id === 'apple-music') {
-                        Alert.alert(
-                          t('settings.alerts.aboutAppleMusicTitle'),
-                          t('settings.alerts.aboutAppleMusicMessage'),
-                          [{ text: t('settings.common.ok') }]
-                        );
                       } else if (item.id === 'terms') {
                         WebBrowser.openBrowserAsync('https://traveling-fahrenheit-b9b.notion.site/Tickemo-Terms-of-Use-2f65fd5d3e2d80ba8abcda85615cde4a?source=copy_link').catch(() => {
                           Alert.alert(t('settings.common.errorTitle'), t('settings.common.openUrlFailed'));
@@ -405,7 +397,7 @@ export default function SettingsScreen({ navigation }: any) {
                     </Text>
                     <View style={styles.rowRight}>
                       {item.value && <Text style={styles.rowValue}>{item.value}</Text>}
-                      {!item.destructive && item.id !== 'about' && item.id !== 'apple-music' && item.id !== 'faq' && item.id !== 'icloud-sync' && (
+                      {!item.destructive && item.id !== 'about' && item.id !== 'faq' && item.id !== 'icloud-sync' && (
                         <MaterialIcons name="arrow-outward" size={20} color="#C7C7CC" />
                       )}
                       {(item.id === 'faq' || item.id === 'icloud-sync') && (
@@ -583,7 +575,7 @@ const styles = StyleSheet.create({
     fontWeight: '800'
   },
   paywallBannerTouchable: {
-    marginTop: 25,
+    marginTop: 15,
     marginBottom: 12,
   },
   paywallBanner: {
@@ -651,7 +643,7 @@ const styles = StyleSheet.create({
   },
   bentoGrid: {
     gap: 10,
-    marginBottom: 6,
+    marginBottom: 0,
   },
   profileCard: {
     backgroundColor: '#F8F8F8',

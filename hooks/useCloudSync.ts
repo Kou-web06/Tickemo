@@ -105,6 +105,8 @@ export const useCloudSync = () => {
           console.log('[CloudSync] Imported data from cloud');
             importData(data);
             await pullImagesFromCloud(data.lives, data.userProfile ?? null);
+            // クラウドにある画像は既に同期済みとしてマーク（不要な再アップロードを防ぐ）
+            getImagePathsFromLives(data.lives, data.userProfile ?? null).forEach((p) => pushedImagesRef.current.add(p));
       }
       
       setLastSyncTime(new Date());
@@ -113,7 +115,7 @@ export const useCloudSync = () => {
     } finally {
       setIsSyncing(false);
     }
-  }, [importData, pullImagesFromCloud]);
+  }, [importData, pullImagesFromCloud, getImagePathsFromLives]);
 
   // クラウドへ書き込む
   const pushToCloud = useCallback(async (data: typeof currentData) => {

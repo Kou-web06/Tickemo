@@ -3,6 +3,7 @@ import {
   View,
   Text,
   StyleSheet,
+  ScrollView,
   TouchableOpacity,
   Modal,
   Alert,
@@ -11,13 +12,15 @@ import {
   Easing,
   Platform,
   Linking,
+  Share as NativeShare,
   useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
-import { Feather, Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
+import { Feather } from '@expo/vector-icons';
 import { HugeiconsIcon } from '@hugeicons/react-native';
-import { CdIcon, Ticket02Icon, Invoice01Icon, AddCircleHalfDotIcon } from '@hugeicons/core-free-icons';
+import { CdIcon, Ticket02Icon, Invoice01Icon, AddCircleHalfDotIcon, MoreHorizontalCircle01Icon, Cancel01Icon, CircleLock02Icon, LookTopIcon } from '@hugeicons/core-free-icons';
 import { captureRef } from 'react-native-view-shot';
 import * as MediaLibrary from 'expo-media-library';
 import { SvgXml } from 'react-native-svg';
@@ -70,12 +73,18 @@ interface ShareImageGeneratorProps {
 }
 
 type CardType = 'ticket' | 'cd' | 'receipt';
-type ShareAction = 'save' | 'x' | 'stories' | null;
+type ShareAction = 'save' | 'stories' | 'other' | null;
+
+const LOCK_SCRIBBLE_SOURCES = [
+  require('../assets/hideParts/scribble1.png'),
+  require('../assets/hideParts/scribble2.png'),
+  require('../assets/hideParts/scribble3.png'),
+] as const;
 
 type RNShareLike = {
   shareSingle: (options: Record<string, unknown>) => Promise<unknown>;
+  open?: (options: Record<string, unknown>) => Promise<unknown>;
   Social: {
-    Twitter: string;
     InstagramStories: string;
   };
 };
@@ -83,17 +92,20 @@ type RNShareLike = {
 const getRNShare = (): RNShareLike | null => {
   try {
     const mod = require('react-native-share');
-    const share = (mod?.default ?? mod) as { shareSingle?: (options: Record<string, unknown>) => Promise<unknown> };
-    const social = mod?.Social as { Twitter?: string; InstagramStories?: string } | undefined;
+    const share = (mod?.default ?? mod) as {
+      shareSingle?: (options: Record<string, unknown>) => Promise<unknown>;
+      open?: (options: Record<string, unknown>) => Promise<unknown>;
+    };
+    const social = mod?.Social as { InstagramStories?: string } | undefined;
 
-    if (!share?.shareSingle || !social?.Twitter || !social?.InstagramStories) {
+    if (!share?.shareSingle || !social?.InstagramStories) {
       return null;
     }
 
     return {
       shareSingle: share.shareSingle,
+      open: share.open,
       Social: {
-        Twitter: social.Twitter,
         InstagramStories: social.InstagramStories,
       },
     };
@@ -102,10 +114,11 @@ const getRNShare = (): RNShareLike | null => {
   }
 };
 
-const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({ record, visible, onClose }) => {
+const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({ record, visible, onClose, onBeforeOpenPaywall }) => {
   const { t } = useTranslation();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const userProfile = useAppStore((state) => state.userProfile);
+  const isPremium = useAppStore((state) => state.isPremium);
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedAction, setSelectedAction] = useState<ShareAction>(null);
   const [captureBlurBackground, setCaptureBlurBackground] = useState(false);
@@ -166,7 +179,23 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({ record, visib
     return cachedImageUri || (coverSource ? resolveLocalImageUri(coverSource) : null) || coverSource || null;
   }, [cachedImageUri, record.imageUrls, record.imagePath]);
 
+  const isLockedPreview = !isPremium && (cardType === 'cd' || cardType === 'receipt');
+  const isActionDisabled = isGenerating || isLockedPreview;
+
+  const handleOpenPaywall = useCallback(() => {
+    if (onBeforeOpenPaywall) {
+      onBeforeOpenPaywall();
+      return;
+    }
+    Alert.alert('Upgrade to Plus', 'CD and Receipt cards are available for Plus members.');
+  }, [onBeforeOpenPaywall]);
+
   const captureImage = async (): Promise<string | null> => {
+    if (isLockedPreview) {
+      handleOpenPaywall();
+      return null;
+    }
+
     if (!viewRef.current) {
       Alert.alert(t('shareImageGenerator.alerts.error'), t('shareImageGenerator.alerts.previewNotReady'));
       return null;
@@ -212,8 +241,8 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({ record, visib
     }
   };
 
-  const handleXShare = async () => {
-    setSelectedAction('x');
+  const handleSystemShare = async () => {
+    setSelectedAction('other');
     setIsGenerating(true);
     setCaptureBlurBackground(true);
 
@@ -226,27 +255,24 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({ record, visib
       const shareUrl = uri.startsWith('file://') ? uri : `file://${uri}`;
 
       const rnShare = getRNShare();
-      if (rnShare) {
-        await rnShare.shareSingle({
-          social: rnShare.Social.Twitter,
+      if (rnShare?.open) {
+        await rnShare.open({
+          title: 'Share',
+          url: shareUrl,
+          type: 'image/png',
+          message: postText,
+          failOnCancel: false,
+        });
+      } else {
+        await NativeShare.share({
           message: postText,
           url: shareUrl,
         });
-      } else {
-        const encodedText = encodeURIComponent(postText);
-        await Linking.openURL(`https://x.com/intent/tweet?text=${encodedText}`);
       }
 
       onClose();
     } catch (error) {
-      // 連携失敗時のみテキスト投稿画面へフォールバック
-      try {
-        const postText = `${record.date || ''} ${record.artist || ''} - ${record.liveName || ''} \n #Tickemo`;
-        const encodedText = encodeURIComponent(postText);
-        await Linking.openURL(`https://x.com/intent/tweet?text=${encodedText}`);
-      } catch {
-        Alert.alert(t('shareImageGenerator.alerts.error'), t('shareImageGenerator.alerts.shareFailed'));
-      }
+      Alert.alert(t('shareImageGenerator.alerts.error'), t('shareImageGenerator.alerts.shareFailed'));
     } finally {
       setCaptureBlurBackground(false);
       setIsGenerating(false);
@@ -881,7 +907,6 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({ record, visib
           outputHeight={outputHeight}
           displayScale={displayScale}
           selectedSticker={'none'}
-          showParticipatedStamp={false}
           backgroundColor={'#FFFFFF'}
           selectedFilterId={'normal'}
           captureViewRef={viewRef}
@@ -905,15 +930,35 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({ record, visib
 
           <View style={styles.header}>
             <TouchableOpacity onPress={handleClose} activeOpacity={0.85} style={styles.closeButton}>
-              <Ionicons name="close" size={28} color="#BCBCBC" />
+              <HugeiconsIcon icon={Cancel01Icon} size={26} color="#BCBCBC" strokeWidth={2.1} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Share</Text>
           </View>
 
-          <Animated.View style={[styles.previewArea, { height: previewHeightAnim }]}>{renderPreview()}</Animated.View>
+          <ScrollView
+            style={styles.contentScroll}
+            contentContainerStyle={styles.contentScrollContainer}
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+          >
+            <Animated.View style={[styles.previewArea, { height: previewHeightAnim }]}>
+              <View style={styles.previewContainer}>
+                {renderPreview()}
 
-          <View style={styles.bottomArea}>
-            <View style={styles.switcherRow}>
+                {isLockedPreview ? (
+                  <TouchableOpacity style={styles.lockOverlayTouchable} activeOpacity={0.9} onPress={handleOpenPaywall}>
+                    <BlurView intensity={8} tint="light" style={styles.lockBlur} />
+                    <View style={styles.lockContent}>
+                      <HugeiconsIcon icon={LookTopIcon} size={34} color="#2F2F2F" strokeWidth={2.0} />
+                      <Text style={styles.lockTitle}>Upgrade to Plus</Text>
+                    </View>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            </Animated.View>
+
+            <View style={styles.bottomArea}>
+              <View style={styles.switcherRow}>
               <TouchableOpacity
                 activeOpacity={0.9}
                 onPress={() => handleSelectCardType('ticket')}
@@ -987,30 +1032,22 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({ record, visib
             <Text style={styles.shareQuestion}>where to share?</Text>
 
             <View style={styles.shareButtonsRow}>
-            <TouchableOpacity style={styles.shareAction} onPress={handleSaveImage} disabled={isGenerating} activeOpacity={0.85}>
-              <View style={styles.circleButton}>
+            <TouchableOpacity style={[styles.shareAction, isLockedPreview && styles.shareActionDisabled]} onPress={handleSaveImage} disabled={isActionDisabled} activeOpacity={0.85}>
+              <View style={[styles.circleButton, isLockedPreview && styles.circleButtonDisabled]}>
                 {isGenerating && selectedAction === 'save' ? (
                   <ActivityIndicator size="small" color="#666666" />
                 ) : (
                   <Feather name="download" size={26} color="#333333" />
                 )}
+                {isLockedPreview ? (
+                  <Image source={LOCK_SCRIBBLE_SOURCES[0]} style={styles.actionLockScribble} contentFit="contain" pointerEvents="none" />
+                ) : null}
               </View>
               <Text style={styles.shareButtonText}>save</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.shareAction} onPress={handleXShare} disabled={isGenerating} activeOpacity={0.85}>
-              <View style={[styles.circleButton, { backgroundColor: '#1c1c1c' }]}>
-                {isGenerating && selectedAction === 'x' ? (
-                  <ActivityIndicator size="small" color="#ffffff" />
-                ) : (
-                  <Image source={require('../assets/x.logo.white.png')} style={styles.xLogo} contentFit="contain" />
-                )}
-              </View>
-              <Text style={styles.shareButtonText}>x</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.shareAction} onPress={handleStoriesShare} disabled={isGenerating} activeOpacity={0.85}>
-              <View style={styles.circleButton}>
+            <TouchableOpacity style={[styles.shareAction, isLockedPreview && styles.shareActionDisabled]} onPress={handleStoriesShare} disabled={isActionDisabled} activeOpacity={0.85}>
+              <View style={[styles.circleButton, isLockedPreview && styles.circleButtonDisabled]}>
                 {isGenerating && selectedAction === 'stories' ? (
                   <ActivityIndicator size="small" color="#666666" />
                 ) : (
@@ -1023,11 +1060,34 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({ record, visib
                     />
                   </View>
                 )}
+                {isLockedPreview ? (
+                  <Image source={LOCK_SCRIBBLE_SOURCES[1]} style={styles.actionLockScribble} contentFit="contain" pointerEvents="none" />
+                ) : null}
               </View>
               <Text style={styles.shareButtonText}>stories</Text>
             </TouchableOpacity>
+
+            <TouchableOpacity style={[styles.shareAction, isLockedPreview && styles.shareActionDisabled]} onPress={handleSystemShare} disabled={isActionDisabled} activeOpacity={0.85}>
+              <View style={[styles.circleButton, isLockedPreview && styles.circleButtonDisabled]}>
+                {isGenerating && selectedAction === 'other' ? (
+                  <ActivityIndicator size="small" color="#666666" />
+                ) : (
+                  <HugeiconsIcon
+                    icon={MoreHorizontalCircle01Icon}
+                    size={28}
+                    color="#333333"
+                    strokeWidth={1.8}
+                  />
+                )}
+                {isLockedPreview ? (
+                  <Image source={LOCK_SCRIBBLE_SOURCES[2]} style={styles.actionLockScribble} contentFit="contain" pointerEvents="none" />
+                ) : null}
+              </View>
+              <Text style={styles.shareButtonText}>other</Text>
+            </TouchableOpacity>
           </View>
-        </View>
+            </View>
+          </ScrollView>
         </SafeAreaView>
       </Animated.View>
     </Modal>
@@ -1088,12 +1148,56 @@ const styles = StyleSheet.create({
     color: '#333333',
     marginLeft: 16,
   },
+  contentScroll: {
+    flex: 1,
+  },
+  contentScrollContainer: {
+    paddingBottom: 14,
+  },
   previewArea: {
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingBottom: 8,
     overflow: 'hidden',
+  },
+  previewContainer: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  lockOverlayTouchable: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 18,
+    overflow: 'hidden',
+  },
+  lockBlur: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  lockContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 22,
+    paddingVertical: 14,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.78)',
+  },
+  lockTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#2F2F2F',
   },
   previewFrame: {
     shadowColor: '#000',
@@ -1113,7 +1217,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#333333',
     textAlign: 'center',
-    marginBottom: 25,
+    marginBottom: 10,
   },
   shareButtonsRow: {
     flexDirection: 'row',
@@ -1122,6 +1226,9 @@ const styles = StyleSheet.create({
   },
   shareAction: {
     alignItems: 'center',
+  },
+  shareActionDisabled: {
+    opacity: 0.95,
   },
   circleButton: {
     width: 64,
@@ -1135,6 +1242,17 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
     elevation: 3,
+    overflow: 'visible',
+  },
+  circleButtonDisabled: {
+    backgroundColor: '#F4F4F4',
+  },
+  actionLockScribble: {
+    position: 'absolute',
+    width: 60,
+    height: 60,
+    top: 0,
+    left: 0,
   },
   shareButtonText: {
     fontSize: 12,
@@ -1194,10 +1312,6 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 12,
     borderWidth: 2,
-  },
-  xLogo: {
-    width: 20,
-    height: 20,
   },
   // シンプルCD ケーススタイル
   cdCaseContainerSimple: {

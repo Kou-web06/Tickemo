@@ -1,15 +1,4 @@
-import { Image, ImageSourcePropType } from 'react-native';
-
-export const getStatusSvgUris = () => ({
-  rookie: Image.resolveAssetSource(require('../assets/status/rookie.png')).uri,
-  expert: Image.resolveAssetSource(require('../assets/status/expert.png')).uri,
-  master: Image.resolveAssetSource(require('../assets/status/master.png')).uri,
-  legend: Image.resolveAssetSource(require('../assets/status/legend.png')).uri,
-});
-
-export const getShareCardUri = () => {
-  return Image.resolveAssetSource(require('../assets/status/shareCard.svg')).uri;
-};
+import { ImageSourcePropType } from 'react-native';
 
 export const getShareCardSource = (
   level: 'ROOKIE' | 'EXPERT' | 'MASTER' | 'LEGEND'

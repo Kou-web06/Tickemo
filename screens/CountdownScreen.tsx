@@ -1,6 +1,6 @@
 ﻿import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, StatusBar, Modal, Animated, Easing, Pressable, Linking, Share, Alert, TextInput, ScrollView, Image as RNImage, ActivityIndicator, Platform, useWindowDimensions } from 'react-native';
-import Svg, { Path, SvgXml, SvgUri } from 'react-native-svg';
+import { View, Text, StyleSheet, TouchableOpacity, StatusBar, Modal, Animated, Easing, Pressable, Linking, Share, Alert, TextInput, ScrollView, ActivityIndicator, Platform, useWindowDimensions } from 'react-native';
+import Svg, { Path, SvgXml } from 'react-native-svg';
 import QRCode from 'react-native-qrcode-svg';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -107,10 +107,8 @@ function CountdownMain({ navigation }: any) {
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { records, addRecord, updateRecord } = useRecords();
   const isPremium = useAppStore((state) => state.isPremium);
-  const pointingSvgUri = RNImage.resolveAssetSource(require('../assets/pointing.svg')).uri;
   const emptyTicketWidth = Math.min(windowWidth * 0.78, 360);
   const emptyTicketHeight = emptyTicketWidth * (470 / 280);
-  const pointIconSize = Math.min(windowWidth * 0.3, 120);
   const [showEditScreen, setShowEditScreen] = useState(false);
   const [isLoading, setIsLoading] = useState(false); // ローディング状態
   const [resolvedImageUrls, setResolvedImageUrls] = useState<string[]>([]);
@@ -657,10 +655,6 @@ function CountdownMain({ navigation }: any) {
             activeOpacity={0.9}
             onPress={handleAddLivePress}
           >
-            <View style={[styles.pointingWrapper, { top: -emptyTicketHeight * 0.19, right: emptyTicketWidth * 0.09 }]}>
-              <SvgUri uri={pointingSvgUri} width={pointIconSize} height={pointIconSize} />
-            </View>
-
             <SvgXml xml={EMPTY_TICKET_SVG} width={emptyTicketWidth} height={emptyTicketHeight} />
 
             <View style={[styles.ticketPlus, { top: emptyTicketHeight * 0.10 }]}>

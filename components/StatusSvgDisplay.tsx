@@ -1,40 +1,13 @@
-import React, { useMemo } from 'react';
-import { SvgUri } from 'react-native-svg';
-import { getStatusSvgUris } from '../utils/statusSvgs';
+import React from 'react';
+import { View } from 'react-native';
 
 interface StatusSvgDisplayProps {
   fanLevel: 'ROOKIE' | 'EXPERT' | 'MASTER' | 'LEGEND';
   style?: any;
 }
 
-const StatusSvgDisplay = React.memo(({ fanLevel, style }: StatusSvgDisplayProps) => {
-  const statusSvgUris = useMemo(() => getStatusSvgUris(), []);
-
-  const uri = useMemo(() => {
-    switch (fanLevel) {
-      case 'LEGEND':
-        return statusSvgUris.legend;
-      case 'MASTER':
-        return statusSvgUris.master;
-      case 'EXPERT':
-        return statusSvgUris.expert;
-      case 'ROOKIE':
-      default:
-        return statusSvgUris.rookie;
-    }
-  }, [fanLevel, statusSvgUris]);
-
-  const width = style?.width ?? 110;
-  const height = style?.height ?? 110;
-
-  return (
-    <SvgUri
-      uri={uri}
-      width={width}
-      height={height}
-      style={style}
-    />
-  );
+const StatusSvgDisplay = React.memo(({ style }: StatusSvgDisplayProps) => {
+  return <View style={style} />;
 });
 
 StatusSvgDisplay.displayName = 'StatusSvgDisplay';

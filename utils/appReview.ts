@@ -1,12 +1,15 @@
-import { Alert, Linking } from 'react-native';
+import { DeviceEventEmitter, Linking } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as StoreReview from 'expo-store-review';
-import i18n from '../i18n';
 
 const REVIEW_REQUESTED_KEY = '@review/hasRequestedReview';
 const TICKET_SAVE_COUNT_KEY = '@review/ticketSaveCount';
 const REVIEW_TRIGGER_COUNT = 3;
 const APP_STORE_REVIEW_URL = 'https://apps.apple.com/app/id6758604980?action=write-review';
+export const APP_REVIEW_MODAL_OPEN_EVENT = 'appReview:openPromptModal';
+export const APP_REVIEW_MODAL_RESPONSE_EVENT = 'appReview:promptModalResponse';
+
+type ReviewPromptAction = 'review' | 'later';
 
 const openAppStoreReviewPage = async (): Promise<boolean> => {
   try {
@@ -26,31 +29,23 @@ const getNumber = (raw: string | null): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const showFirstPrompt = (): Promise<void> =>
+const waitForReviewModalResponse = (): Promise<ReviewPromptAction> =>
   new Promise((resolve) => {
-    Alert.alert(
-      i18n.t('appReview.prompts.first.title'),
-      '',
-      [
-        { text: i18n.t('appReview.prompts.first.okay'), onPress: () => resolve() },
-        { text: i18n.t('appReview.prompts.first.good'), onPress: () => resolve() },
-      ],
-      { cancelable: false }
-    );
+    const subscription = DeviceEventEmitter.addListener(APP_REVIEW_MODAL_RESPONSE_EVENT, (payload?: { action?: ReviewPromptAction }) => {
+      subscription.remove();
+      resolve(payload?.action === 'review' ? 'review' : 'later');
+    });
+
+    DeviceEventEmitter.emit(APP_REVIEW_MODAL_OPEN_EVENT);
   });
 
-const showSecondPrompt = (): Promise<'review' | 'later'> =>
-  new Promise((resolve) => {
-    Alert.alert(
-      i18n.t('appReview.prompts.second.title'),
-      '',
-      [
-        { text: i18n.t('appReview.prompts.second.later'), onPress: () => resolve('later') },
-        { text: i18n.t('appReview.prompts.second.writeReview'), onPress: () => resolve('review') },
-      ],
-      { cancelable: false }
-    );
-  });
+const runReviewPromptFlow = async (): Promise<boolean> => {
+  const action = await waitForReviewModalResponse();
+  if (action === 'review') {
+    return requestAppReview();
+  }
+  return false;
+};
 
 export const requestAppReview = async (): Promise<boolean> => {
   try {
@@ -85,24 +80,20 @@ export const requestAppReview = async (): Promise<boolean> => {
 
 export const trackTicketSaveForReview = async (): Promise<void> => {
   try {
+    const currentCountRaw = await AsyncStorage.getItem(TICKET_SAVE_COUNT_KEY);
+    const nextCount = getNumber(currentCountRaw) + 1;
+    await AsyncStorage.setItem(TICKET_SAVE_COUNT_KEY, String(nextCount));
+
     const hasRequestedReview = await AsyncStorage.getItem(REVIEW_REQUESTED_KEY);
     if (hasRequestedReview === '1') {
       return;
     }
 
-    const currentCountRaw = await AsyncStorage.getItem(TICKET_SAVE_COUNT_KEY);
-    const nextCount = getNumber(currentCountRaw) + 1;
-    await AsyncStorage.setItem(TICKET_SAVE_COUNT_KEY, String(nextCount));
-
-    if (nextCount !== REVIEW_TRIGGER_COUNT) {
+    if (nextCount % REVIEW_TRIGGER_COUNT !== 0) {
       return;
     }
 
-    await showFirstPrompt();
-    const secondPromptAction = await showSecondPrompt();
-    if (secondPromptAction === 'review') {
-      await requestAppReview();
-    }
+    await runReviewPromptFlow();
   } catch (error) {
     console.warn('[AppReview] Failed to track ticket save:', error);
   }

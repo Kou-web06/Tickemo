@@ -3,6 +3,8 @@ import { NavigationContainer, StackActions } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useRef, useState } from 'react';
+import { Asset } from 'expo-asset';
+import { Image as ExpoImage } from 'expo-image';
 import { useTranslation } from 'react-i18next';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFonts, Anton_400Regular } from '@expo-google-fonts/anton';
@@ -14,6 +16,7 @@ import ProfileEditScreen from './screens/ProfileEditScreen';
 import ICloudSyncScreen from './screens/ICloudSyncScreen';
 import { PaywallScreen } from './screens';
 import { FloatingTabBar } from './components/FloatingTabBar';
+import AppReviewPromptModal from './components/AppReviewPromptModal';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { theme } from './theme';
@@ -25,7 +28,9 @@ import { setGlobalNotification } from './contexts/NotificationContext';
 import { useAppStore } from './store/useAppStore';
 import { isTestflightMode } from './utils/appMode';
 import { getPremiumStatusFromCustomerInfo, initializeRevenueCat } from './lib/revenuecat';
+import { resolveLocalImageUri } from './lib/imageUpload';
 import { APP_MAX_WIDTH } from './utils/layout';
+import type { ChekiRecord } from './types/record';
 
 // Keep the splash screen visible while we fetch fonts
 SplashScreen.preventAutoHideAsync();
@@ -41,6 +46,45 @@ const isTablet = () => {
 };
 
 const SettingsStack = createNativeStackNavigator();
+const MAX_PRELOAD_RECORD_IMAGES = 24;
+const APP_SURFACE_COLOR = '#F8F8F8';
+
+const SHARE_PRELOAD_ASSETS = [
+  require('./assets/cdFrame.png'),
+  require('./assets/receipt.png'),
+  require('./assets/tickemo_qr.png'),
+  require('./assets/x.logo.white.png'),
+  require('./assets/ticketEmpty.png'),
+  require('./assets/splash.png'),
+  require('./assets/hideParts/scribble1.png'),
+  require('./assets/hideParts/scribble2.png'),
+  require('./assets/hideParts/scribble3.png'),
+];
+
+const preloadLaunchAssets = async () => {
+  try {
+    await Asset.loadAsync(SHARE_PRELOAD_ASSETS);
+  } catch (error) {
+    console.log('[LaunchPreload] Static asset preload failed:', error);
+  }
+
+  try {
+    const lives = (useAppStore.getState().lives ?? []) as ChekiRecord[];
+    const imageUris = lives
+      .map((record) => record.imageUrls?.[0] ?? record.imagePath)
+      .filter((value): value is string => Boolean(value))
+      .map((path) => resolveLocalImageUri(path) || path)
+      .filter((uri) => Boolean(uri) && uri.startsWith('file://'))
+      .filter((uri, index, arr) => arr.indexOf(uri) === index)
+      .slice(0, MAX_PRELOAD_RECORD_IMAGES);
+
+    if (imageUris.length > 0) {
+      await ExpoImage.prefetch(imageUris, 'memory-disk');
+    }
+  } catch (error) {
+    console.log('[LaunchPreload] Record image preload failed:', error);
+  }
+};
 
 function SettingsStackScreen() {
   return (
@@ -107,7 +151,7 @@ function AppContent() {
   const { t } = useTranslation();
   const [currentPage, setCurrentPage] = useState(0); // デフォルトをCollectionタブに設定
   const [activeTabIndex, setActiveTabIndex] = useState(0);
-  const [visitedPages, setVisitedPages] = useState<Record<number, boolean>>({ 0: true, 1: true, 2: true, 3: true });
+  const [visitedPages, setVisitedPages] = useState<Record<number, boolean>>({ 0: true });
   const [pageWidth, setPageWidth] = useState(APP_MAX_WIDTH);
   const [tabTransition, setTabTransition] = useState<null | { from: number; to: number; direction: 1 | -1 }>(null);
   const tabSlideProgress = useRef(new Animated.Value(0)).current;
@@ -230,7 +274,11 @@ function AppContent() {
 
   const getPageLayerStyle = (index: number) => {
     if (!tabTransition) {
-      return [styles.pageLayer, index === currentPage ? styles.pageVisible : styles.pageHidden];
+      return [
+        styles.pageLayer,
+        index === currentPage ? styles.pageVisible : styles.pageHidden,
+        index === currentPage ? null : styles.pageDetached,
+      ];
     }
 
     if (index === tabTransition.from) {
@@ -286,7 +334,7 @@ function AppContent() {
   };
 
   return (
-    <GestureHandlerRootView style={{ flex: 1, backgroundColor: theme.colors.background.primary }}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: APP_SURFACE_COLOR }}>
       <View style={styles.container}>
         <View
           style={styles.pageStack}
@@ -439,9 +487,9 @@ export default function App() {
     const runSplashAnimation = () => {
       Animated.timing(splashAnim, {
         toValue: 1,
-        duration: 380,
+        duration: 460,
         easing: Easing.out(Easing.cubic),
-        useNativeDriver: false,
+        useNativeDriver: true,
       }).start(() => {
         if (isMounted) {
           setShowSplashOverlay(false);
@@ -451,7 +499,7 @@ export default function App() {
 
     const prepare = async () => {
       try {
-        await Promise.all([waitForFonts(), waitMinimum()]);
+        await Promise.all([waitForFonts(), waitMinimum(), preloadLaunchAssets()]);
       } catch (error) {
         console.warn('[Splash] prepare failed:', error);
       } finally {
@@ -548,42 +596,35 @@ export default function App() {
           <TabBarProvider>
             <View style={styles.appRoot}>
               {fontsLoaded ? <AppContent /> : <View style={styles.appPlaceholder} />}
+              <AppReviewPromptModal />
               {showSplashOverlay && (
                 <Animated.View
                   pointerEvents="none"
                   style={[
                     styles.splashOverlay,
                     {
-                      opacity: splashAnim.interpolate({
-                        inputRange: [0, 0.8, 1],
-                        outputRange: [1, 1, 0],
-                      }),
+                      transform: [
+                        {
+                          translateY: splashAnim.interpolate({
+                            inputRange: [0, 0.72, 1],
+                            outputRange: [0, 0, -screenHeight - 24],
+                          }),
+                        },
+                      ],
                     },
                   ]}
                 >
-                  <Animated.View
+                  <View
                     style={[
                       styles.splashImageWrap,
                       {
                         width: splashSize,
                         height: splashSize,
-                        borderRadius: splashAnim.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [0, splashSize / 2],
-                        }),
-                        transform: [
-                          {
-                            scale: splashAnim.interpolate({
-                              inputRange: [0, 1],
-                              outputRange: [1, 0.06],
-                            }),
-                          },
-                        ],
                       },
                     ]}
                   >
                     <Image source={splashImage} style={styles.splashImage} />
-                  </Animated.View>
+                  </View>
                 </Animated.View>
               )}
             </View>
@@ -597,11 +638,11 @@ export default function App() {
 const styles = StyleSheet.create({
   appRoot: {
     flex: 1,
-    backgroundColor: theme.colors.background.primary,
+    backgroundColor: APP_SURFACE_COLOR,
   },
   appPlaceholder: {
     flex: 1,
-    backgroundColor: theme.colors.background.primary,
+    backgroundColor: APP_SURFACE_COLOR,
   },
   splashOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -626,10 +667,12 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: APP_MAX_WIDTH,
     alignSelf: 'center',
-    backgroundColor: theme.colors.background.primary,
+    backgroundColor: APP_SURFACE_COLOR,
   },
   pageStack: {
     flex: 1,
+    backgroundColor: APP_SURFACE_COLOR,
+    overflow: 'hidden',
   },
   pageLayer: {
     ...StyleSheet.absoluteFillObject,
@@ -639,6 +682,9 @@ const styles = StyleSheet.create({
   },
   pageHidden: {
     opacity: 0,
+  },
+  pageDetached: {
+    display: 'none',
   },
   page: {
     flex: 1,

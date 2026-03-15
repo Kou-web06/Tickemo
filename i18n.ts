@@ -30,11 +30,16 @@ i18n.use(initReactI18next).init({
           prompts: {
             first: {
               title: 'いつもTickemoを使っていただきありがとうございます。アプリの使い心地はいかがですか？',
+              cardTitle: 'Enjoying Tickemo?',
+              cardSubtitle: '使い心地を5段階で教えてください！',
               good: '良い感じ',
               okay: 'まぁまぁかな',
+              skip: 'また今度',
             },
             second: {
               title: '今後のサービス向上のためご意見をお聞かせください！',
+              cardTitle: 'Thank You',
+              cardSubtitle: 'よければApp Storeでも評価してくれる？',
               writeReview: 'レビューを書く',
               later: 'またあとで',
             },
@@ -62,7 +67,7 @@ i18n.use(initReactI18next).init({
             appleMusic: 'Data provided by Apple Music',
             terms: '利用規約',
             privacy: 'プライバシーポリシー',
-            review: '5つ星レビューをお願いします',
+            review: 'アプリをレビューする',
             faq: 'よくある質問',
             feedback: 'フィードバック',
             sns: 'Instagram',
@@ -196,6 +201,7 @@ i18n.use(initReactI18next).init({
         },
         statistics: {
           title: 'レポート',
+          yearlyTotal: '年間合計',
           tabs: {
             artists: 'アーティスト',
             yearly: '年間',
@@ -454,6 +460,10 @@ i18n.use(initReactI18next).init({
         },
         todaySong: {
           title: '今日の1曲',
+          lyrics: {
+            loading: '歌詞を読み込み中...',
+            unavailable: 'この曲の歌詞は表示できません',
+          },
           alerts: {
             error: 'エラー',
             playbackError: '再生エラー',
@@ -484,11 +494,16 @@ i18n.use(initReactI18next).init({
           prompts: {
             first: {
               title: 'Thank you for always using Tickemo. How do you feel about the app experience?',
+              cardTitle: 'Enjoying Tickemo?',
+              cardSubtitle: 'How would you rate our service?',
               good: 'Feels great',
               okay: 'It’s okay',
+              skip: 'Maybe next time',
             },
             second: {
               title: 'Please share your feedback to help us improve the service!',
+              cardTitle: 'Thank You',
+              cardSubtitle: 'How about rating on the App Store, then?',
               writeReview: 'Write a review',
               later: 'Maybe later',
             },
@@ -516,7 +531,7 @@ i18n.use(initReactI18next).init({
             appleMusic: 'Data provided by Apple Music',
             terms: 'Terms of Use',
             privacy: 'Privacy Policy',
-            review: 'Please leave a 5-star review',
+            review: 'Review the app',
             faq: 'FAQ',
             feedback: 'Feedback',
             sns: 'Instagram',
@@ -650,6 +665,7 @@ i18n.use(initReactI18next).init({
         },
         statistics: {
           title: 'Report',
+          yearlyTotal: 'Yearly total',
           tabs: {
             artists: 'Artists',
             yearly: 'Yearly',
@@ -908,6 +924,10 @@ i18n.use(initReactI18next).init({
         },
         todaySong: {
           title: 'Today\'s Song',
+          lyrics: {
+            loading: 'Loading lyrics...',
+            unavailable: 'Lyrics are not available for this track.',
+          },
           alerts: {
             error: 'Error',
             playbackError: 'Playback Error',

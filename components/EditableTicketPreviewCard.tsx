@@ -42,7 +42,6 @@ interface EditableTicketPreviewProps {
   outputHeight: number;
   displayScale: number;
   selectedSticker: StickerType;
-  showParticipatedStamp: boolean;
   backgroundColor: string;
   selectedFilterId: TicketFilterId;
   captureViewRef: React.RefObject<View | null>;
@@ -165,7 +164,6 @@ const EditableTicketPreview: React.FC<EditableTicketPreviewProps> = ({
   outputHeight,
   displayScale,
   selectedSticker,
-  showParticipatedStamp,
   backgroundColor,
   selectedFilterId,
   captureViewRef,
@@ -209,8 +207,6 @@ const EditableTicketPreview: React.FC<EditableTicketPreviewProps> = ({
   const stickerAppearScale = useRef(new Animated.Value(1)).current;
   const stickerAppearOpacity = useRef(new Animated.Value(1)).current;
   const stickerAppearTranslateY = useRef(new Animated.Value(0)).current;
-  const participatedStampScale = useRef(new Animated.Value(1)).current;
-  const participatedStampOpacity = useRef(new Animated.Value(1)).current;
   const filterRevealProgress = useRef(new Animated.Value(0)).current;
   const dragStartRef = useRef(stickerDefaultPos);
   const lastSnapKeyRef = useRef<string>('');
@@ -279,29 +275,6 @@ const EditableTicketPreview: React.FC<EditableTicketPreviewProps> = ({
       }),
     ]).start();
   }, [selectedSticker, stickerAppearOpacity, stickerAppearScale, stickerAppearTranslateY]);
-
-  useEffect(() => {
-    if (!showParticipatedStamp) {
-      return;
-    }
-
-    participatedStampScale.setValue(0.65);
-    participatedStampOpacity.setValue(0);
-
-    Animated.parallel([
-      Animated.spring(participatedStampScale, {
-        toValue: 1,
-        useNativeDriver: true,
-        speed: 22,
-        bounciness: 12,
-      }),
-      Animated.timing(participatedStampOpacity, {
-        toValue: 0.8,
-        duration: 180,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [showParticipatedStamp, participatedStampOpacity, participatedStampScale]);
 
   const activeSvgFilterId = useMemo(() => {
     switch (selectedFilterId) {
@@ -862,25 +835,6 @@ const EditableTicketPreview: React.FC<EditableTicketPreviewProps> = ({
                   )}
                 </View>
 
-                {showParticipatedStamp && (
-                  <Animated.View
-                    style={{
-                      position: 'absolute',
-                      right: ticketWidth * 0.08,
-                      top: ticketHeight * 0.34,
-                      width: ticketHeight * 0.25,
-                      height: ticketHeight * 0.25,
-                      transform: [{ rotate: '-10deg' }, { scale: participatedStampScale }],
-                      opacity: participatedStampOpacity,
-                    }}
-                  >
-                    <Image
-                      source={require('../assets/participated.png')}
-                      style={{ width: '100%', height: '100%' }}
-                      contentFit="contain"
-                    />
-                  </Animated.View>
-                )}
               </View>
             </View>
           </View>

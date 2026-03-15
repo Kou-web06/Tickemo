@@ -31,6 +31,7 @@ const TEXT_VERY_LIGHT = '#AAAAAA';
 const BUTTON_COLOR = '#A226D9';
 const DASHED_BORDER = '#CCCCCC';
 const DEFAULT_LIFETIME_PRICE_VALUE = 480;
+const DEFAULT_ORIGINAL_PRICE_VALUE = 980;
 
 export default function PaywallScreen({ navigation }: PaywallScreenProps) {
   const { t, i18n } = useTranslation();
@@ -65,6 +66,7 @@ export default function PaywallScreen({ navigation }: PaywallScreenProps) {
   );
 
   const lifetimeFallbackPrice = formatFallbackPrice(DEFAULT_LIFETIME_PRICE_VALUE);
+  const originalFallbackPrice = formatFallbackPrice(DEFAULT_ORIGINAL_PRICE_VALUE);
   const features = (t('paywall.featureList', { returnObjects: true }) as string[]) || [
     '無制限のチケット登録',
     'シェアカード全種類を解放',
@@ -275,7 +277,9 @@ export default function PaywallScreen({ navigation }: PaywallScreenProps) {
     });
   }, [backdropOpacity, navigation, screenHeight, sheetTranslateY]);
 
-  const selectedPrice = lifetimePackage?.product?.priceString ?? lifetimeFallbackPrice;
+  const selectedPrice = languageCode === 'en'
+    ? formatFallbackPrice(Number(lifetimePackage?.product?.price ?? DEFAULT_LIFETIME_PRICE_VALUE))
+    : (lifetimePackage?.product?.priceString ?? lifetimeFallbackPrice);
 
   if (!fontsLoaded) {
     return null;
@@ -374,7 +378,7 @@ export default function PaywallScreen({ navigation }: PaywallScreenProps) {
           <Text style={styles.priceLabel}>買い切り・サブスクなし</Text>
           <Text style={styles.currentPrice}>{selectedPrice}</Text>
           <View style={styles.originalPriceWrap}>
-            <Text style={styles.originalPrice}>￥980</Text>
+            <Text style={styles.originalPrice}>{originalFallbackPrice}</Text>
             <ExpoImage
               source={require('../assets/scribble1.png')}
               style={styles.originalPriceScribble}

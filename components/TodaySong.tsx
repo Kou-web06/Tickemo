@@ -5,7 +5,7 @@ import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { requireNativeModule } from 'expo-modules-core';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { theme } from '../theme';
-import { searchAppleMusicSongs, getArtworkUrl, AppleMusicSong } from '../utils/appleMusicApi';
+import { searchAppleMusicSongs, getArtworkUrl, AppleMusicSong, getAppleMusicSongUrl } from '../utils/appleMusicApi';
 import { useTranslation } from 'react-i18next';
 
 // ネイティブモジュールの読み込み
@@ -152,7 +152,7 @@ export default function TodaySong({ artistName, developerToken }: TodaySongProps
   const handleOpenAppleMusic = async () => {
     if (!song?.id) return;
     
-    const appleMusicUrl = `https://music.apple.com/jp/song/${song.id}`;
+    const appleMusicUrl = getAppleMusicSongUrl(song.id);
     
     try {
       const canOpen = await Linking.canOpenURL(appleMusicUrl);

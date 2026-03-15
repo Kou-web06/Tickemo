@@ -18,7 +18,7 @@ interface TicketCardProps {
   animationProgress?: Animated.AnimatedInterpolation<number> | number; // 0~1, 親から連動
 }
 
-export const TicketCard: React.FC<TicketCardProps> = ({ record, width, isAnimating = false, animationDirection = 'out', onAnimationEnd, animationProgress }) => {
+const TicketCardInner: React.FC<TicketCardProps> = ({ record, width, isAnimating = false, animationDirection = 'out', onAnimationEnd, animationProgress }) => {
   const height = width * 0.366; // 118/322 ratio from SVG
   const imageSize = height * 0.619; // 73/118
   const liveName = record.liveName || '-';
@@ -249,6 +249,15 @@ export const TicketCard: React.FC<TicketCardProps> = ({ record, width, isAnimati
     </View>
   );
 };
+
+export const TicketCard = React.memo(TicketCardInner, (prev, next) => {
+  return (
+    prev.record === next.record &&
+    prev.width === next.width &&
+    prev.isAnimating === next.isAnimating &&
+    prev.animationDirection === next.animationDirection
+  );
+});
 
 const styles = StyleSheet.create({
   container: {

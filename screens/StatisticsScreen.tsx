@@ -15,6 +15,7 @@ import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
 import { BarChart } from 'react-native-gifted-charts';
+import { useTranslation } from 'react-i18next';
 import { useRecords } from '../contexts/RecordsContext';
 import { useAppStore } from '../store/useAppStore';
 import { useFonts, LINESeedJP_400Regular, LINESeedJP_700Bold } from '@expo-google-fonts/line-seed-jp';
@@ -62,6 +63,7 @@ const parseRecordDateTime = (date: string, startTime?: string) => {
 };
 
 const StatisticsScreen: React.FC = () => {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   const { records } = useRecords();
@@ -417,7 +419,7 @@ const StatisticsScreen: React.FC = () => {
           <View style={styles.spendingCard}>
             <HugeiconsIcon icon={Wallet03Icon} size={28} color={PRIMARY_COLOR} strokeWidth={1.8} />
             <View style={{ flex: 1 }}>
-              <Text style={styles.spendingLabel}>年間合計</Text>
+              <Text style={styles.spendingLabel}>{t('statistics.yearlyTotal')}</Text>
               <Text style={styles.spendingAmount}>
                 {priceHidden ? '¥ ••••••' : `¥ ${totalSpending.toLocaleString()}`}
               </Text>

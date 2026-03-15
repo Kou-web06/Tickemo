@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TouchableWithoutFeedback, Animated, Alert, Modal, useWindowDimensions } from 'react-native';
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import { Image } from 'expo-image';
+import { useNavigation } from '@react-navigation/native';
 import { FontAwesome, Ionicons, Octicons, MaterialIcons, MaterialCommunityIcons, Feather } from '@expo/vector-icons';
 import { HugeiconsIcon } from '@hugeicons/react-native';
 import { Share06Icon, Edit01Icon, Settings03Icon, Delete01Icon, Ticket03Icon } from '@hugeicons/core-free-icons';
@@ -94,6 +95,7 @@ const TICKET_BASE_LAYOUT = {
 } as const;
 
 export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) => {
+  const navigation = useNavigation<any>();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
@@ -249,7 +251,10 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
     if (onBack) {
       onBack();
     }
-  }, [onBack]);
+    setTimeout(() => {
+      navigation.navigate('Paywall');
+    }, 0);
+  }, [navigation, onBack]);
 
 
 
@@ -609,7 +614,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
                       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <Text style={[styles.infoLabel, { width: infoLabelWidthPct, textAlign: 'right' }]}>VENUE</Text>
                         {(record.venue || '-').length >= 8 ? (
-                          <View style={{ flex: 1, height: venueTickerHeightPct, justifyContent: 'center' }}>
+                          <View style={{ flex: 1, height: 28, justifyContent: 'center' }}>
                             <TextTicker
                               style={[styles.infoValue, { textAlign: 'left' }]}
                               duration={(record.venue || '-').length * 250}
@@ -850,7 +855,7 @@ export const TicketDetailOld: React.FC<TicketDetailProps> = ({ record, onBack })
                     {fullArtistText}
                   </Text>
 
-                  <View style={[styles.info, { flexDirection: 'column', gap: 12, marginTop: 40 }]}>
+                  <View style={[styles.info, { flexDirection: 'column', gap: 12, marginTop: 24 }]}>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                       <Text style={[styles.infoLabel, { width: 100, textAlign: 'right' }]}>DATE</Text>
                       <Text style={[styles.infoValue, { flex: 1, textAlign: 'left' }]}>{record.date || '-'}</Text>
@@ -987,7 +992,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   infoSection: {
-    paddingBottom: 30,
+    paddingBottom: 40,
   },
   mainTitle: {
     position: 'absolute',

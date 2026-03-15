@@ -9,7 +9,7 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { HugeiconsIcon } from '@hugeicons/react-native';
-import { Tap03Icon, Search01Icon, LayoutGridIcon, LeftToRightListDashIcon, QuoteDownIcon, QuoteUpIcon, CalendarAdd01Icon } from '@hugeicons/core-free-icons';
+import { Tap03Icon, Search01Icon, LayoutGridIcon, LeftToRightListDashIcon, CalendarAdd01Icon } from '@hugeicons/core-free-icons';
 import QRCode from 'react-native-qrcode-svg';
 import { SvgXml } from 'react-native-svg';
 import * as ImagePicker from 'expo-image-picker';
@@ -18,7 +18,6 @@ import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { TicketCard } from '../components/TicketCard';
 import { TicketDetail } from '../components/TicketDetail';
-import { AddCardButton } from '../components/AddCardButton';
 import SettingsScreen from './SettingsScreen';
 import ProfileEditScreen from './ProfileEditScreen';
 import LiveEditScreen from './LiveEditScreen';
@@ -29,7 +28,7 @@ import { useAppStore } from '../store/useAppStore';
 import { uploadImage, normalizeStoredImageUri, resolveLocalImageUri, deleteImage } from '../lib/imageUpload';
 import { saveSetlist } from '../lib/setlistDb';
 import type { SetlistItem } from '../types/setlist';
-import { getArtworkUrl, searchAppleMusicSongs, AppleMusicSong } from '../utils/appleMusicApi';
+import { getArtworkUrl, searchAppleMusicSongs, AppleMusicSong, getAppleMusicSongUrl } from '../utils/appleMusicApi';
 import { useTranslation } from 'react-i18next';
 import { normalizeLiveType } from '../utils/liveType';
 import { getAppWidth } from '../utils/layout';
@@ -65,89 +64,20 @@ const getDailyPickKey = (artistName: string, dateKey: string) => {
 
 const MAX_TODAY_SONG_HISTORY = 20;
 
-const normalizeSongTitleForLyrics = (title: string) => {
-  return title
-    .replace(/\s*\((feat\.|ft\.|with).+?\)/gi, '')
-    .replace(/\s*\[(feat\.|ft\.|with).+?\]/gi, '')
-    .replace(/\s*[-~].*$/, '')
-    .trim();
+const formatSongDuration = (durationInMillis?: number) => {
+  if (!durationInMillis || durationInMillis <= 0) return '-';
+  const totalSeconds = Math.floor(durationInMillis / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 };
 
-const pickLyricSnippet = (lyrics?: string | null): string | null => {
-  if (!lyrics) return null;
-
-  const lines = lyrics
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .filter((line) => !/^\[.*\]$/.test(line));
-
-  const firstIndex = lines.findIndex((line) => line.length >= 8);
-  const startIndex = firstIndex >= 0 ? firstIndex : 0;
-  if (!lines[startIndex]) return null;
-
-  const parts = [lines[startIndex]];
-  if (lines[startIndex + 1] && lines[startIndex + 1].length >= 4) {
-    parts.push(lines[startIndex + 1]);
-  }
-
-  const combined = parts.join(' / ');
-  return combined.length > 140 ? `${combined.slice(0, 140).trimEnd()}...` : combined;
-};
-
-const fetchWithTimeout = async (url: string, timeoutMs: number = 7000) => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    return await fetch(url, { signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-};
-
-const fetchLyricsText = async (artist: string, title: string): Promise<string | null> => {
-  const artistQ = encodeURIComponent(artist);
-  const titleQ = encodeURIComponent(title);
-
-  try {
-    const ovh = await fetchWithTimeout(`https://api.lyrics.ovh/v1/${artistQ}/${titleQ}`);
-    if (ovh.ok) {
-      const data = (await ovh.json()) as { lyrics?: string };
-      if (data.lyrics?.trim()) return data.lyrics;
-    }
-  } catch {
-    // try next source
-  }
-
-  try {
-    const lrclibGet = await fetchWithTimeout(
-      `https://lrclib.net/api/get?artist_name=${artistQ}&track_name=${titleQ}`
-    );
-    if (lrclibGet.ok) {
-      const data = (await lrclibGet.json()) as { plainLyrics?: string; syncedLyrics?: string };
-      if (data.plainLyrics?.trim()) return data.plainLyrics;
-      if (data.syncedLyrics?.trim()) return data.syncedLyrics;
-    }
-  } catch {
-    // try search endpoint
-  }
-
-  try {
-    const lrclibSearch = await fetchWithTimeout(
-      `https://lrclib.net/api/search?artist_name=${artistQ}&track_name=${titleQ}`
-    );
-    if (lrclibSearch.ok) {
-      const list = (await lrclibSearch.json()) as Array<{ plainLyrics?: string; syncedLyrics?: string }>;
-      const first = list?.[0];
-      if (first?.plainLyrics?.trim()) return first.plainLyrics;
-      if (first?.syncedLyrics?.trim()) return first.syncedLyrics;
-    }
-  } catch {
-    // no-op
-  }
-
-  return null;
+const formatReleaseDate = (releaseDate?: string) => {
+  if (!releaseDate) return '-';
+  const [year, month, day] = releaseDate.split('-');
+  if (!year) return '-';
+  if (!month || !day) return year;
+  return `${year}.${month}.${day}`;
 };
 
 const isPersistedImageUri = (uri: string) => {
@@ -264,7 +194,7 @@ const styles = StyleSheet.create({
   },
   gridColumnWrapper: {
     paddingHorizontal: 20,
-    justifyContent: 'space-between',
+    gap: 12,
   },
   gridItemShell: {
     marginBottom: 10,
@@ -835,7 +765,7 @@ const styles = StyleSheet.create({
   },
   nextLiveTitle: {
     color: '#FFFFFF',
-    fontSize: 24,
+    fontSize: 22,
     fontFamily: 'LINESeedJP_800ExtraBold',
     lineHeight: 40,
   },
@@ -844,6 +774,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: 'LINESeedJP_400Regular',
     marginTop: 4,
+    lineHeight: 17,
   },
   nextLiveMeta: {
     color: '#FFFFFF',
@@ -853,11 +784,11 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
   nextLiveCountdown: {
-    fontSize: 36,
+    fontSize: 34,
     fontWeight: 'bold',
     color: '#FFFFFF',
     lineHeight: 44,
-    marginTop: 4,
+    marginTop: 2,
   },
   nextLiveCountdownMessage: {
     fontSize: 28,
@@ -898,13 +829,13 @@ const styles = StyleSheet.create({
   todaySongArtwork: {
     width: 52,
     height: 52,
-    borderRadius: 10,
+    borderRadius: 8,
     backgroundColor: '#E9E9E9',
   },
   todaySongFallback: {
     width: 52,
     height: 52,
-    borderRadius: 10,
+    borderRadius: 8,
     backgroundColor: '#ECECEC',
     alignItems: 'center',
     justifyContent: 'center',
@@ -925,18 +856,32 @@ const styles = StyleSheet.create({
     fontFamily: 'LINESeedJP_400Regular',
     marginTop: 4,
   },
-  todaySongLyricRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    columnGap: 6,
-    paddingRight: 12,
+  todaySongMetaGrid: {
+    marginTop: 12,
+    paddingRight: 108,
+    rowGap: 6,
   },
-  todaySongLyricSnippet: {
+  todaySongMetaRow: {
+    flexDirection: 'row',
+    columnGap: 14,
+  },
+  todaySongMetaItem: {
     flex: 1,
-    color: 'rgba(255,255,255,0.9)',
-    fontSize: 11,
-    lineHeight: 16,
+    minHeight: 28,
+  },
+  todaySongMetaLabel: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 6,
+    letterSpacing: 0.7,
+    fontFamily: 'LINESeedJP_700Bold',
+    textTransform: 'uppercase',
+  },
+  todaySongMetaValue: {
+    color: 'rgba(255,255,255,0.86)',
+    fontSize: 9,
+    lineHeight: 14,
     fontFamily: 'LINESeedJP_400Regular',
+    marginTop: 2,
   },
   appleMusicBadge: {
     position: 'absolute',
@@ -1000,8 +945,59 @@ const styles = StyleSheet.create({
   },
 });
 
+const NextLiveCountdown: React.FC<{ date?: string; startTime?: string }> = React.memo(({ date, startTime }) => {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timerId = setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+
+    return () => clearInterval(timerId);
+  }, []);
+
+  const { text, isMessage } = useMemo(() => {
+    if (!date) {
+      return {
+        text: '6 : 23 : 45 : 30',
+        isMessage: false,
+      };
+    }
+
+    const targetDate = new Date(date.replace(/\./g, '-'));
+    const [hour, minute] = (startTime || '18:00')
+      .split(':')
+      .map((value) => Number(value));
+
+    if (!Number.isNaN(hour)) {
+      targetDate.setHours(hour, Number.isNaN(minute) ? 0 : minute, 0, 0);
+    }
+
+    const diff = targetDate.getTime() - now;
+    if (diff <= 0) {
+      return {
+        text: 'see you next live !!',
+        isMessage: true,
+      };
+    }
+
+    const totalSeconds = Math.max(0, Math.floor(diff / 1000));
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    return {
+      text: `${days} : ${String(hours).padStart(2, '0')} : ${String(minutes).padStart(2, '0')} : ${String(seconds).padStart(2, '0')}`,
+      isMessage: false,
+    };
+  }, [date, startTime, now]);
+
+  return <Text style={[styles.nextLiveCountdown, isMessage && styles.nextLiveCountdownMessage]}>{text}</Text>;
+});
+
 const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewRecord: (record: ChekiRecord) => Promise<void>; deleteRecord: (id: string) => Promise<void>; isPremium: boolean }> = ({ navigation, records, addNewRecord, deleteRecord, isPremium }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const setlists = useAppStore((state) => state.setlists);
@@ -1021,10 +1017,8 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
   const [searchQuery, setSearchQuery] = useState('');
   const [headerHeight, setHeaderHeight] = useState(0);
   const [isListAnimating, setIsListAnimating] = useState(false);
-  const [countdownNow, setCountdownNow] = useState(() => Date.now());
   const [isNextLiveFlipped, setIsNextLiveFlipped] = useState(false);
   const [todaySongForNextLive, setTodaySongForNextLive] = useState<AppleMusicSong | null>(null);
-  const [todaySongLyricSnippet, setTodaySongLyricSnippet] = useState<string | null>(null);
   const itemAnimations = useRef(new Map<string, Animated.Value>()).current;
   const nextLiveFlipAnim = useRef(new Animated.Value(0)).current;
   const nextLiveFlippedRef = useRef(false);
@@ -1066,14 +1060,6 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
 
     preloadCollectionImages();
   }, [records]);
-
-  useEffect(() => {
-    const timerId = setInterval(() => {
-      setCountdownNow(Date.now());
-    }, 1000);
-
-    return () => clearInterval(timerId);
-  }, []);
 
   const screenWidth = getAppWidth();
   const PADDING = Math.min(Math.max(windowWidth * 0.06, 16), 28);
@@ -1285,10 +1271,8 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
     return resolveLocalImageUri(imageUri);
   }, [nextLiveRecord]);
 
-  const countdownText = useMemo(() => {
-    if (!nextLiveRecord?.date) {
-      return '6 : 23 : 45 : 30';
-    }
+  const isNextLivePast = useMemo(() => {
+    if (!nextLiveRecord?.date) return false;
 
     const targetDate = new Date(nextLiveRecord.date.replace(/\./g, '-'));
     const [hour, minute] = (nextLiveRecord.startTime || '18:00')
@@ -1299,20 +1283,8 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
       targetDate.setHours(hour, Number.isNaN(minute) ? 0 : minute, 0, 0);
     }
 
-    const diff = targetDate.getTime() - countdownNow;
-    if (diff <= 0) {
-      return 'see you next live !!';
-    }
-
-    const totalSeconds = Math.max(0, Math.floor(diff / 1000));
-    const days = Math.floor(totalSeconds / 86400);
-    const hours = Math.floor((totalSeconds % 86400) / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-
-    return `${days} : ${String(hours).padStart(2, '0')} : ${String(minutes).padStart(2, '0')} : ${String(seconds).padStart(2, '0')}`;
-  }, [nextLiveRecord, countdownNow]);
-  const isCountdownMessage = countdownText === 'see you next live !!';
+    return targetDate.getTime() - Date.now() <= 0;
+  }, [nextLiveRecord]);
 
   useEffect(() => {
     let isActive = true;
@@ -1399,44 +1371,16 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
     return {
       title: todaySongForNextLive.attributes.name || 'Unknown song',
       artist: todaySongForNextLive.attributes.artistName || nextLiveRecord?.artist || '-',
+      album: todaySongForNextLive.attributes.albumName || '-',
+      genre: todaySongForNextLive.attributes.genreNames?.[0] || '-',
+      duration: formatSongDuration(todaySongForNextLive.attributes.durationInMillis),
+      releaseDate: formatReleaseDate(todaySongForNextLive.attributes.releaseDate),
       artworkUrl: todaySongForNextLive.attributes.artwork?.url
         ? getArtworkUrl(todaySongForNextLive.attributes.artwork.url, 200)
         : undefined,
-      appleMusicUrl: todaySongForNextLive.id ? `https://music.apple.com/jp/song/${todaySongForNextLive.id}` : undefined,
+      appleMusicUrl: todaySongForNextLive.id ? getAppleMusicSongUrl(todaySongForNextLive.id) : undefined,
     };
   }, [todaySongForNextLive, nextLiveRecord?.artist]);
-
-  useEffect(() => {
-    let isActive = true;
-
-    const fetchLyricSnippet = async () => {
-      if (!todaySongDisplay?.title || !todaySongDisplay?.artist) {
-        if (isActive) setTodaySongLyricSnippet(null);
-        return;
-      }
-
-      if (isActive) setTodaySongLyricSnippet('Loading lyrics...');
-
-      const title = normalizeSongTitleForLyrics(todaySongDisplay.title);
-      const artist = todaySongDisplay.artist.trim();
-
-      try {
-        const lyrics = await fetchLyricsText(artist, title);
-        const snippet = pickLyricSnippet(lyrics);
-        if (isActive) {
-          setTodaySongLyricSnippet(snippet || 'Lyrics are not available for this track.');
-        }
-      } catch {
-        if (isActive) setTodaySongLyricSnippet('Lyrics are not available for this track.');
-      }
-    };
-
-    void fetchLyricSnippet();
-
-    return () => {
-      isActive = false;
-    };
-  }, [todaySongDisplay?.artist, todaySongDisplay?.title]);
 
   useEffect(() => {
     nextLiveFlippedRef.current = false;
@@ -1477,12 +1421,12 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
     outputRange: ['180deg', '360deg'],
   });
 
-  // Create display data with add button at the end
+  // Create display data
   const displayData = useMemo(() => {
     if (filteredRecords.length === 0) {
       return [{ id: 'empty-state' }];
     }
-    return [...filteredRecords, { id: 'add-button' }];
+    return filteredRecords;
   }, [filteredRecords]);
 
   const handleOpenQrLink = useCallback(async () => {
@@ -1664,7 +1608,7 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
           ListHeaderComponent={
             !isSearching && nextLiveRecord ? (
               <View style={styles.nextLiveSection}>
-                <Text style={styles.nextLiveLabel}>{isCountdownMessage ? 'LAST LIVE' : 'NEXT LIVE'}</Text>
+                <Text style={styles.nextLiveLabel}>{isNextLivePast ? 'LAST LIVE' : 'NEXT LIVE'}</Text>
                 <View>
                   <ImageBackground
                     source={nextLiveImageUri ? { uri: nextLiveImageUri } : require('../assets/ticketEmpty.png')}
@@ -1703,7 +1647,7 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
                               {'\n'}
                               {`VENUE    ${nextLiveRecord.venue || '-'}`}
                             </Text>
-                            <Text style={[styles.nextLiveCountdown, isCountdownMessage && styles.nextLiveCountdownMessage]}>{countdownText}</Text>
+                            <NextLiveCountdown date={nextLiveRecord.date} startTime={nextLiveRecord.startTime} />
                           </View>
                         </View>
                         <TouchableOpacity
@@ -1755,15 +1699,28 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
                                 <Text style={styles.todaySongArtist} numberOfLines={1}>{todaySongDisplay?.artist || nextLiveRecord.artist || '-'}</Text>
                               </View>
                             </View>
-                            {todaySongLyricSnippet ? (
-                              <View style={{ marginTop: 10 }}>
-                                <View style={styles.todaySongLyricRow}>
-                                  <HugeiconsIcon icon={QuoteUpIcon} size={12} color="rgba(255,255,255,0.85)" strokeWidth={2.2} />
-                                  <Text style={styles.todaySongLyricSnippet} numberOfLines={4}>{`${todaySongLyricSnippet.replace(/[.…\s]+$/u, '')}…`}</Text>
-                                  <HugeiconsIcon icon={QuoteDownIcon} size={12} color="rgba(255,255,255,0.85)" strokeWidth={2.2} />
+                            <View style={styles.todaySongMetaGrid}>
+                              <View style={styles.todaySongMetaRow}>
+                                <View style={styles.todaySongMetaItem}>
+                                  <Text style={styles.todaySongMetaLabel}>ALBUM</Text>
+                                  <Text style={styles.todaySongMetaValue} numberOfLines={1}>{todaySongDisplay?.album || '-'}</Text>
+                                </View>
+                                <View style={styles.todaySongMetaItem}>
+                                  <Text style={styles.todaySongMetaLabel}>TIME</Text>
+                                  <Text style={styles.todaySongMetaValue} numberOfLines={1}>{todaySongDisplay?.duration || '-'}</Text>
                                 </View>
                               </View>
-                            ) : null}
+                              <View style={styles.todaySongMetaRow}>
+                                <View style={styles.todaySongMetaItem}>
+                                  <Text style={styles.todaySongMetaLabel}>GENRE</Text>
+                                  <Text style={styles.todaySongMetaValue} numberOfLines={1}>{todaySongDisplay?.genre || '-'}</Text>
+                                </View>
+                                <View style={styles.todaySongMetaItem}>
+                                  <Text style={styles.todaySongMetaLabel}>REL</Text>
+                                  <Text style={styles.todaySongMetaValue} numberOfLines={1}>{todaySongDisplay?.releaseDate || '-'}</Text>
+                                </View>
+                              </View>
+                            </View>
                           </View>
                         </View>
                         <TouchableOpacity
@@ -1800,44 +1757,6 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
               },
             ],
           } as const;
-          if (item.id === 'add-button') {
-            if (isGridLayout) {
-              return (
-                <TouchableOpacity
-                  style={[styles.gridItemShell, { width: currentCardWidth }]}
-                  onPress={handleAddPress}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.gridAddTile}>
-                    <MaterialIcons name="add" size={32} color="#B8B8B8" />
-                  </View>
-                </TouchableOpacity>
-              );
-            }
-
-            return (
-              isListAnimating ? (
-                <Animated.View style={animatedStyle}>
-                  <TouchableOpacity
-                    style={{ width: currentCardWidth, marginBottom: 12, alignSelf: isGridLayout ? 'auto' : 'center' }}
-                    onPress={handleAddPress}
-                    activeOpacity={0.7}
-                  >
-                    <AddCardButton width={currentCardWidth} />
-                  </TouchableOpacity>
-                </Animated.View>
-              ) : (
-                <TouchableOpacity
-                  style={{ width: currentCardWidth, marginBottom: 12, alignSelf: isGridLayout ? 'auto' : 'center' }}
-                  onPress={handleAddPress}
-                  activeOpacity={0.7}
-                >
-                  <AddCardButton width={currentCardWidth} />
-                </TouchableOpacity>
-              )
-            );
-          }
-
           if (item.id === 'empty-state') return null;
 
           const recordItem = item as ChekiRecord;
@@ -1964,6 +1883,10 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
           scrollEnabled
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingTop: headerContentPaddingTop, paddingBottom: listBottomPadding }}
+          windowSize={5}
+          maxToRenderPerBatch={5}
+          initialNumToRender={8}
+          removeClippedSubviews={true}
         />
         )}
       </View>
@@ -2436,23 +2359,7 @@ const CollectionStack = ({ records, addNewRecord, updateRecord, deleteRecord, na
 };
 
 export default function CollectionScreen() {
-  const { records, addRecord, updateRecord, deleteRecord, isLoading } = useRecords();
-  const navigation = useRef<any>(null);
-
-  useEffect(() => {
-    const { getGlobalNotification } = require('../contexts/NotificationContext');
-    const checkNotification = () => {
-      const notification = getGlobalNotification();
-      if (notification && navigation.current) {
-        const record = records.find((r) => r.id === notification.recordId);
-        if (record) {
-        }
-      }
-    };
-
-    const timer = setInterval(checkNotification, 100);
-    return () => clearInterval(timer);
-  }, [records]);
+  const { records, addRecord, updateRecord, deleteRecord } = useRecords();
 
   return (
     <>

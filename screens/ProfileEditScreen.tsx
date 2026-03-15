@@ -11,6 +11,8 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
+import { HugeiconsIcon } from '@hugeicons/react-native';
+import { Tick02Icon } from '@hugeicons/core-free-icons';
 import { Image as ExpoImage } from 'expo-image';
 import { BlurView } from 'expo-blur';
 import * as ImagePicker from 'expo-image-picker';
@@ -201,7 +203,7 @@ export default function ProfileEditScreen({ navigation }: any) {
             {isSaving ? (
               <ActivityIndicator color="#FFF" size="small" />
             ) : (
-              <Text style={styles.saveButtonText}>{t('profileEdit.save')}</Text>
+              <HugeiconsIcon icon={Tick02Icon} size={18} color="#FFFFFF" strokeWidth={2.4} />
             )}
           </TouchableOpacity>
         </View>
@@ -318,21 +320,15 @@ const styles = StyleSheet.create({
     color: '#000000',
   },
   saveButton: {
-    paddingHorizontal: 16,
+    width: 34,
     height: 34,
     borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#8315B1',
-    minWidth: 70,
   },
   saveButtonDisabled: {
     opacity: 0.6,
-  },
-  saveButtonText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '700',
   },
   content: {
     paddingHorizontal: 20,

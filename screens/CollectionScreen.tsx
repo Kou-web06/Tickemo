@@ -4,7 +4,6 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
-import { Asset } from 'expo-asset';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
@@ -1024,7 +1023,7 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
   const nextLiveFlippedRef = useRef(false);
   const didInitialListAnimation = useRef(false);
   const prevFilterType = useRef(filterType);
-  const prevRecordCount = useRef(records.length);
+  const prefetchedCollectionImageUris = useRef(new Set<string>()).current;
   const renderCountRef = useRef(0);
   
   renderCountRef.current++;
@@ -1038,28 +1037,28 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
   useEffect(() => {
     const preloadCollectionImages = async () => {
       try {
-        const uris = new Set<string>();
+        const nextUris: string[] = [];
         records.forEach((record) => {
           if (record.imageUrls && Array.isArray(record.imageUrls)) {
             record.imageUrls.forEach((uri) => {
-              if (uri && !uri.startsWith('file://')) {
-                uris.add(uri);
+              if (uri && !uri.startsWith('file://') && !prefetchedCollectionImageUris.has(uri)) {
+                prefetchedCollectionImageUris.add(uri);
+                nextUris.push(uri);
               }
             });
           }
         });
 
-        if (uris.size === 0) return;
+        if (nextUris.length === 0) return;
 
-        const assets = Array.from(uris).map((uri) => Asset.fromURI(uri));
-        await Promise.all(assets.map((asset) => asset.downloadAsync()));
+        await Image.prefetch(nextUris);
       } catch (error) {
         // Image preload failed, continue
       }
     };
 
     preloadCollectionImages();
-  }, [records]);
+  }, [records, prefetchedCollectionImageUris]);
 
   const screenWidth = getAppWidth();
   const PADDING = Math.min(Math.max(windowWidth * 0.06, 16), 28);
@@ -1477,11 +1476,9 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
     }
 
     const filterChanged = prevFilterType.current !== filterType;
-    const recordCountChanged = prevRecordCount.current !== records.length;
     prevFilterType.current = filterType;
-    prevRecordCount.current = records.length;
 
-    const shouldAnimate = !didInitialListAnimation.current || (!filterChanged && recordCountChanged);
+    const shouldAnimate = !didInitialListAnimation.current;
     if (!shouldAnimate) {
       setIsListAnimating(false);
       displayData.forEach((item) => {
@@ -1508,7 +1505,7 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
     Animated.stagger(70, animations).start(() => {
       setIsListAnimating(false);
     });
-  }, [displayData, itemAnimations, filterType, records.length]);
+  }, [displayData, itemAnimations, filterType]);
 
   if (!fontsLoaded) {
     return <View style={styles.listContainer} />;

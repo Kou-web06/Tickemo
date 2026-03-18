@@ -14,7 +14,7 @@ const resolveInitialLanguage = (): 'ja' | 'en' => {
 i18n.use(initReactI18next).init({
   compatibilityJSON: 'v4',
   lng: resolveInitialLanguage(),
-  fallbackLng: 'ja',
+  fallbackLng: 'en',
   supportedLngs: ['ja', 'en'],
   resources: {
     ja: {
@@ -39,7 +39,7 @@ i18n.use(initReactI18next).init({
             second: {
               title: '今後のサービス向上のためご意見をお聞かせください！',
               cardTitle: 'Thank You',
-              cardSubtitle: 'よければApp Storeでも評価してくれる？',
+              cardSubtitle: 'ぜひApp Storeであなたの声を聞かせてください！',
               writeReview: 'レビューを書く',
               later: 'またあとで',
             },
@@ -250,8 +250,10 @@ i18n.use(initReactI18next).init({
         collection: {
           title: 'コレクション',
           emptyState: {
-            title: 'コレクションは\nまだありません',
-            subtitle: '上のボタンから追加してください',
+            title: 'まだチケットがありません',
+            subtitle: '最初のライブを追加して、思い出を残そう。',
+            description: 'チケットを追加して、\nライブの思い出を残そう。',
+            cta: 'ライブを追加',
           },
           filters: {
             all: 'すべて',
@@ -716,6 +718,8 @@ i18n.use(initReactI18next).init({
           emptyState: {
             title: 'Your collection\nis empty',
             subtitle: 'Add from the button above',
+            description: "No tickets yet, let's change that.\nScan a setlist, craft your stub,\nand keep the memory.",
+            cta: 'Add your first live',
           },
           filters: {
             all: 'All',
@@ -949,6 +953,9 @@ i18n.use(initReactI18next).init({
   interpolation: {
     escapeValue: false,
   },
+  returnNull: false,
+  returnEmptyString: false,
+  parseMissingKeyHandler: (key) => key,
   react: {
     useSuspense: false,
   },

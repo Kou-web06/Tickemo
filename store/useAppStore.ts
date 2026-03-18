@@ -9,6 +9,7 @@ export interface UserProfile {
   username: string;
   avatarUri?: string;
   joinedAt: string;
+  plusStartedAt?: string;
 }
 
 export type MembershipType = 'free' | 'plus' | 'lifetime';

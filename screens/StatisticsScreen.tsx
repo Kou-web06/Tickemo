@@ -20,6 +20,7 @@ import { useRecords } from '../contexts/RecordsContext';
 import { useAppStore } from '../store/useAppStore';
 import { useFonts, LINESeedJP_400Regular, LINESeedJP_700Bold } from '@expo-google-fonts/line-seed-jp';
 import { getArtworkUrl, searchAppleMusicArtists, searchAppleMusicSongs } from '../utils/appleMusicApi';
+import { resolveLocalImageUri } from '../lib/imageUpload';
 
 const PRIMARY_COLOR = '#a328dd';
 const PRIMARY_LIGHT = '#f3d9ff';
@@ -60,6 +61,18 @@ const parseRecordDateTime = (date: string, startTime?: string) => {
   }
 
   return parsed;
+};
+
+const resolveArtistThumbUrl = (value?: string) => {
+  if (!value) return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+
+  if (/^https?:\/\//.test(trimmed)) {
+    return getArtworkUrl(trimmed, 160);
+  }
+
+  return resolveLocalImageUri(trimmed) || '';
 };
 
 const StatisticsScreen: React.FC = () => {
@@ -178,9 +191,10 @@ const StatisticsScreen: React.FC = () => {
 
     const artistMap: Record<string, { count: number; imageUrl: string }> = {};
     filtered.forEach((r) => {
-      if (r.artist) {
-        const savedImageUrl = r.artistImageUrl || r.artistImageUrls?.[0] || '';
-        const current = artistMap[r.artist];
+      const artistName = r.artist?.trim();
+      if (artistName) {
+        const savedImageUrl = resolveArtistThumbUrl(r.artistImageUrl || r.artistImageUrls?.[0] || '');
+        const current = artistMap[artistName];
 
         if (current) {
           current.count += 1;
@@ -188,7 +202,7 @@ const StatisticsScreen: React.FC = () => {
             current.imageUrl = savedImageUrl;
           }
         } else {
-          artistMap[r.artist] = {
+          artistMap[artistName] = {
             count: 1,
             imageUrl: savedImageUrl,
           };

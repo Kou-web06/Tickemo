@@ -31,11 +31,13 @@ export default function ProfileEditScreen({ navigation }: any) {
   const [avatarUrl, setAvatarUrl] = useState('');
   const [joinedAt, setJoinedAt] = useState('');
   const [firstLaunchAt, setFirstLaunchAt] = useState('');
+  const [plusStartedAt, setPlusStartedAt] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [displayNameError, setDisplayNameError] = useState('');
   const [usernameError, setUsernameError] = useState('');
   const userProfile = useAppStore((state) => state.userProfile);
+  const isPremium = useAppStore((state) => state.isPremium);
 
   useEffect(() => {
     loadProfile();
@@ -48,6 +50,36 @@ export default function ProfileEditScreen({ navigation }: any) {
       ExpoImage.prefetch(resolvedAvatarUri, 'memory-disk').catch(() => {});
     }
   }, [resolvedAvatarUri]);
+
+  useEffect(() => {
+    const ensurePlusStartedAt = async () => {
+      try {
+        const profilePlusDate = userProfile?.plusStartedAt;
+        if (profilePlusDate && !Number.isNaN(Date.parse(profilePlusDate))) {
+          setPlusStartedAt(profilePlusDate);
+          return;
+        }
+
+        const stored = await AsyncStorage.getItem('@plus_started_at');
+        if (stored && !Number.isNaN(Date.parse(stored))) {
+          setPlusStartedAt(stored);
+          return;
+        }
+
+        if (isPremium) {
+          const now = new Date().toISOString();
+          await AsyncStorage.setItem('@plus_started_at', now);
+          setPlusStartedAt(now);
+        } else {
+          setPlusStartedAt('');
+        }
+      } catch {
+        setPlusStartedAt('');
+      }
+    };
+
+    void ensurePlusStartedAt();
+  }, [isPremium, userProfile?.plusStartedAt]);
 
   const loadProfile = async () => {
     try {
@@ -114,6 +146,7 @@ export default function ProfileEditScreen({ navigation }: any) {
         username: normalizedUsername,
         avatarUri: storedAvatarUri || undefined,
         joinedAt: joinedAt || firstLaunchAt || new Date().toISOString(),
+        plusStartedAt: plusStartedAt || userProfile?.plusStartedAt,
       });
       navigation.goBack();
     } catch (error) {
@@ -233,9 +266,25 @@ export default function ProfileEditScreen({ navigation }: any) {
               <Feather name="edit-2" size={14} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
+
+          {isPremium && (
+            <ExpoImage
+              source={require('../assets/bannerPass.png')}
+              style={styles.premiumBannerImage}
+              contentFit="contain"
+              transition={0}
+            />
+          )}
+
           <View style={styles.profileMeta}>
             <Text style={styles.profileLabel}>{t('profileEdit.joined')}</Text>
             <Text style={styles.profileValue}>{joinedAt ? new Date(joinedAt).toLocaleDateString() : '-'}</Text>
+            {isPremium && (
+              <>
+                <Text style={[styles.profileLabel, styles.plusSinceLabel]}>Plus since</Text>
+                <Text style={styles.profileValue}>{plusStartedAt ? new Date(plusStartedAt).toLocaleDateString() : '-'}</Text>
+              </>
+            )}
           </View>
         </View>
 
@@ -339,6 +388,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 22,
     padding: 18,
+    overflow: 'hidden',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -390,11 +440,21 @@ const styles = StyleSheet.create({
   profileMeta: {
     alignItems: 'flex-end',
   },
+  premiumBannerImage: {
+    width: 110,
+    height: 100,
+    marginHorizontal: 10,
+    alignSelf: 'flex-start',
+    marginTop: -16,
+  },
   profileLabel: {
     fontSize: 11,
     color: '#9A9A9A',
     fontWeight: '600',
     marginBottom: 6,
+  },
+  plusSinceLabel: {
+    marginTop: 10,
   },
   profileValue: {
     fontSize: 14,

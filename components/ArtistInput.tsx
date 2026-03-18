@@ -21,7 +21,8 @@ const APPLE_MUSIC_DEVELOPER_TOKEN = 'eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI
 interface ArtistSearchResult {
   id: string;
   name: string;
-  imageUrl: string;
+  imageUrl: string;       // ドロップダウン表示用（解決済み80px）
+  templateUrl: string;   // 保存用（テンプレートURLのまま）
 }
 
 interface ArtistInputProps {
@@ -52,7 +53,7 @@ export default function ArtistInput({ value, imageUrl, onChange, placeholder, on
   // Update selectedArtist when value or imageUrl props change
   useEffect(() => {
     if (value) {
-      setSelectedArtist({ id: '', name: value, imageUrl: imageUrl || '' });
+      setSelectedArtist({ id: '', name: value, imageUrl: getArtworkUrl(imageUrl || '', 80), templateUrl: imageUrl || '' });
     } else {
       setSelectedArtist(null);
     }
@@ -63,13 +64,15 @@ export default function ArtistInput({ value, imageUrl, onChange, placeholder, on
     try {
       const artists = await searchAppleMusicArtists(term, APPLE_MUSIC_DEVELOPER_TOKEN, 10);
       
-      return artists.map((artist) => ({
-        id: artist.id,
-        name: artist.attributes.name,
-        imageUrl: artist.attributes.artwork 
-          ? getArtworkUrl(artist.attributes.artwork.url, 300)
-          : '',
-      }));
+      return artists.map((artist) => {
+        const rawTemplateUrl = artist.attributes.artwork?.url ?? '';
+        return {
+          id: artist.id,
+          name: artist.attributes.name,
+          imageUrl: rawTemplateUrl ? getArtworkUrl(rawTemplateUrl, 80) : '',
+          templateUrl: rawTemplateUrl,
+        };
+      });
     } catch (error) {
       console.error('Artist search error:', error);
       return [];
@@ -116,7 +119,8 @@ export default function ArtistInput({ value, imageUrl, onChange, placeholder, on
     setSearchTerm('');
     setSuggestions([]);
     setShowDropdown(false);
-    onChange(artist.name, artist.imageUrl);
+    // templateUrl を保存することで、表示時に任意サイズへ解決できる
+    onChange(artist.name, artist.templateUrl || artist.imageUrl);
     Keyboard.dismiss();
   };
 

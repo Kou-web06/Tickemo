@@ -695,14 +695,14 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: 'transparent',
+    backgroundColor: '#D9DEE8',
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarInitials: {
-    color: '#FFFFFF',
+    color: '#3B4454',
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: '800',
   },
   profileText: {
     flex: 1,

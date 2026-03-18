@@ -165,7 +165,13 @@ export async function searchAppleMusicSongs(
  * @returns 実際のURL
  */
 export function getArtworkUrl(templateUrl: string, size: number = 600): string {
-  return templateUrl.replace('{w}', size.toString()).replace('{h}', size.toString());
+  if (!templateUrl) return templateUrl;
+  // テンプレートURL（{w}/{h} あり）
+  if (templateUrl.includes('{w}') || templateUrl.includes('{h}')) {
+    return templateUrl.replace('{w}', size.toString()).replace('{h}', size.toString());
+  }
+  // 既に解決済みのURL（例: …/300x300bb.jpg）→ 正規表現でサイズ差し替え
+  return templateUrl.replace(/\/\d+x\d+([a-z]{0,2})\.jpg/, `/${size}x${size}$1.jpg`);
 }
 
 /**

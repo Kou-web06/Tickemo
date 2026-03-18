@@ -2,7 +2,7 @@
   "expo": {
     "name": "Tickemo",
     "slug": "Tickemo",
-    "version": "2.2.3",
+    "version": "2.2.4",
     "buildNumber": "19",
     "orientation": "portrait",
     "icon": "./assets/app-icon/icon1.png",

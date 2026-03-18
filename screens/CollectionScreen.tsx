@@ -32,6 +32,8 @@ import { useTranslation } from 'react-i18next';
 import { normalizeLiveType } from '../utils/liveType';
 import { getAppWidth } from '../utils/layout';
 import { useFonts, LINESeedJP_400Regular, LINESeedJP_700Bold, LINESeedJP_800ExtraBold } from '@expo-google-fonts/line-seed-jp';
+import { ArtistGridItem } from '../components/ArtistGridItem';
+import ArtistDetailScreen from './ArtistDetailScreen';
 
 const Stack = createNativeStackNavigator();
 const FREE_TICKET_LIMIT = 3;
@@ -194,6 +196,10 @@ const styles = StyleSheet.create({
   gridColumnWrapper: {
     paddingHorizontal: 20,
     gap: 12,
+  },
+  artistColumnWrapper: {
+    paddingHorizontal: 20,
+    gap: 16,
   },
   gridItemShell: {
     marginBottom: 10,
@@ -904,8 +910,16 @@ const styles = StyleSheet.create({
     color: '#555555',
     textAlign: 'center',
     lineHeight: 22,
-    marginBottom: 32,
+    marginBottom: 24,
     fontFamily: 'LINESeedJP_400Regular',
+  },
+  emptyStateTitle: {
+    fontSize: 22,
+    color: '#333333',
+    textAlign: 'center',
+    lineHeight: 30,
+    marginBottom: 10,
+    fontFamily: 'LINESeedJP_800ExtraBold',
   },
   emptyStateButton: {
     backgroundColor: '#A328DD',
@@ -995,6 +1009,15 @@ const NextLiveCountdown: React.FC<{ date?: string; startTime?: string }> = React
   return <Text style={[styles.nextLiveCountdown, isMessage && styles.nextLiveCountdownMessage]}>{text}</Text>;
 });
 
+interface ArtistItem {
+  id: string;
+  name: string;
+  imageUri: string | null;
+  showCount: number;
+  latestDate: string;
+  latestDateTs: number;
+}
+
 const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewRecord: (record: ChekiRecord) => Promise<void>; deleteRecord: (id: string) => Promise<void>; isPremium: boolean }> = ({ navigation, records, addNewRecord, deleteRecord, isPremium }) => {
   const { t, i18n } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -1068,6 +1091,8 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
   const gridColumns = 3;
   const gridCardWidth = Math.floor((screenWidth - gridHorizontalPadding * 2 - gridGap * (gridColumns - 1)) / gridColumns);
   const currentCardWidth = isGridLayout ? gridCardWidth : cardWidth;
+  const artistGridGap = 16;
+  const artistCardWidth = Math.floor((screenWidth - gridHorizontalPadding * 2 - artistGridGap) / 2);
   const headerMarginTop = insets.top + windowHeight * -0.045;
   const headerButtonSize = Math.min(46, Math.max(40, windowWidth * 0.11));
   const headerButtonRadius = headerButtonSize / 2;
@@ -1428,6 +1453,49 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
     return filteredRecords;
   }, [filteredRecords]);
 
+  const artistGridData = useMemo((): ArtistItem[] => {
+    if (!isGridLayout) return [];
+    const map = new Map<string, ArtistItem>();
+    filteredRecords.forEach((record) => {
+      const names =
+        record.artists && record.artists.filter(Boolean).length > 0
+          ? record.artists
+          : [record.artist ?? ''];
+      names.forEach((rawName) => {
+        const name = rawName?.trim();
+        if (!name) return;
+        const key = name.toLowerCase();
+        if (!map.has(key)) {
+          const artistImgUrl = record.artistImageUrl?.trim();
+          const chekiImgUrl = record.imageUrls?.[0];
+          const resolvedUri = artistImgUrl
+            ? resolveLocalImageUri(getArtworkUrl(artistImgUrl, 400))
+            : chekiImgUrl
+            ? resolveLocalImageUri(chekiImgUrl)
+            : null;
+          const latestDateTs = toTime(record);
+          map.set(key, {
+            id: key,
+            name,
+            imageUri: resolvedUri,
+            showCount: 0,
+            latestDate: record.date || '-',
+            latestDateTs,
+          });
+        }
+        const artistItem = map.get(key)!;
+        artistItem.showCount++;
+
+        const currentRecordDateTs = toTime(record);
+        if (currentRecordDateTs > artistItem.latestDateTs) {
+          artistItem.latestDateTs = currentRecordDateTs;
+          artistItem.latestDate = record.date || '-';
+        }
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => b.showCount - a.showCount);
+  }, [isGridLayout, filteredRecords]);
+
   const handleOpenQrLink = useCallback(async () => {
     const url = nextLiveRecord?.qrCode?.trim();
     if (!url) return;
@@ -1519,11 +1587,12 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
         contentFit="contain"
         transition={0}
       />
+      <Text style={styles.emptyStateTitle}>{t('collection.emptyState.title')}</Text>
       <Text style={styles.emptyStateSubtitle}>
-        {"No Tickets yet, let's change that.\nScan a setlist, craft your stub,\nand keep the memory."}
+        {t('collection.emptyState.subtitle')}
       </Text>
       <TouchableOpacity style={styles.emptyStateButton} activeOpacity={0.9} onPress={handleAddPress}>
-        <Text style={styles.emptyStateButtonText}>Craft Your First Memory</Text>
+        <Text style={styles.emptyStateButtonText}>{t('collection.emptyState.cta')}</Text>
       </TouchableOpacity>
     </View>
   );
@@ -1592,18 +1661,18 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
       
       <View style={{ flex: 1 }}>
         {filteredRecords.length === 0 ? (
-          <View style={{ paddingTop: headerContentPaddingTop }}>
+          <View style={{ flex: 1, paddingTop: headerContentPaddingTop }}>
             {normalizedSearchQuery ? renderSearchEmptyState() : renderEmptyState()}
           </View>
         ) : (
         <FlatList
-          key={isGridLayout ? 'collection-grid' : 'collection-list'}
-          data={displayData}
-          numColumns={isGridLayout ? 3 : 1}
-          keyExtractor={(item) => item.id}
-          columnWrapperStyle={isGridLayout ? styles.gridColumnWrapper : undefined}
+          key={isGridLayout ? 'artist-grid' : 'collection-list'}
+          data={(isGridLayout ? artistGridData : displayData) as any[]}
+          numColumns={isGridLayout ? 2 : 1}
+          keyExtractor={(item) => (item as { id: string }).id}
+          columnWrapperStyle={isGridLayout ? styles.artistColumnWrapper : undefined}
           ListHeaderComponent={
-            !isSearching && nextLiveRecord ? (
+            !isSearching && !isGridLayout && nextLiveRecord ? (
               <View style={styles.nextLiveSection}>
                 <Text style={styles.nextLiveLabel}>{isNextLivePast ? 'LAST LIVE' : 'NEXT LIVE'}</Text>
                 <View>
@@ -1742,6 +1811,20 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
             ) : null
           }
           renderItem={({ item }) => {
+          if (isGridLayout) {
+            const artistItem = item as unknown as ArtistItem;
+            return (
+              <ArtistGridItem
+                artistName={artistItem.name}
+                imageUri={artistItem.imageUri}
+                latestDate={artistItem.latestDate}
+                showCount={artistItem.showCount}
+                onPress={() => navigation.navigate('ArtistDetail', { artistName: artistItem.name })}
+                width={artistCardWidth}
+              />
+            );
+          }
+
           const itemAnim = getItemAnimation(item.id);
           const animatedStyle = {
             opacity: itemAnim,
@@ -1757,28 +1840,6 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
           if (item.id === 'empty-state') return null;
 
           const recordItem = item as ChekiRecord;
-          const gridImageUri = recordItem.imageUrls?.[0] ? resolveLocalImageUri(recordItem.imageUrls[0]) : null;
-
-          if (isGridLayout) {
-            return (
-              <TouchableOpacity
-                style={[styles.gridItemShell, { width: currentCardWidth }]}
-                onPress={() => handleCardPress(recordItem)}
-                onLongPress={() => handleLongPress(recordItem)}
-                activeOpacity={0.9}
-              >
-                <View style={styles.gridJacketButton}>
-                  {gridImageUri ? (
-                    <Image source={{ uri: gridImageUri }} style={styles.gridJacketImage} contentFit="cover" transition={120} />
-                  ) : (
-                    <View style={styles.gridJacketFallback}>
-                      <MaterialIcons name="photo" size={28} color="#A0A0A0" />
-                    </View>
-                  )}
-                </View>
-              </TouchableOpacity>
-            );
-          }
           
           // アニメーション状態の計算
           const isAnimating = animatingCardId === item.id;
@@ -2491,6 +2552,16 @@ function CollectionStackWrapper({ records, addNewRecord, updateRecord, deleteRec
       >
         {(props) => <EditScreen {...props} records={records} updateRecord={updateRecord} />}
       </Stack.Screen>
+      <Stack.Screen
+        name="ArtistDetail"
+        component={ArtistDetailScreen}
+        options={{
+          headerShown: false,
+          animation: 'slide_from_right',
+          gestureEnabled: false,
+          fullScreenGestureEnabled: false,
+        }}
+      />
     </Stack.Navigator>
   );
 }

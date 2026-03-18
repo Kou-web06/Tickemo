@@ -109,6 +109,31 @@ export default function CalendarScreen() {
   const modalCoverRadius = useMemo(() => Math.round(modalCoverSize * 0.18), [modalCoverSize]);
   const modalCoverIconSize = useMemo(() => Math.round(modalCoverSize * 0.4), [modalCoverSize]);
 
+  const calendarTheme = useMemo(() => ({
+    calendarBackground: '#F8F8F8',
+    monthTextColor: '#333333',
+    textMonthFontWeight: '800' as const,
+    textMonthFontSize: 19,
+    textDayHeaderFontSize: 12,
+    textSectionTitleColor: '#9A9A9A',
+    dayTextColor: '#333333',
+    textDisabledColor: '#C4C4C4',
+    'stylesheet.calendar.main': {
+      week: {
+        marginTop: 2,
+        marginBottom: 2,
+        flexDirection: 'row',
+        flexWrap: 'wrap' as const,
+      },
+      dayContainer: {
+        width: '14.2857%',
+        alignItems: 'center',
+        justifyContent: 'flex-start',
+        paddingHorizontal: 0,
+      },
+    },
+  }), []);
+
   const scrollToToday = React.useCallback(() => {
     const now = new Date();
     const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 12, 0, 0, 0);
@@ -131,7 +156,13 @@ export default function CalendarScreen() {
   }, [scrollToToday]);
 
   const renderDay = useCallback(({ date }: { date?: DateData }) => {
-    if (!date) return <View style={styles.dayCell} />;
+    if (!date) {
+      return (
+        <View style={styles.dayCellSlot}>
+          <View style={styles.dayCell} />
+        </View>
+      );
+    }
 
     const key = date.dateString;
     const event = eventsByDate[key];
@@ -182,13 +213,15 @@ export default function CalendarScreen() {
     }
 
     if (!hasEvent) {
-      return dayContent;
+      return <View style={styles.dayCellSlot}>{dayContent}</View>;
     }
 
     return (
-      <TouchableOpacity activeOpacity={0.75} onPress={() => setSelectedDate(key)}>
-        {dayContent}
-      </TouchableOpacity>
+      <View style={styles.dayCellSlot}>
+        <TouchableOpacity style={styles.dayPressable} activeOpacity={0.75} onPress={() => setSelectedDate(key)}>
+          {dayContent}
+        </TouchableOpacity>
+      </View>
     );
   }, [eventsByDate, recordsByDate, today]);
 
@@ -235,16 +268,7 @@ export default function CalendarScreen() {
           scrollEnabled
           calendarStyle={styles.calendarBody}
           showScrollIndicator={false}
-          theme={{
-            calendarBackground: '#F8F8F8',
-            monthTextColor: '#333333',
-            textMonthFontWeight: '800',
-            textMonthFontSize: 19,
-            textDayHeaderFontSize: 12,
-            textSectionTitleColor: '#9A9A9A',
-            dayTextColor: '#333333',
-            textDisabledColor: '#C4C4C4',
-          }}
+          theme={calendarTheme}
           onVisibleMonthsChange={(months) => {
             const firstVisible = months[0];
             if (!firstVisible) return;
@@ -356,11 +380,21 @@ const styles = StyleSheet.create({
     paddingRight: 0,
   },
   dayCell: {
-    width: 42,
+    width: '100%',
     minHeight: 68,
     alignItems: 'center',
     justifyContent: 'flex-start',
     paddingTop: 4,
+    paddingHorizontal: 1,
+  },
+  dayCellSlot: {
+    width: '14.2857%',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+  },
+  dayPressable: {
+    width: '100%',
+    alignItems: 'center',
   },
   monthHeaderWrap: {
     paddingTop: 2,

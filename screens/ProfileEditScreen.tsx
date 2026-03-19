@@ -8,6 +8,7 @@ import {
   Alert,
   ScrollView,
   ActivityIndicator,
+  DeviceEventEmitter,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
@@ -22,10 +23,37 @@ import { useAppStore } from '../store/useAppStore';
 import { normalizeStoredImageUri, resolveLocalImageUri } from '../lib/imageUpload';
 import { pushImageToCloud } from '../lib/icloudImageSync';
 import { useTranslation } from 'react-i18next';
+import { getCachedThemePreference, hydrateThemePreference } from '../lib/themePreference';
+import { useTheme } from '../src/theme';
+
+const buildPalette = (isDarkMode: boolean) => ({
+  screenBackground: isDarkMode ? '#121212' : '#F8F8F8',
+  headerBackground: isDarkMode ? 'rgba(18, 18, 18, 0.74)' : 'rgba(248, 248, 248, 0.62)',
+  headerBorder: isDarkMode ? 'rgba(255, 255, 255, 0.10)' : 'rgba(255, 255, 255, 0.45)',
+  primaryText: isDarkMode ? '#F5F5F7' : '#000000',
+  cardBackground: isDarkMode ? '#1A1A1A' : '#FFFFFF',
+  sectionShadow: isDarkMode ? '#000000' : '#D2D2D2',
+  avatarBackground: isDarkMode ? '#2B2B32' : '#111111',
+  avatarFallbackBackground: isDarkMode ? '#3A3A45' : '#1F1F1F',
+  avatarText: '#FFFFFF',
+  borderColor: isDarkMode ? '#1A1A1A' : '#FFFFFF',
+  subText: isDarkMode ? '#A1A1AA' : '#9A9A9A',
+  valueText: isDarkMode ? '#F5F5F7' : '#111111',
+  inputBackground: isDarkMode ? '#26262C' : '#F5F5F5',
+  inputText: isDarkMode ? '#F5F5F7' : '#111111',
+  placeholderText: isDarkMode ? '#8A8A94' : '#B8B8B8',
+  saveButton: '#8315B1',
+  editIcon: '#FFFFFF',
+  loadingIndicator: isDarkMode ? '#F5F5F7' : '#000000',
+});
+
+type ProfilePalette = ReturnType<typeof buildPalette>;
 
 export default function ProfileEditScreen({ navigation }: any) {
   const { t } = useTranslation();
+  const { isDark: isSystemDark } = useTheme();
   const insets = useSafeAreaInsets();
+  const [manualDarkMode, setManualDarkMode] = useState<boolean | null | undefined>(() => getCachedThemePreference());
   const [displayName, setDisplayName] = useState('');
   const [username, setUsername] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
@@ -38,6 +66,31 @@ export default function ProfileEditScreen({ navigation }: any) {
   const [usernameError, setUsernameError] = useState('');
   const userProfile = useAppStore((state) => state.userProfile);
   const isPremium = useAppStore((state) => state.isPremium);
+
+  useEffect(() => {
+    const loadThemePreference = async () => {
+      const value = await hydrateThemePreference();
+      setManualDarkMode(value);
+    };
+
+    void loadThemePreference();
+  }, []);
+
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener('theme:changed', (nextValue?: boolean) => {
+      if (typeof nextValue === 'boolean') {
+        setManualDarkMode(nextValue);
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  const isDarkMode = manualDarkMode ?? false;
+  const palette = useMemo(() => buildPalette(isDarkMode), [isDarkMode]);
+  const styles = useMemo(() => createStyles(palette), [palette]);
 
   useEffect(() => {
     loadProfile();
@@ -222,10 +275,10 @@ export default function ProfileEditScreen({ navigation }: any) {
 
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
-      <BlurView tint="light" intensity={80} style={[styles.glassHeader, { paddingTop: Math.max(insets.top, 12) }]}>
+      <BlurView tint={isDarkMode ? 'dark' : 'light'} intensity={80} style={[styles.glassHeader, { paddingTop: Math.max(insets.top, 12) }]}>
         <View style={styles.header}> 
           <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-            <Ionicons name="chevron-back" size={26} color="#000" />
+            <Ionicons name="chevron-back" size={26} color={palette.primaryText} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{t('profileEdit.title')}</Text>
           <TouchableOpacity
@@ -234,9 +287,9 @@ export default function ProfileEditScreen({ navigation }: any) {
             disabled={isSaving}
           >
             {isSaving ? (
-              <ActivityIndicator color="#FFF" size="small" />
+              <ActivityIndicator color={palette.avatarText} size="small" />
             ) : (
-              <HugeiconsIcon icon={Tick02Icon} size={18} color="#FFFFFF" strokeWidth={2.4} />
+              <HugeiconsIcon icon={Tick02Icon} size={18} color={palette.avatarText} strokeWidth={2.4} />
             )}
           </TouchableOpacity>
         </View>
@@ -263,7 +316,7 @@ export default function ProfileEditScreen({ navigation }: any) {
               style={styles.avatarEditButton}
               onPress={handlePickAvatar}
             >
-              <Feather name="edit-2" size={14} color="#FFFFFF" />
+              <Feather name="edit-2" size={14} color={palette.editIcon} />
             </TouchableOpacity>
           </View>
 
@@ -302,7 +355,7 @@ export default function ProfileEditScreen({ navigation }: any) {
               }
             }}
             placeholder={t('profileEdit.displayNamePlaceholder')}
-            placeholderTextColor="#B8B8B8"
+            placeholderTextColor={palette.placeholderText}
           />
           {!!displayNameError && <Text style={styles.errorText}>{displayNameError}</Text>}
 
@@ -319,7 +372,7 @@ export default function ProfileEditScreen({ navigation }: any) {
                 }
               }}
               placeholder={t('profileEdit.usernamePlaceholder')}
-              placeholderTextColor="#B8B8B8"
+              placeholderTextColor={palette.placeholderText}
               autoCapitalize="none"
               autoCorrect={false}
             />
@@ -330,7 +383,7 @@ export default function ProfileEditScreen({ navigation }: any) {
 
         {isLoading && (
           <View style={styles.loadingOverlay}>
-            <ActivityIndicator color="#000" />
+            <ActivityIndicator color={palette.loadingIndicator} />
           </View>
         )}
       </ScrollView>
@@ -338,15 +391,15 @@ export default function ProfileEditScreen({ navigation }: any) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (palette: ProfilePalette) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F8F8',
+    backgroundColor: palette.screenBackground,
   },
   glassHeader: {
-    backgroundColor: 'rgba(248, 248, 248, 0.62)',
+    backgroundColor: palette.headerBackground,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.45)',
+    borderBottomColor: palette.headerBorder,
     overflow: 'hidden',
     paddingHorizontal: 16,
     paddingBottom: 8,
@@ -366,7 +419,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#000000',
+    color: palette.primaryText,
   },
   saveButton: {
     width: 34,
@@ -374,7 +427,7 @@ const styles = StyleSheet.create({
     borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#8315B1',
+    backgroundColor: palette.saveButton,
   },
   saveButtonDisabled: {
     opacity: 0.6,
@@ -385,14 +438,14 @@ const styles = StyleSheet.create({
   },
   profileCard: {
     marginTop: 12,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: palette.cardBackground,
     borderRadius: 22,
     padding: 18,
     overflow: 'hidden',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    shadowColor: '#d2d2d2',
+    shadowColor: palette.sectionShadow,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
     shadowRadius: 8,
@@ -402,7 +455,7 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 71,
-    backgroundColor: '#111111',
+    backgroundColor: palette.avatarBackground,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -417,10 +470,10 @@ const styles = StyleSheet.create({
     borderRadius: 71,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#1F1F1F',
+    backgroundColor: palette.avatarFallbackBackground,
   },
   avatarInitials: {
-    color: '#FFFFFF',
+    color: palette.avatarText,
     fontSize: 22,
     fontWeight: '800',
   },
@@ -431,11 +484,11 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#111111',
+    backgroundColor: palette.avatarBackground,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: '#FFFFFF',
+    borderColor: palette.borderColor,
   },
   profileMeta: {
     alignItems: 'flex-end',
@@ -449,7 +502,7 @@ const styles = StyleSheet.create({
   },
   profileLabel: {
     fontSize: 11,
-    color: '#9A9A9A',
+    color: palette.subText,
     fontWeight: '600',
     marginBottom: 6,
   },
@@ -459,14 +512,14 @@ const styles = StyleSheet.create({
   profileValue: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#111111',
+    color: palette.valueText,
   },
   formCard: {
     marginTop: 20,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: palette.cardBackground,
     borderRadius: 22,
     padding: 18,
-    shadowColor: '#d2d2d2',
+    shadowColor: palette.sectionShadow,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
     shadowRadius: 8,
@@ -475,41 +528,41 @@ const styles = StyleSheet.create({
   sectionLabel: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#9A9A9A',
+    color: palette.subText,
     marginBottom: 10,
     marginTop: 8,
   },
   input: {
     height: 44,
     borderRadius: 14,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: palette.inputBackground,
     paddingHorizontal: 14,
     fontSize: 14,
-    color: '#111111',
+    color: palette.inputText,
   },
   usernameRow: {
     flexDirection: 'row',
     alignItems: 'center',
     height: 44,
     borderRadius: 14,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: palette.inputBackground,
     paddingHorizontal: 14,
   },
   usernamePrefix: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#111111',
+    color: palette.inputText,
     marginRight: 6,
   },
   usernameInput: {
     flex: 1,
     fontSize: 14,
-    color: '#111111',
+    color: palette.inputText,
   },
   helpText: {
     marginTop: 10,
     fontSize: 11,
-    color: '#9A9A9A',
+    color: palette.subText,
   },
   errorText: {
     marginTop: 8,

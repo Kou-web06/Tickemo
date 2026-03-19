@@ -8,8 +8,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { HugeiconsIcon } from '@hugeicons/react-native';
 import { ArrowTurnBackwardIcon } from '@hugeicons/core-free-icons';
 import * as Haptics from 'expo-haptics';
+import { useFocusEffect } from '@react-navigation/native';
 import { useRecords } from '../contexts/RecordsContext';
 import { DummyJacket } from '../components/DummyJacket';
+import { getCachedThemePreference, hydrateThemePreference } from '../lib/themePreference';
+import { useTheme } from '../src/theme';
 
 type EventType = 'past' | 'future';
 
@@ -20,6 +23,37 @@ interface CalendarEvent {
 
 const SCRIBBLE_IMAGE = require('../assets/shareCard/cardParts/scribble.png');
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
+
+const buildPalette = (isDarkMode: boolean) => ({
+  background: isDarkMode ? '#121212' : '#F8F8F8',
+  headerBackground: isDarkMode ? 'rgba(18, 18, 18, 0.74)' : 'rgba(248, 248, 248, 0.62)',
+  headerBorder: isDarkMode ? 'rgba(255, 255, 255, 0.10)' : 'rgba(255, 255, 255, 0.45)',
+  weekdayBorder: isDarkMode ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.4)',
+  weekdayBackground: isDarkMode ? 'rgba(24, 24, 24, 0.45)' : 'rgba(248, 248, 248, 0.18)',
+  title: isDarkMode ? '#F5F5F7' : '#333333',
+  weekday: isDarkMode ? '#B7B7C2' : '#7A7A7A',
+  weekdayWeekend: isDarkMode ? '#8F8F9A' : '#A9A9A9',
+  monthHeader: isDarkMode ? '#BCBCC8' : '#626262',
+  dayText: isDarkMode ? '#F5F5F7' : '#333333',
+  dayWeekend: isDarkMode ? '#8F8F9A' : '#A9A9A9',
+  daySelected: '#A226D9',
+  daySelectedBackground: isDarkMode ? '#2A2234' : '#F3E5FA',
+  calendarDisabled: isDarkMode ? '#4A4A55' : '#C4C4C4',
+  coverFallback: isDarkMode ? '#34343B' : '#EAEAEA',
+  modalBackdrop: 'rgba(0, 0, 0, 0.32)',
+  modalCard: isDarkMode ? '#1A1A1A' : '#FFFFFF',
+  modalItem: isDarkMode ? '#26262C' : '#F7F7F7',
+  modalCoverFallback: isDarkMode ? '#32323A' : '#E7E7E7',
+  modalTitle: isDarkMode ? '#F5F5F7' : '#333333',
+  modalTextStrong: isDarkMode ? '#ECECF3' : '#2F2F2F',
+  modalText: isDarkMode ? '#B7B7C2' : '#666666',
+  modalCloseIcon: isDarkMode ? '#B7B7C2' : '#7A7A7A',
+  backToCurrentButton: '#A226D9',
+  backToCurrentIcon: '#FFFFFF',
+  buttonShadow: isDarkMode ? '#000000' : '#6C3A8D',
+});
+
+type CalendarPalette = ReturnType<typeof buildPalette>;
 
 const toIsoDate = (date: Date) => {
   const yyyy = date.getFullYear();
@@ -43,9 +77,11 @@ const parseRecordDate = (value?: string) => {
 };
 
 export default function CalendarScreen() {
+  const { isDark: isSystemDark } = useTheme();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   const { records } = useRecords();
+  const [manualDarkMode, setManualDarkMode] = React.useState<boolean | null | undefined>(() => getCachedThemePreference());
   const today = useMemo(() => toIsoDate(new Date()), []);
   const todayMonthKey = useMemo(() => today.slice(0, 7), [today]);
   const initialMonthLabel = useMemo(() => {
@@ -56,6 +92,37 @@ export default function CalendarScreen() {
   const [selectedDate, setSelectedDate] = React.useState<string | null>(null);
   const [visibleMonthKey, setVisibleMonthKey] = React.useState(todayMonthKey);
   const [currentMonth, setCurrentMonth] = React.useState(initialMonthLabel);
+
+  const loadThemePreference = React.useCallback(async () => {
+    const value = await hydrateThemePreference();
+    setManualDarkMode(value);
+  }, []);
+
+  React.useEffect(() => {
+    void loadThemePreference();
+  }, [loadThemePreference]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      void loadThemePreference();
+    }, [loadThemePreference])
+  );
+
+  React.useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener('theme:changed', (nextValue?: boolean) => {
+      if (typeof nextValue === 'boolean') {
+        setManualDarkMode(nextValue);
+      } else {
+        void loadThemePreference();
+      }
+    });
+
+    return () => subscription.remove();
+  }, [loadThemePreference]);
+
+  const isDarkMode = manualDarkMode ?? false;
+  const palette = useMemo(() => buildPalette(isDarkMode), [isDarkMode]);
+  const styles = useMemo(() => createStyles(palette), [palette]);
 
   const eventsByDate = useMemo(() => {
     const now = new Date();
@@ -110,14 +177,14 @@ export default function CalendarScreen() {
   const modalCoverIconSize = useMemo(() => Math.round(modalCoverSize * 0.4), [modalCoverSize]);
 
   const calendarTheme = useMemo(() => ({
-    calendarBackground: '#F8F8F8',
-    monthTextColor: '#333333',
+    calendarBackground: palette.background,
+    monthTextColor: palette.title,
     textMonthFontWeight: '800' as const,
     textMonthFontSize: 19,
     textDayHeaderFontSize: 12,
-    textSectionTitleColor: '#9A9A9A',
-    dayTextColor: '#333333',
-    textDisabledColor: '#C4C4C4',
+    textSectionTitleColor: palette.weekday,
+    dayTextColor: palette.dayText,
+    textDisabledColor: palette.calendarDisabled,
     'stylesheet.calendar.main': {
       week: {
         marginTop: 2,
@@ -132,7 +199,7 @@ export default function CalendarScreen() {
         paddingHorizontal: 0,
       },
     },
-  }), []);
+  }), [palette.background, palette.calendarDisabled, palette.dayText, palette.title, palette.weekday]);
 
   const scrollToToday = React.useCallback(() => {
     const now = new Date();
@@ -146,6 +213,7 @@ export default function CalendarScreen() {
   }, []);
 
   const showBackToCurrentMonth = visibleMonthKey !== todayMonthKey;
+  const calendarRenderKey = `calendar-${isDarkMode ? 'dark' : 'light'}`;
 
   React.useEffect(() => {
     const subscription = DeviceEventEmitter.addListener('calendar:scrollToToday', () => {
@@ -169,7 +237,7 @@ export default function CalendarScreen() {
     const hasEvent = Boolean(recordsByDate[key]?.length);
     const todaySelected = key === today;
     const weekend = isWeekend(key);
-    const defaultDayColor = weekend ? '#A9A9A9' : '#333333';
+    const defaultDayColor = weekend ? palette.dayWeekend : palette.dayText;
 
     let dayContent: React.ReactNode;
 
@@ -177,7 +245,7 @@ export default function CalendarScreen() {
       dayContent = (
         <View style={styles.dayCell}>
           <View style={[styles.todayCircle, todaySelected && styles.todayCircleActive]}>
-            <Text style={[styles.dayNumber, { color: todaySelected ? '#A226D9' : defaultDayColor }]}>{date.day}</Text>
+            <Text style={[styles.dayNumber, { color: todaySelected ? palette.daySelected : defaultDayColor }]}>{date.day}</Text>
           </View>
           {event.imageUrl ? (
             <Image source={{ uri: event.imageUrl }} style={styles.coverArt} contentFit="cover" />
@@ -191,7 +259,7 @@ export default function CalendarScreen() {
         <View style={styles.dayCell}>
           <View style={[styles.todayCircle, styles.futureDateWrap, todaySelected && styles.todayCircleActive]}>
             <Image source={SCRIBBLE_IMAGE} style={styles.dateScribble} contentFit="contain" />
-            <Text style={[styles.dayNumber, { color: todaySelected ? '#A226D9' : defaultDayColor }]}>{date.day}</Text>
+            <Text style={[styles.dayNumber, { color: todaySelected ? palette.daySelected : defaultDayColor }]}>{date.day}</Text>
           </View>
           <View style={styles.futureWrap}>
             {event.imageUrl ? (
@@ -206,7 +274,7 @@ export default function CalendarScreen() {
       dayContent = (
         <View style={styles.dayCell}>
           <View style={[styles.todayCircle, todaySelected && styles.todayCircleActive]}>
-            <Text style={[styles.dayNumber, { color: todaySelected ? '#A226D9' : defaultDayColor }]}>{date.day}</Text>
+            <Text style={[styles.dayNumber, { color: todaySelected ? palette.daySelected : defaultDayColor }]}>{date.day}</Text>
           </View>
         </View>
       );
@@ -223,7 +291,7 @@ export default function CalendarScreen() {
         </TouchableOpacity>
       </View>
     );
-  }, [eventsByDate, recordsByDate, today]);
+  }, [eventsByDate, palette.daySelected, palette.dayText, palette.dayWeekend, recordsByDate, styles, today]);
 
   const renderMonthHeader = useCallback((date?: string) => {
     if (!date) {
@@ -237,11 +305,11 @@ export default function CalendarScreen() {
         <Text style={styles.monthHeaderText}>{month}</Text>
       </View>
     );
-  }, []);
+  }, [styles.monthHeaderText, styles.monthHeaderWrap]);
 
   return (
     <View style={styles.container}>
-      <BlurView tint="light" intensity={80} style={[styles.fixedHeader, { paddingTop: insets.top + 8 }]}>
+      <BlurView tint={isDarkMode ? 'dark' : 'light'} intensity={80} style={[styles.fixedHeader, { paddingTop: insets.top + 8 }]}>
         <Text style={styles.title}>{currentMonth}</Text>
         <View style={styles.weekdayRow}>
           {WEEKDAYS.map((weekday, index) => {
@@ -257,6 +325,7 @@ export default function CalendarScreen() {
 
       <View style={[styles.calendarWrap, { paddingBottom: Math.max(96, insets.bottom + 86) }]}>
         <CalendarList
+          key={calendarRenderKey}
           ref={calendarRef}
           current={today}
           pastScrollRange={72}
@@ -273,8 +342,9 @@ export default function CalendarScreen() {
             const firstVisible = months[0];
             if (!firstVisible) return;
             const next = `${firstVisible.year}-${String(firstVisible.month).padStart(2, '0')}`;
+            const nextLabel = `${firstVisible.year}年 ${firstVisible.month}月`;
             setVisibleMonthKey((prev) => (prev === next ? prev : next));
-            setCurrentMonth(`${firstVisible.year}年 ${firstVisible.month}月`);
+            setCurrentMonth((prev) => (prev === nextLabel ? prev : nextLabel));
           }}
           dayComponent={renderDay}
         />
@@ -286,7 +356,7 @@ export default function CalendarScreen() {
           activeOpacity={0.9}
           onPress={scrollToToday}
         >
-          <HugeiconsIcon icon={ArrowTurnBackwardIcon} size={18} color="#FFFFFF" strokeWidth={2.1} />
+          <HugeiconsIcon icon={ArrowTurnBackwardIcon} size={18} color={palette.backToCurrentIcon} strokeWidth={2.1} />
         </TouchableOpacity>
       ) : null}
 
@@ -296,7 +366,7 @@ export default function CalendarScreen() {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{selectedDate ? selectedDate.replace(/-/g, '.') : ''}</Text>
               <TouchableOpacity style={styles.modalCloseButton} onPress={() => setSelectedDate(null)}>
-                <Ionicons name="close" size={22} color="#7A7A7A" />
+                <Ionicons name="close" size={22} color={palette.modalCloseIcon} />
               </TouchableOpacity>
             </View>
 
@@ -338,21 +408,21 @@ export default function CalendarScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (palette: CalendarPalette) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F8F8',
+    backgroundColor: palette.background,
   },
   fixedHeader: {
-    backgroundColor: 'rgba(248, 248, 248, 0.62)',
+    backgroundColor: palette.headerBackground,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.45)',
+    borderBottomColor: palette.headerBorder,
     overflow: 'hidden',
   },
   title: {
     fontSize: 28,
     fontWeight: '800',
-    color: '#333333',
+    color: palette.title,
     marginLeft: 20,
     marginBottom: 10,
   },
@@ -361,16 +431,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.4)',
-    backgroundColor: 'rgba(248, 248, 248, 0.18)',
+    borderBottomColor: palette.weekdayBorder,
+    backgroundColor: palette.weekdayBackground,
   },
   weekdayText: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#7A7A7A',
+    color: palette.weekday,
   },
   weekendWeekdayText: {
-    color: '#A9A9A9',
+    color: palette.weekdayWeekend,
   },
   calendarWrap: {
     flex: 1,
@@ -405,12 +475,12 @@ const styles = StyleSheet.create({
   monthHeaderText: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#626262',
+    color: palette.monthHeader,
   },
   dayNumber: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#333333',
+    color: palette.dayText,
   },
   coverArt: {
     width: 32,
@@ -423,7 +493,7 @@ const styles = StyleSheet.create({
     height: 32,
     borderRadius: 8,
     marginTop: 6,
-    backgroundColor: '#EAEAEA',
+    backgroundColor: palette.coverFallback,
   },
   futureWrap: {
     width: 32,
@@ -456,17 +526,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   todayCircleActive: {
-    backgroundColor: '#F3E5FA',
+    backgroundColor: palette.daySelectedBackground,
     borderRadius: 30,
   },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.28)',
+    backgroundColor: palette.modalBackdrop,
     justifyContent: 'center',
     paddingHorizontal: 20,
   },
   modalCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: palette.modalCard,
     borderRadius: 18,
     maxHeight: '75%',
     paddingHorizontal: 24,
@@ -482,7 +552,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#333333',
+    color: palette.modalTitle,
   },
   modalClose: {
     fontSize: 14,
@@ -505,7 +575,7 @@ const styles = StyleSheet.create({
     gap: 10,
     padding: 10,
     borderRadius: 12,
-    backgroundColor: '#F7F7F7',
+    backgroundColor: palette.modalItem,
   },
   modalCover: {
     width: 56,
@@ -516,7 +586,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 10,
-    backgroundColor: '#E7E7E7',
+    backgroundColor: palette.modalCoverFallback,
   },
   modalInfo: {
     flex: 1,
@@ -525,11 +595,11 @@ const styles = StyleSheet.create({
   modalLiveName: {
     fontSize: 14,
     fontWeight: '800',
-    color: '#2F2F2F',
+    color: palette.modalTextStrong,
   },
   modalMeta: {
     fontSize: 12,
-    color: '#666666',
+    color: palette.modalText,
     marginTop: 2,
   },
   backToCurrentButton: {
@@ -537,11 +607,11 @@ const styles = StyleSheet.create({
     right: 18,
     width: 44,
     height: 44,
-    backgroundColor: '#A226D9',
+    backgroundColor: palette.backToCurrentButton,
     borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#6C3A8D',
+    shadowColor: palette.buttonShadow,
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.2,
     shadowRadius: 12,

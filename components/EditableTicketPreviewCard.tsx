@@ -58,7 +58,7 @@ interface SnapResult {
   kind: SnapKind;
 }
 
-const STICKER_IMAGES: Record<Exclude<StickerType, 'none'>, any> = {
+const STICKER_IMAGES: Partial<Record<Exclude<StickerType, 'none'>, any>> = {
   // Sticker images have been removed
 };
 
@@ -671,7 +671,7 @@ const EditableTicketPreview: React.FC<EditableTicketPreviewProps> = ({
                         fontWeight: '800',
                       }}
                     >
-                      {record.startTime || '18:00'}
+                      {record.endTime || record.startTime || '18:00'}
                     </Text>
                   </View>
 

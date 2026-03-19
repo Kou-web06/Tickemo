@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   ScrollView,
@@ -9,10 +10,13 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import { HugeiconsIcon } from '@hugeicons/react-native';
+import { Infinity01Icon, CdIcon, HeartAddIcon } from '@hugeicons/core-free-icons';
 import { Image as ExpoImage } from 'expo-image';
 import * as WebBrowser from 'expo-web-browser';
+import { BlurView } from 'expo-blur';
 import Purchases, { type PurchasesPackage } from 'react-native-purchases';
 import { getPremiumStatusFromCustomerInfo } from '../lib/revenuecat';
 import { useAppStore } from '../store/useAppStore';
@@ -28,13 +32,14 @@ const TEXT_DARK = '#333333';
 const TEXT_MEDIUM = '#555555';
 const TEXT_LIGHT = '#888888';
 const TEXT_VERY_LIGHT = '#AAAAAA';
-const BUTTON_COLOR = '#A226D9';
+const BUTTON_COLOR = '#8B5CF6';
 const DASHED_BORDER = '#CCCCCC';
 const DEFAULT_LIFETIME_PRICE_VALUE = 480;
 const DEFAULT_ORIGINAL_PRICE_VALUE = 980;
 
 export default function PaywallScreen({ navigation }: PaywallScreenProps) {
   const { t, i18n } = useTranslation();
+  const insets = useSafeAreaInsets();
   const setRevenueCatState = useAppStore((state) => state.setRevenueCatState);
   const { height: screenHeight, width: screenWidth } = useWindowDimensions();
   const [fontsLoaded] = useFonts({
@@ -67,11 +72,8 @@ export default function PaywallScreen({ navigation }: PaywallScreenProps) {
 
   const lifetimeFallbackPrice = formatFallbackPrice(DEFAULT_LIFETIME_PRICE_VALUE);
   const originalFallbackPrice = formatFallbackPrice(DEFAULT_ORIGINAL_PRICE_VALUE);
-  const features = (t('paywall.featureList', { returnObjects: true }) as string[]) || [
-    '無制限のチケット登録',
-    'シェアカード全種類を解放',
-    '今後の新機能もすべて無料',
-  ];
+  const benefits = (t('paywall.benefits', { returnObjects: true }) as Array<{ title: string; description: string }>) || [];
+  const benefitIcons = [Infinity01Icon, CdIcon, HeartAddIcon] as const;
 
   useEffect(() => {
     // Animate in
@@ -198,6 +200,20 @@ export default function PaywallScreen({ navigation }: PaywallScreenProps) {
     return false;
   }, [applyCustomerInfoToStore, sleep]);
 
+  const showPurchaseSuccessAlert = useCallback(() => {
+    Alert.alert(
+      t('paywall.alerts.purchaseRecovered', { defaultValue: '購入が完了しました' }),
+      '',
+      [
+        {
+          text: 'OK',
+          onPress: () => navigation.goBack(),
+        },
+      ],
+      { cancelable: false }
+    );
+  }, [navigation, t]);
+
   const handlePurchase = useCallback(async () => {
     if (isPurchasing) {
       return;
@@ -221,7 +237,7 @@ export default function PaywallScreen({ navigation }: PaywallScreenProps) {
           return;
         }
       }
-      navigation.goBack();
+      showPurchaseSuccessAlert();
     } catch (error: any) {
       if (error?.userCancelled) {
         return;
@@ -237,12 +253,7 @@ export default function PaywallScreen({ navigation }: PaywallScreenProps) {
           const recovered = await waitForPremiumGrant();
 
           if (recovered) {
-            Alert.alert(t('paywall.alerts.purchaseRecovered'), '', [
-              {
-                text: 'OK',
-                onPress: () => navigation.goBack(),
-              },
-            ], { cancelable: false });
+            showPurchaseSuccessAlert();
             return;
           }
 
@@ -258,7 +269,7 @@ export default function PaywallScreen({ navigation }: PaywallScreenProps) {
     } finally {
       setIsPurchasing(false);
     }
-  }, [applyCustomerInfoToStore, isPurchasing, lifetimePackage, navigation, t, waitForPremiumGrant]);
+  }, [applyCustomerInfoToStore, isPurchasing, lifetimePackage, showPurchaseSuccessAlert, t, waitForPremiumGrant]);
 
   const handleClose = useCallback(() => {
     Animated.parallel([
@@ -331,9 +342,19 @@ export default function PaywallScreen({ navigation }: PaywallScreenProps) {
       </View>
 
       <View style={styles.foregroundContent}>
+      <TouchableOpacity
+        style={[styles.restoreFloatingButtonWrap, { top: insets.top + 2 }]}
+        onPress={handleRestore}
+        activeOpacity={0.75}
+      >
+        <BlurView intensity={18} tint="light" style={styles.restoreGlassButton}>
+          <Text style={styles.restoreGlassButtonText}>購入を復元</Text>
+        </BlurView>
+      </TouchableOpacity>
+
       {/* Close Button */}
       <TouchableOpacity
-        style={styles.closeButton}
+        style={[styles.closeButton, { top: insets.top }]}
         onPress={handleClose}
         activeOpacity={0.6}
       >
@@ -342,7 +363,10 @@ export default function PaywallScreen({ navigation }: PaywallScreenProps) {
 
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: Math.max(220, insets.bottom + 220) },
+        ]}
         showsVerticalScrollIndicator={false}
       >
         {/* VIP Pass Image */}
@@ -353,67 +377,71 @@ export default function PaywallScreen({ navigation }: PaywallScreenProps) {
           cachePolicy="memory-disk"
         />
 
-        {/* Title */}
-        <Text style={styles.title}>Plusにアップグレード</Text>
-
-        {/* Features List */}
-        <View style={styles.featuresContainer}>
-          <FeatureItem
-            icon="gift"
-            text="無制限のチケット登録"
-          />
-          <FeatureItem
-            icon="disc"
-            text="シェアカード全種類を解放"
-          />
-          <FeatureItem
-            icon="zap"
-            text="今後の新機能もすべて無料"
-          />
+        <View style={styles.heroContainer}>
+          <View style={styles.heroTitleRow}>
+            <Text style={styles.heroTitlePrefix}>{t('paywall.hero.titlePrefix')}</Text>
+            <View style={styles.heroPlusPill}>
+              <Text style={styles.heroPlusText}>{t('paywall.hero.titlePlus')}</Text>
+            </View>
+          </View>
+          <Text style={styles.heroSubtitle}>{t('paywall.hero.subtitle')}</Text>
         </View>
 
-        {/* Price Box */}
-        <View style={styles.priceBox}>
-          <Text style={styles.priceLabel}>リリース記念価格</Text>
-          <Text style={styles.priceLabel}>買い切り・サブスクなし</Text>
-          <Text style={styles.currentPrice}>{selectedPrice}</Text>
-          <View style={styles.originalPriceWrap}>
-            <Text style={styles.originalPrice}>{originalFallbackPrice}</Text>
-            <ExpoImage
-              source={require('../assets/scribble1.png')}
-              style={styles.originalPriceScribble}
-              contentFit="contain"
+        <View style={styles.featuresContainer}>
+          {benefits.map((item, index) => (
+            <BenefitItem
+              key={`${item.title}-${index}`}
+              icon={benefitIcons[index] ?? Infinity01Icon}
+              title={item.title}
+              description={item.description}
+              iconColor={index === 2 ? '#8B5CF6' : '#1F1F1F'}
             />
+          ))}
+        </View>
+
+      </ScrollView>
+
+      </View>
+
+      <View style={[styles.bottomIslandWrap, { bottom: Math.max(6, insets.bottom + 2) }]}>
+        <View style={styles.bottomIslandPanel}>
+          <View style={styles.planCard}>
+            <View style={styles.planTextBlock}>
+              <Text style={styles.planTitle}>買い切り</Text>
+              <Text style={styles.planSubTitle}>リリース記念価格・サブスクなし</Text>
+            </View>
+            <View style={styles.planPriceBlock}>
+              <Text style={styles.planOriginalPrice}>{originalFallbackPrice}</Text>
+              <Text style={styles.planCurrentPrice}>{selectedPrice}</Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.purchaseButton, isPurchasing && styles.purchaseButtonDisabled]}
+            onPress={handlePurchase}
+            disabled={isPurchasing}
+            activeOpacity={0.82}
+          >
+            <View style={styles.purchaseButtonContent}>
+              {isPurchasing ? (
+                <ActivityIndicator size="small" color="#FFFFFF" style={styles.purchaseSpinner} />
+              ) : null}
+              <Text style={styles.purchaseButtonText}>
+                {isPurchasing ? t('paywall.ctaProcessing') : '続ける'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          <View style={styles.footerLinks}>
+            <TouchableOpacity onPress={() => handleOpenLink('https://traveling-fahrenheit-b9b.notion.site/Tickemo-Terms-of-Use-2f65fd5d3e2d80ba8abcda85615cde4a?pvs=74')}>
+              <Text style={styles.footerText}>利用規約</Text>
+            </TouchableOpacity>
+            <Text style={styles.footerSeparator}>・</Text>
+            <TouchableOpacity onPress={() => handleOpenLink('https://traveling-fahrenheit-b9b.notion.site/Tickemo-Privacy-Policy-2f85fd5d3e2d809b912dfc4ec2a2ed6a?pvs=74')}>
+              <Text style={styles.footerText}>プライバシーポリシー</Text>
+            </TouchableOpacity>
           </View>
         </View>
-
-        {/* Purchase Button */}
-        <TouchableOpacity
-          style={[styles.purchaseButton, isPurchasing && styles.purchaseButtonDisabled]}
-          onPress={handlePurchase}
-          disabled={isPurchasing}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.purchaseButtonText}>
-            {isPurchasing ? t('paywall.ctaProcessing') : 'Upgrade to Plus'}
-          </Text>
-        </TouchableOpacity>
-
-        {/* Footer Links */}
-        <View style={styles.footerLinks}>
-          <TouchableOpacity onPress={handleRestore}>
-            <Text style={styles.footerText}>購入を復元</Text>
-          </TouchableOpacity>
-          <Text style={styles.footerSeparator}>・</Text>
-          <TouchableOpacity onPress={() => handleOpenLink('https://traveling-fahrenheit-b9b.notion.site/Tickemo-Terms-of-Use-2f65fd5d3e2d80ba8abcda85615cde4a?pvs=74')}>
-            <Text style={styles.footerText}>利用規約</Text>
-          </TouchableOpacity>
-          <Text style={styles.footerSeparator}>・</Text>
-          <TouchableOpacity onPress={() => handleOpenLink('https://traveling-fahrenheit-b9b.notion.site/Tickemo-Privacy-Policy-2f85fd5d3e2d809b912dfc4ec2a2ed6a?pvs=74')}>
-            <Text style={styles.footerText}>プライバシーポリシー</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
       </View>
           </SafeAreaView>
         </Animated.View>
@@ -422,15 +450,22 @@ export default function PaywallScreen({ navigation }: PaywallScreenProps) {
 }
 
 interface FeatureItemProps {
-  icon: React.ComponentProps<typeof Feather>['name'];
-  text: string;
+  icon: any;
+  title: string;
+  description: string;
+  iconColor?: string;
 }
 
-function FeatureItem({ icon, text }: FeatureItemProps) {
+function BenefitItem({ icon, title, description, iconColor = '#1F1F1F' }: FeatureItemProps) {
   return (
     <View style={styles.featureItem}>
-      <Feather name={icon} size={24} color={TEXT_MEDIUM} style={styles.featureIcon} />
-      <Text style={styles.featureText}>{text}</Text>
+      <View style={styles.featureIconWrap}>
+        <HugeiconsIcon icon={icon} size={22} color={iconColor} strokeWidth={2.0} />
+      </View>
+      <View style={styles.featureTextBlock}>
+        <Text style={styles.featureTitle}>{title}</Text>
+        <Text style={styles.featureDescription}>{description}</Text>
+      </View>
     </View>
   );
 }
@@ -458,6 +493,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: BG_COLOR,
     overflow: 'hidden',
+    position: 'relative',
   },
   foregroundContent: {
     flex: 1,
@@ -483,12 +519,32 @@ const styles = StyleSheet.create({
     zIndex: 10,
     padding: 8,
   },
+  restoreFloatingButtonWrap: {
+    position: 'absolute',
+    right: 12,
+    zIndex: 20,
+  },
+  restoreGlassButton: {
+    borderRadius: 30,
+    overflow: 'hidden',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.84)',
+    backgroundColor: 'rgba(255,255,255,0.58)',
+    marginRight: 8,
+  },
+  restoreGlassButtonText: {
+    fontSize: 12,
+    color: '#2B2B2B',
+    fontFamily: 'LINESeedJP_700Bold',
+  },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
     paddingTop: 0,
-    paddingBottom: 40,
+    paddingBottom: 220,
   },
   vipImage: {
     width: '100%',
@@ -503,75 +559,143 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 32,
   },
-  featuresContainer: {
-    paddingHorizontal: 45,
+  heroContainer: {
+    paddingHorizontal: 24,
     marginBottom: 18,
+  },
+  heroTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  heroTitlePrefix: {
+    fontSize: 34,
+    color: '#151515',
+    fontFamily: 'LINESeedJP_800ExtraBold',
+    letterSpacing: 0.3,
+  },
+  heroPlusPill: {
+    borderWidth: 1.5,
+    borderColor: '#8B5CF6',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#F5F3FF',
+  },
+  heroPlusText: {
+    fontSize: 17,
+    color: '#5B38B2',
+    fontFamily: 'LINESeedJP_700Bold',
+  },
+  heroSubtitle: {
+    marginTop: 10,
+    marginBottom: 8,
+    fontSize: 13,
+    lineHeight: 20,
+    textAlign: 'center',
+    color: '#7A7A7A',
+    fontFamily: 'LINESeedJP_700Bold',
+  },
+  featuresContainer: {
+    paddingHorizontal: 30,
+    marginBottom: 12,
   },
   featureItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 16,
   },
-  featureIcon: {
-    marginRight: 16,
+  featureIconWrap: {
+    width: 34,
+    alignItems: 'center',
+    marginTop: 1,
   },
-  featureText: {
+  featureTextBlock: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  featureTitle: {
     fontSize: 16,
-    fontWeight: '600',
-    color: TEXT_MEDIUM,
+    color: '#171717',
+    fontFamily: 'LINESeedJP_700Bold',
+  },
+  featureDescription: {
+    marginTop: 3,
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#7D7D7D',
+    fontFamily: 'LINESeedJP_400Regular',
     flex: 1,
   },
-  priceBox: {
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: DASHED_BORDER,
-    borderRadius: 20,
-    paddingVertical: 24,
-    marginHorizontal: 24,
-    marginTop: 16,
-    alignItems: 'center',
-  },
-  priceLabel: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: TEXT_MEDIUM,
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  currentPrice: {
-    fontSize: 38,
-    fontWeight: '900',
-    color: TEXT_DARK,
-    textAlign: 'center',
-  },
-  originalPrice: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: TEXT_LIGHT,
-    textAlign: 'center',
-    marginTop: 4,
-  },
-  originalPriceWrap: {
-    marginTop: 2,
-    minWidth: 110,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  originalPriceScribble: {
+  bottomIslandWrap: {
     position: 'absolute',
-    width: 100,
-    height: 38,
-    top: 0,
-    opacity: 0.9,
-    zIndex: 2,
+    left: 16,
+    right: 16,
+    zIndex: 15,
+  },
+  bottomIslandPanel: {
+    borderRadius: 28,
+    padding: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.94)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.92)',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 18,
+    elevation: 12,
+  },
+  planCard: {
+    backgroundColor: '#F5F3FF',
+    borderWidth: 2,
+    borderColor: '#8B5CF6',
+    borderRadius: 24,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  planTextBlock: {
+    flex: 1,
+    paddingRight: 10,
+  },
+  planTitle: {
+    fontSize: 15,
+    color: '#111111',
+    fontFamily: 'LINESeedJP_700Bold',
+    marginBottom: 6,
+  },
+  planSubTitle: {
+    fontSize: 10,
+    color: '#7A7A7A',
+    fontFamily: 'LINESeedJP_400Regular',
+  },
+  planPriceBlock: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 6,
+  },
+  planOriginalPrice: {
+    fontSize: 14,
+    color: '#9A9A9A',
+    textDecorationLine: 'line-through',
+    fontFamily: 'LINESeedJP_700Bold',
+    lineHeight: 20,
+  },
+  planCurrentPrice: {
+    fontSize: 20,
+    color: '#111111',
+    fontFamily: 'LINESeedJP_800ExtraBold',
+    lineHeight: 20,
   },
   purchaseButton: {
     backgroundColor: BUTTON_COLOR,
-    borderRadius: 30,
+    borderRadius: 999,
     paddingVertical: 18,
-    marginHorizontal: 24,
-    marginTop: 24,
+    paddingHorizontal: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -580,23 +704,32 @@ const styles = StyleSheet.create({
   },
   purchaseButtonText: {
     fontSize: 18,
-    fontWeight: 'bold',
+    fontFamily: 'LINESeedJP_800ExtraBold',
     color: '#FFFFFF',
+  },
+  purchaseButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  purchaseSpinner: {
+    marginRight: 8,
   },
   footerLinks: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 16,
-    marginBottom: 40,
+    marginTop: 14,
+    marginBottom: 2,
     gap: 8,
   },
   footerText: {
-    fontSize: 12,
-    color: TEXT_VERY_LIGHT,
+    fontSize: 10,
+    color: '#9A9A9A',
+    fontFamily: 'LINESeedJP_400Regular',
   },
   footerSeparator: {
-    fontSize: 12,
-    color: TEXT_VERY_LIGHT,
+    fontSize: 10,
+    color: '#B0B0B0',
   },
 });

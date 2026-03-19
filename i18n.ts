@@ -62,6 +62,7 @@ i18n.use(initReactI18next).init({
             unknown: '不明',
           },
           items: {
+            darkMode: 'テーマ',
             icloudSync: 'iCloud同期',
             notifications: '通知',
             appleMusic: 'Data provided by Apple Music',
@@ -220,12 +221,31 @@ i18n.use(initReactI18next).init({
           },
         },
         paywall: {
+          hero: {
+            titlePrefix: 'Tickemo',
+            titlePlus: 'Plus',
+            subtitle: '全てのライブにこだわりをプラス。制限なしですべての機能にアクセスしよう',
+          },
           unlockAll: 'すべての機能をアンロックする',
           featureList: [
             '無制限のチケット登録',
             '広告なしでストレスフリー',
             'シェアチケットの追加編集',
             '今後の新機能もすべて解放',
+          ],
+          benefits: [
+            {
+              title: '無制限のアーカイブ',
+              description: '過去のチケットも写真もすべて保存。',
+            },
+            {
+              title: 'シェアカードの拡張',
+              description: 'ストーリーズで映える限定画像を無制限に生成。',
+            },
+            {
+              title: '開発者を応援',
+              description: '今後のアップデートと新機能の開発をサポート',
+            },
           ],
           selectPlan: 'プランを選択',
           plans: {
@@ -528,6 +548,7 @@ i18n.use(initReactI18next).init({
             unknown: 'Unknown',
           },
           items: {
+            darkMode: 'Theme',
             icloudSync: 'iCloud Sync',
             notifications: 'Notifications',
             appleMusic: 'Data provided by Apple Music',
@@ -686,12 +707,31 @@ i18n.use(initReactI18next).init({
           },
         },
         paywall: {
+          hero: {
+            titlePrefix: 'Tickemo',
+            titlePlus: 'Plus',
+            subtitle: 'Add more dedication to every live. Unlock every feature with no limits.',
+          },
           unlockAll: 'Unlock all features',
           featureList: [
             'Unlimited ticket registrations',
             'Ad-free experience',
             'Advanced shared-ticket editing',
             'Access to all future features',
+          ],
+          benefits: [
+            {
+              title: 'Unlimited Archive',
+              description: 'Keep every past ticket and live photo saved forever.',
+            },
+            {
+              title: 'Premium Output',
+              description: 'Generate story-ready exclusive images without limits.',
+            },
+            {
+              title: 'Support the Developer',
+              description: 'Help us build more features.',
+            },
           ],
           selectPlan: 'Choose a plan',
           plans: {

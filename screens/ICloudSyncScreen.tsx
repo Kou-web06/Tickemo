@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -7,12 +7,34 @@ import {
   ScrollView,
   ActivityIndicator,
   RefreshControl,
+  DeviceEventEmitter,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
 import { AntDesign, Ionicons } from '@expo/vector-icons';
 import { useCloudSync } from '../hooks/useCloudSync';
 import { useTranslation } from 'react-i18next';
+import { getCachedThemePreference, hydrateThemePreference } from '../lib/themePreference';
+import { useTheme } from '../src/theme';
+
+const buildPalette = (isDarkMode: boolean) => ({
+  screenBackground: isDarkMode ? '#121212' : '#F2F2F7',
+  headerBackground: isDarkMode ? 'rgba(18, 18, 18, 0.74)' : 'rgba(248, 248, 248, 0.62)',
+  headerBorder: isDarkMode ? 'rgba(255, 255, 255, 0.10)' : 'rgba(255, 255, 255, 0.45)',
+  titleText: isDarkMode ? '#F5F5F7' : '#000000',
+  cardBackground: isDarkMode ? '#1A1A1A' : '#FFFFFF',
+  shadowColor: isDarkMode ? '#000000' : '#5D5D5D',
+  statusLabel: isDarkMode ? '#B7B7C2' : '#666666',
+  statusText: isDarkMode ? '#F5F5F7' : '#000000',
+  descriptionText: isDarkMode ? '#A1A1AA' : '#888888',
+  syncTimeText: isDarkMode ? '#8A8A94' : '#999999',
+  buttonText: isDarkMode ? '#CFCFDD' : '#666666',
+  indicatorColor: isDarkMode ? '#A1A1AA' : '#888888',
+  refreshTint: isDarkMode ? '#A1A1AA' : '#888888',
+  success: '#34C759',
+});
+
+type ICloudPalette = ReturnType<typeof buildPalette>;
 
 interface ICloudSyncScreenProps {
   navigation: any;
@@ -20,10 +42,37 @@ interface ICloudSyncScreenProps {
 
 export default function ICloudSyncScreen({ navigation }: ICloudSyncScreenProps) {
   const { t } = useTranslation();
+  const { isDark: isSystemDark } = useTheme();
   const insets = useSafeAreaInsets();
   const { isSyncing, lastSyncTime, forceSync } = useCloudSync();
+  const [manualDarkMode, setManualDarkMode] = useState<boolean | null | undefined>(() => getCachedThemePreference());
   const [isManualSyncing, setIsManualSyncing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => {
+    const loadThemePreference = async () => {
+      const value = await hydrateThemePreference();
+      setManualDarkMode(value);
+    };
+
+    void loadThemePreference();
+  }, []);
+
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener('theme:changed', (nextValue?: boolean) => {
+      if (typeof nextValue === 'boolean') {
+        setManualDarkMode(nextValue);
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  const isDarkMode = manualDarkMode ?? false;
+  const palette = useMemo(() => buildPalette(isDarkMode), [isDarkMode]);
+  const styles = useMemo(() => createStyles(palette), [palette]);
 
   const handleManualSync = async () => {
     setIsManualSyncing(true);
@@ -56,14 +105,14 @@ export default function ICloudSyncScreen({ navigation }: ICloudSyncScreenProps) 
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
       {/* ヘッダー */}
-      <BlurView tint="light" intensity={80} style={[styles.glassHeader, { paddingTop: Math.max(insets.top, 12) }]}>
+      <BlurView tint={isDarkMode ? 'dark' : 'light'} intensity={80} style={[styles.glassHeader, { paddingTop: Math.max(insets.top, 12) }]}>
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => navigation.goBack()}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Ionicons name="chevron-back" size={28} color="#000" />
+            <Ionicons name="chevron-back" size={28} color={palette.titleText} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{t('icloudSync.title')}</Text>
           <View style={styles.headerSpacer} />
@@ -78,7 +127,7 @@ export default function ICloudSyncScreen({ navigation }: ICloudSyncScreenProps) 
           <RefreshControl 
             refreshing={refreshing} 
             onRefresh={onRefresh}
-            tintColor="#888"
+            tintColor={palette.refreshTint}
           />
         }
       >
@@ -110,12 +159,12 @@ export default function ICloudSyncScreen({ navigation }: ICloudSyncScreenProps) 
         >
           {isManualSyncing || isSyncing ? (
             <>
-              <ActivityIndicator color="#666" size="small" />
+              <ActivityIndicator color={palette.indicatorColor} size="small" />
               <Text style={styles.syncButtonText}>{t('icloudSync.syncing')}</Text>
             </>
           ) : (
             <>
-              <AntDesign name="cloud-sync" size={18} color="#666" />
+              <AntDesign name="cloud-sync" size={18} color={palette.buttonText} />
               <Text style={styles.syncButtonText}>{t('icloudSync.syncNow')}</Text>
             </>
           )}
@@ -125,15 +174,15 @@ export default function ICloudSyncScreen({ navigation }: ICloudSyncScreenProps) 
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (palette: ICloudPalette) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F2F2F7',
+    backgroundColor: palette.screenBackground,
   },
   glassHeader: {
-    backgroundColor: 'rgba(248, 248, 248, 0.62)',
+    backgroundColor: palette.headerBackground,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.45)',
+    borderBottomColor: palette.headerBorder,
     overflow: 'hidden',
     paddingHorizontal: 16,
     paddingBottom: 12,
@@ -153,7 +202,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#000',
+    color: palette.titleText,
     letterSpacing: -0.5,
   },
   headerSpacer: {
@@ -165,12 +214,12 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
   },
   statusCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: palette.cardBackground,
     borderRadius: 30,
     paddingHorizontal: 18,
     paddingVertical: 18,
     marginBottom: 24,
-    shadowColor: '#5d5d5d',
+    shadowColor: palette.shadowColor,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
     shadowRadius: 3,
@@ -184,7 +233,7 @@ const styles = StyleSheet.create({
   statusLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#666',
+    color: palette.statusLabel,
   },
   statusIndicator: {
     flexDirection: 'row',
@@ -195,8 +244,8 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#34C759',
-    shadowColor: '#34C759',
+    backgroundColor: palette.success,
+    shadowColor: palette.success,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.4,
     shadowRadius: 3,
@@ -205,12 +254,12 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#000',
+    color: palette.statusText,
   },
   descriptionText: {
     fontSize: 14,
     lineHeight: 20,
-    color: '#888',
+    color: palette.descriptionText,
     marginBottom: 24,
     paddingHorizontal: 20,
   },
@@ -221,7 +270,7 @@ const styles = StyleSheet.create({
   syncTimeLabel: {
     fontSize: 13,
     fontWeight: '500',
-    color: '#999',
+    color: palette.syncTimeText,
     marginBottom: 8,
     letterSpacing: 0.2,
   },
@@ -230,11 +279,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: palette.cardBackground,
     borderRadius: 30,
     paddingVertical: 14,
     marginBottom: 40,
-    shadowColor: '#5d5d5d',
+    shadowColor: palette.shadowColor,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
     shadowRadius: 3,
@@ -246,6 +295,6 @@ const styles = StyleSheet.create({
   syncButtonText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#666',
+    color: palette.buttonText,
   },
 });

@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,7 +7,9 @@ import {
   StyleSheet,
   Modal,
   useWindowDimensions,
+  DeviceEventEmitter,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -21,16 +23,41 @@ import { resolveLocalImageUri } from '../lib/imageUpload';
 import { getArtworkUrl } from '../utils/appleMusicApi';
 import { TicketCard } from '../components/TicketCard';
 import { getAppWidth } from '../utils/layout';
+import { useTheme } from '../src/theme';
+import { getCachedThemePreference, hydrateThemePreference } from '../lib/themePreference';
 
-const StatPill: React.FC<{ label: string; value: string; icon: any; largeValue?: boolean }> = ({ label, value, icon, largeValue = false }) => (
-  <BlurView tint="dark" intensity={45} style={styles.statPill}>
+const buildArtistDetailPalette = (isDarkMode: boolean) => ({
+  screenBackground: isDarkMode ? '#0F1013' : '#F3F3F6',
+  heroBackground: isDarkMode ? '#171A1F' : '#222222',
+  heroFallback: isDarkMode ? '#232833' : '#381616',
+  artistName: isDarkMode ? '#ECEEF2' : '#0C0C0D',
+  backButtonBackground: isDarkMode ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.34)',
+  backIcon: '#FFFFFF',
+  statPillBackground: isDarkMode ? 'rgba(255,255,255,0.12)' : 'rgba(18, 18, 24, 0.58)',
+  statPillBorder: isDarkMode ? 'rgba(255,255,255,0.16)' : 'rgba(255, 255, 255, 0.18)',
+  statLabel: isDarkMode ? 'rgba(242,244,247,0.9)' : 'rgba(255,255,255,0.86)',
+  statValue: '#FFFFFF',
+  yearDividerLine: isDarkMode ? '#3A3F49' : '#CECED4',
+  yearChipBackground: isDarkMode ? '#2B313B' : '#DEDEE2',
+  yearChipText: isDarkMode ? '#D1D7E1' : '#5F5F66',
+  emptyText: isDarkMode ? '#A5ADBB' : '#8A8A94',
+});
+
+type ArtistDetailPalette = ReturnType<typeof buildArtistDetailPalette>;
+
+const StatPill: React.FC<{ label: string; value: string; icon: any; isDarkMode: boolean; palette: ArtistDetailPalette; largeValue?: boolean }> = ({ label, value, icon, isDarkMode, palette, largeValue = false }) => (
+  <BlurView tint={isDarkMode ? 'dark' : 'light'} intensity={45} style={[styles.statPill, { backgroundColor: palette.statPillBackground, borderColor: palette.statPillBorder }]}>
     <View style={styles.statLabelRow}>
-      <HugeiconsIcon icon={icon} size={16} color="rgba(255,255,255,0.86)" strokeWidth={2.0} />
-      <Text style={styles.statLabel}>{label}</Text>
+      <HugeiconsIcon icon={icon} size={16} color={palette.statLabel} strokeWidth={2.0} />
+      <Text style={[styles.statLabel, { color: palette.statLabel }]}>{label}</Text>
     </View>
-    <Text style={[styles.statValue, largeValue && styles.statValueLarge]}>{value}</Text>
+    <Text style={[styles.statValue, { color: palette.statValue }, largeValue && styles.statValueLarge]}>{value}</Text>
   </BlurView>
 );
+
+type ArtistDetailListItem =
+  | { type: 'divider'; id: string; year: string }
+  | { type: 'ticket'; id: string; record: ChekiRecord };
 
 const ArtistDetailScreen: React.FC<{ route: any; navigation: any }> = ({
   route,
@@ -38,9 +65,42 @@ const ArtistDetailScreen: React.FC<{ route: any; navigation: any }> = ({
 }) => {
   const { artistName } = route.params as { artistName: string };
   const { records } = useRecords();
+  const { isDark: isSystemDark } = useTheme();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   const [selectedRecord, setSelectedRecord] = useState<ChekiRecord | null>(null);
+  const [manualDarkMode, setManualDarkMode] = useState<boolean | null | undefined>(() => getCachedThemePreference());
+  const isDarkMode = manualDarkMode ?? isSystemDark;
+  const palette = useMemo(() => buildArtistDetailPalette(isDarkMode), [isDarkMode]);
+
+  const loadThemePreference = useCallback(async () => {
+    const value = await hydrateThemePreference();
+    setManualDarkMode(value);
+  }, []);
+
+  useEffect(() => {
+    void loadThemePreference();
+  }, [loadThemePreference]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadThemePreference();
+    }, [loadThemePreference])
+  );
+
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener('theme:changed', (nextValue?: boolean) => {
+      if (typeof nextValue === 'boolean') {
+        setManualDarkMode(nextValue);
+      } else {
+        void loadThemePreference();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [loadThemePreference]);
 
   const artistRecords = useMemo(() => {
     return records
@@ -58,23 +118,61 @@ const ArtistDetailScreen: React.FC<{ route: any; navigation: any }> = ({
       });
   }, [records, artistName]);
 
+  const pastArtistRecords = useMemo(() => {
+    const now = Date.now();
+
+    return artistRecords.filter((record) => {
+      const liveDate = new Date(record.date.replace(/\./g, '-'));
+      const [hour, minute] = (record.startTime || '').split(':').map((value) => Number(value));
+
+      if (!Number.isNaN(hour)) {
+        liveDate.setHours(hour, Number.isNaN(minute) ? 0 : minute, 0, 0);
+      } else {
+        // 開演時刻がない場合は当日終了まで未来扱いにして誤集計を防ぐ
+        liveDate.setHours(23, 59, 59, 999);
+      }
+
+      const timestamp = liveDate.getTime();
+      return Number.isFinite(timestamp) && timestamp < now;
+    });
+  }, [artistRecords]);
+
   const stats = useMemo(() => {
-    const totalLives = artistRecords.length;
-    const oldest = [...artistRecords].sort((a, b) => {
+    const totalLives = pastArtistRecords.length;
+    const oldest = [...pastArtistRecords].sort((a, b) => {
       const tA = new Date(a.date.replace(/\./g, '-')).getTime();
       const tB = new Date(b.date.replace(/\./g, '-')).getTime();
       return tA - tB;
     })[0];
     const firstLive = oldest?.date ?? '-';
-    const totalSpent = artistRecords.reduce((sum, r) => sum + (r.ticketPrice ?? 0), 0);
-    const yearLabel = (artistRecords[0]?.date || new Date().toISOString().slice(0, 4)).slice(0, 4);
+    const totalSpent = pastArtistRecords.reduce((sum, r) => sum + (r.ticketPrice ?? 0), 0);
 
     return {
       totalLives,
       firstLive,
       totalSpent,
-      yearLabel,
     };
+  }, [pastArtistRecords]);
+
+  const listData = useMemo<ArtistDetailListItem[]>(() => {
+    const items: ArtistDetailListItem[] = [];
+    let prevYear: string | null = null;
+
+    artistRecords.forEach((record) => {
+      const year = (record.date || '').slice(0, 4) || '-';
+      if (year !== prevYear) {
+        items.push({ type: 'divider', id: `divider-${year}`, year });
+        prevYear = year;
+      }
+
+      items.push({
+        type: 'ticket',
+        id: `ticket-${record.id}`,
+        record,
+      });
+    });
+
+    return items;
   }, [artistRecords]);
 
   const resolveArtistImageUri = useCallback((rawUri: string, size: number) => {
@@ -171,25 +269,19 @@ const ArtistDetailScreen: React.FC<{ route: any; navigation: any }> = ({
           </View>
         </View>
 
-        <Text style={styles.artistName}>{artistName}</Text>
+        <Text style={[styles.artistName, { color: palette.artistName }]}>{artistName}</Text>
 
         <View style={styles.statsRow}>
-          <StatPill icon={AiMicIcon} label="LIVE" value={String(stats.totalLives)} largeValue={true} />
-          <StatPill icon={WavingHand02Icon} label="FIRST" value={stats.firstLive.replace(/\./g, '/')} />
+          <StatPill icon={AiMicIcon} label="LIVE" value={String(stats.totalLives)} isDarkMode={isDarkMode} palette={palette} largeValue={true} />
+          <StatPill icon={WavingHand02Icon} label="FIRST" value={stats.firstLive.replace(/\./g, '/')} isDarkMode={isDarkMode} palette={palette} />
           <StatPill
             icon={Wallet01Icon}
             label="SPENT"
             value={stats.totalSpent > 0 ? `¥${stats.totalSpent.toLocaleString()}` : '¥0'}
+            isDarkMode={isDarkMode}
+            palette={palette}
             largeValue={true}
           />
-        </View>
-
-        <View style={styles.yearDividerRow}>
-          <View style={styles.yearDividerLine} />
-          <View style={styles.yearChip}>
-            <Text style={styles.yearChipText}>{stats.yearLabel}</Text>
-          </View>
-          <View style={styles.yearDividerLine} />
         </View>
       </View>
     </View>
@@ -202,7 +294,8 @@ const ArtistDetailScreen: React.FC<{ route: any; navigation: any }> = ({
     stats.firstLive,
     stats.totalLives,
     stats.totalSpent,
-    stats.yearLabel,
+    isDarkMode,
+    palette,
     heroHeight,
   ]);
 
@@ -210,22 +303,36 @@ const ArtistDetailScreen: React.FC<{ route: any; navigation: any }> = ({
     setSelectedRecord(record);
   }, []);
 
-  const renderTicketItem = useCallback(
-    ({ item }: { item: ChekiRecord }) => (
-      <TouchableOpacity
-        style={styles.ticketItemWrap}
-        activeOpacity={0.92}
-        onPress={() => handleSelectRecord(item)}
-      >
-        <TicketCard record={item} width={ticketWidth} />
-      </TouchableOpacity>
-    ),
-    [handleSelectRecord, ticketWidth]
+  const renderListItem = useCallback(
+    ({ item }: { item: ArtistDetailListItem }) => {
+      if (item.type === 'divider') {
+        return (
+          <View style={styles.yearDividerRow}>
+            <View style={[styles.yearDividerLine, { backgroundColor: palette.yearDividerLine }]} />
+            <View style={[styles.yearChip, { backgroundColor: palette.yearChipBackground }]}>
+              <Text style={[styles.yearChipText, { color: palette.yearChipText }]}>{item.year}</Text>
+            </View>
+            <View style={[styles.yearDividerLine, { backgroundColor: palette.yearDividerLine }]} />
+          </View>
+        );
+      }
+
+      return (
+        <TouchableOpacity
+          style={styles.ticketItemWrap}
+          activeOpacity={0.92}
+          onPress={() => handleSelectRecord(item.record)}
+        >
+          <TicketCard record={item.record} width={ticketWidth} />
+        </TouchableOpacity>
+      );
+    },
+    [handleSelectRecord, ticketWidth, palette]
   );
 
   return (
-    <View style={styles.container}>
-      <View style={[styles.heroWrap, { height: heroHeight }]}>
+    <View style={[styles.container, { backgroundColor: palette.screenBackground }]}>
+      <View style={[styles.heroWrap, { height: heroHeight, backgroundColor: palette.heroBackground }]}>
         {heroImageSource ? (
           <Image
             source={heroImageSource}
@@ -235,11 +342,15 @@ const ArtistDetailScreen: React.FC<{ route: any; navigation: any }> = ({
             cachePolicy="memory-disk"
           />
         ) : (
-          <View style={styles.heroFallback} />
+          <View style={[styles.heroFallback, { backgroundColor: palette.heroFallback }]} />
         )}
 
         <LinearGradient
-          colors={['rgba(255,255,255,0)', 'rgba(255,255,255,0.92)', '#F3F3F6']}
+          colors={
+            isDarkMode
+              ? (['rgba(15,16,19,0)', 'rgba(15,16,19,0.9)', '#0F1013'] as const)
+              : (['rgba(255,255,255,0)', 'rgba(255,255,255,0.92)', '#F3F3F6'] as const)
+          }
           locations={[0.44, 0.82, 1]}
           style={styles.heroFade}
         />
@@ -248,26 +359,25 @@ const ArtistDetailScreen: React.FC<{ route: any; navigation: any }> = ({
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}> 
         <TouchableOpacity
           onPress={() => navigation.goBack()}
-          style={styles.backButton}
+          style={[styles.backButton, { backgroundColor: palette.backButtonBackground }]}
           activeOpacity={0.8}
         >
-          <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
+          <Ionicons name="chevron-back" size={22} color={palette.backIcon} />
         </TouchableOpacity>
       </View>
 
       <FlatList
-        data={artistRecords}
+        data={listData}
         keyExtractor={(item) => item.id}
-        renderItem={renderTicketItem}
+        renderItem={renderListItem}
         ListHeaderComponent={listHeader}
         ListEmptyComponent={
-          <Text style={styles.emptyText}>No tickets found for this artist.</Text>
+          <Text style={[styles.emptyText, { color: palette.emptyText }]}>No tickets found for this artist.</Text>
         }
         contentContainerStyle={{
           paddingBottom: insets.bottom + 110,
         }}
         showsVerticalScrollIndicator={false}
-        ItemSeparatorComponent={() => <View style={styles.separator} />}
         removeClippedSubviews={true}
         initialNumToRender={6}
         maxToRenderPerBatch={6}
@@ -433,7 +543,8 @@ const styles = StyleSheet.create({
   yearDividerRow: {
     marginTop: 30,
     marginBottom: 20,
-    width: '100%',
+    width: '86%',
+    alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
@@ -442,6 +553,7 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 1,
     backgroundColor: '#CECED4',
+    borderRadius: 999,
   },
   yearChip: {
     paddingHorizontal: 12,

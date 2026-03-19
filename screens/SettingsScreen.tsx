@@ -3,6 +3,9 @@ import {
   View,
   Text,
   TouchableOpacity,
+  Pressable,
+  Animated,
+  Easing,
   StyleSheet,
   ScrollView,
   Image,
@@ -18,7 +21,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { HugeiconsIcon } from '@hugeicons/react-native';
-import { Edit01Icon } from '@hugeicons/core-free-icons';
+import { Edit01Icon, Sun01Icon, Moon01Icon, Moon02Icon } from '@hugeicons/core-free-icons';
 import Svg, { Path } from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
@@ -31,7 +34,14 @@ import { useAppStore } from '../store/useAppStore';
 import { isTestflightMode } from '../utils/appMode';
 import { normalizeStoredImageUri, resolveLocalImageUri, resolveStoredImageUri } from '../lib/imageUpload';
 import { pullImageFromCloud } from '../lib/icloudImageSync';
+import {
+  getCachedThemePreference,
+  hydrateThemePreference,
+  saveThemePreference,
+  setThemePreferenceCache,
+} from '../lib/themePreference';
 import { useFonts, LINESeedJP_400Regular, LINESeedJP_700Bold, LINESeedJP_800ExtraBold } from '@expo-google-fonts/line-seed-jp';
+import { useTheme, lightTheme, darkTheme } from '../src/theme';
 
 interface SettingItem {
   id: string;
@@ -51,8 +61,143 @@ interface SettingSection {
 const APP_STORE_URL = 'https://apps.apple.com/ja/app/tickemo-%E3%83%A9%E3%82%A4%E3%83%96%E3%81%AE%E6%80%9D%E3%81%84%E5%87%BA%E3%82%92%E8%A8%98%E9%8C%B2/id6758604980';
 const APP_STORE_REVIEW_URL = `${APP_STORE_URL}?action=write-review`;
 
+const buildPalette = (isDarkMode: boolean, primaryColor: string) => ({
+  screenBackground: isDarkMode ? '#121212' : '#F8F8F8',
+  cardBackground: isDarkMode ? '#1A1A1A' : '#FFFFFF',
+  mutedCardBackground: isDarkMode ? '#202024' : '#F0F0F0',
+  headerBackground: isDarkMode ? 'rgba(18, 18, 18, 0.74)' : 'rgba(248, 248, 248, 0.62)',
+  headerBorder: isDarkMode ? 'rgba(255, 255, 255, 0.10)' : 'rgba(255, 255, 255, 0.45)',
+  titleText: isDarkMode ? '#F5F5F7' : '#333333',
+  primaryText: isDarkMode ? '#F5F5F7' : '#000000',
+  secondaryText: isDarkMode ? '#A1A1AA' : '#8E8E93',
+  tertiaryText: isDarkMode ? '#8A8A94' : '#9A9A9A',
+  subtleText: isDarkMode ? '#B7B7C2' : '#666666',
+  destructiveText: '#FF453A',
+  rowBorder: isDarkMode ? '#2E2E35' : '#E8E8E8',
+  iconColor: isDarkMode ? '#D0D0D7' : '#C7C7CC',
+  avatarRingBackground: isDarkMode ? '#222227' : '#FFFFFF',
+  avatarFallbackBackground: isDarkMode ? '#313643' : '#D9DEE8',
+  avatarFallbackText: isDarkMode ? '#E8EBF4' : '#3B4454',
+  freeBadgeBackground: isDarkMode ? '#2D2D34' : '#E7E7E7',
+  freeBadgeText: isDarkMode ? '#CFCFDD' : '#5A5A5A',
+  profileEditIcon: isDarkMode ? '#DADAE6' : '#2F2F2F',
+  sectionShadow: isDarkMode ? '#000000' : '#D2D2D2',
+  switchThumb: isDarkMode ? '#F5F5F7' : '#FFFFFF',
+  switchTrackOff: isDarkMode ? '#3A3A42' : '#D1D1D6',
+  switchTrackOn: primaryColor,
+  paywallGradientStart: isDarkMode ? '#2B2B2B' : '#2B2B2B',
+  paywallGradientEnd: isDarkMode ? '#121212' : '#121212',
+  paywallCaption: 'rgba(255,255,255,0.72)',
+  paywallTitle: '#FFFFFF',
+  paywallAction: '#8FE58C',
+  plusGradientStart: '#8FE58C',
+  plusGradientEnd: '#8872F8',
+  plusText: '#FFFFFF',
+  faqQuestionLabel: isDarkMode ? '#F5F5F7' : '#000000',
+  faqAnswerLabel: isDarkMode ? '#BCBCC8' : '#666666',
+  transparent: 'transparent',
+});
+
+type SettingsPalette = ReturnType<typeof buildPalette>;
+
+const CustomThemeToggle: React.FC<{
+  isDarkMode: boolean;
+  onToggle: () => void;
+}> = ({ isDarkMode, onToggle }) => {
+  const thumbTranslateX = useRef(new Animated.Value(isDarkMode ? 28 : 0)).current;
+  const backgroundProgress = useRef(new Animated.Value(isDarkMode ? 1 : 0)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(thumbTranslateX, {
+        toValue: isDarkMode ? 28 : 0,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(backgroundProgress, {
+        toValue: isDarkMode ? 1 : 0,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }),
+    ]).start();
+  }, [backgroundProgress, isDarkMode, thumbTranslateX]);
+
+  const trackBackgroundColor = backgroundProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['#8B5CF6', '#333333'],
+  });
+
+  return (
+    <Pressable onPress={onToggle} hitSlop={8} style={toggleStyles.pressable}>
+      <Animated.View style={[toggleStyles.track, { backgroundColor: trackBackgroundColor as any }]}>
+        <View style={toggleStyles.iconLayer} pointerEvents="none">
+          <View style={toggleStyles.iconSlot}>
+            <HugeiconsIcon icon={Sun01Icon} size={14} color="#FFFFFF" strokeWidth={2.1} />
+          </View>
+          <View style={toggleStyles.iconSlot}>
+            <HugeiconsIcon icon={Moon02Icon} size={14} color="#FFFFFF" strokeWidth={2.1} />
+          </View>
+        </View>
+
+        <Animated.View
+          style={[
+            toggleStyles.thumb,
+            {
+              transform: [{ translateX: thumbTranslateX }],
+            },
+          ]}
+        />
+      </Animated.View>
+    </Pressable>
+  );
+};
+
+const toggleStyles = StyleSheet.create({
+  pressable: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  track: {
+    width: 60,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    padding: 2,
+  },
+  iconLayer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 8,
+  },
+  iconSlot: {
+    width: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  thumb: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.28,
+    shadowRadius: 2,
+    elevation: 3,
+  },
+});
+
 export default function SettingsScreen({ navigation }: any) {
   const { t } = useTranslation();
+  const { theme: systemTheme, isDark: isSystemDark } = useTheme();
   const [fontsLoaded] = useFonts({
     LINESeedJP_400Regular,
     LINESeedJP_700Bold,
@@ -66,12 +211,53 @@ export default function SettingsScreen({ navigation }: any) {
   const membershipType = useAppStore((state) => state.membershipType);
   const [firstLaunchAt, setFirstLaunchAt] = useState('');
   const [resolvedProfileAvatarUri, setResolvedProfileAvatarUri] = useState('');
+  const [manualDarkMode, setManualDarkMode] = useState<boolean | null | undefined>(() => getCachedThemePreference());
   const scrollViewRef = useRef<ScrollView>(null);
+
+  const loadThemePreference = useCallback(async () => {
+    const value = await hydrateThemePreference();
+    setManualDarkMode(value);
+  }, []);
+
+  useEffect(() => {
+    void loadThemePreference();
+  }, [loadThemePreference]);
+
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener('theme:changed', (nextValue?: boolean) => {
+      if (typeof nextValue !== 'boolean') return;
+      setManualDarkMode(nextValue);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  const isDarkMode = manualDarkMode ?? false;
+  const activeTheme = isDarkMode ? darkTheme : lightTheme;
+  const palette = useMemo(
+    () => buildPalette(isDarkMode, activeTheme.primary || systemTheme.primary),
+    [activeTheme.primary, isDarkMode, systemTheme.primary]
+  );
+  const styles = useMemo(() => createStyles(palette), [palette]);
+
+  const handleToggleDarkMode = useCallback(async (nextValue: boolean) => {
+    setManualDarkMode(nextValue);
+    setThemePreferenceCache(nextValue);
+    DeviceEventEmitter.emit('theme:changed', nextValue);
+    try {
+      await saveThemePreference(nextValue);
+    } catch {
+      // Ignore preference save errors.
+    }
+  }, []);
 
   const sections: SettingSection[] = [
     {
       title: t('settings.sections.general'),
       data: [
+        { id: 'dark-mode', label: t('settings.items.darkMode') },
         { id: 'icloud-sync', label: t('settings.items.icloudSync') },
       ],
     },
@@ -252,7 +438,7 @@ export default function SettingsScreen({ navigation }: any) {
 
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
-      <BlurView tint="light" intensity={80} style={[styles.glassHeader, { paddingTop: insets.top + 8 }]}>
+      <BlurView tint={isDarkMode ? 'dark' : 'light'} intensity={80} style={[styles.glassHeader, { paddingTop: insets.top + 8 }]}>
         <View style={[styles.titleRow, { marginBottom: 0 }]}> 
           <Text style={[styles.title, { fontSize: titleFontSize }]}>My page</Text>
         </View>
@@ -274,6 +460,8 @@ export default function SettingsScreen({ navigation }: any) {
         <View style={styles.bentoCardContainer}>
           <UserProfileHeader
             profile={profile}
+            palette={palette}
+            styles={styles}
             onPressEdit={() => {
                 navigation.navigate('ProfileEdit');
             }}
@@ -293,7 +481,7 @@ export default function SettingsScreen({ navigation }: any) {
             onPress={() => navigation.navigate('Paywall')}
           >
             <LinearGradient
-              colors={['#2B2B2B', '#121212']}
+              colors={[palette.paywallGradientStart, palette.paywallGradientEnd]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={[
@@ -344,6 +532,7 @@ export default function SettingsScreen({ navigation }: any) {
                       isLast && styles.rowLast,
                     ]}
                     activeOpacity={0.7}
+                    disabled={item.id === 'dark-mode'}
                     onPress={() => {
                       if (item.id === 'icloud-sync') {
                         navigation.navigate('ICloudSync');
@@ -396,12 +585,20 @@ export default function SettingsScreen({ navigation }: any) {
                       {item.label}
                     </Text>
                     <View style={styles.rowRight}>
+                      {item.id === 'dark-mode' ? (
+                        <CustomThemeToggle
+                          isDarkMode={isDarkMode}
+                          onToggle={() => {
+                            void handleToggleDarkMode(!isDarkMode);
+                          }}
+                        />
+                      ) : null}
                       {item.value && <Text style={styles.rowValue}>{item.value}</Text>}
-                      {!item.destructive && item.id !== 'about' && item.id !== 'faq' && item.id !== 'icloud-sync' && (
-                        <MaterialIcons name="arrow-outward" size={20} color="#C7C7CC" />
+                      {!item.destructive && item.id !== 'about' && item.id !== 'faq' && item.id !== 'icloud-sync' && item.id !== 'dark-mode' && (
+                        <MaterialIcons name="arrow-outward" size={20} color={palette.iconColor} />
                       )}
                       {(item.id === 'faq' || item.id === 'icloud-sync') && (
-                        <MaterialIcons name="arrow-forward-ios" size={15} color="#C7C7CC" />
+                        <MaterialIcons name="arrow-forward-ios" size={15} color={palette.iconColor} />
                       )}
                     </View>
                   </TouchableOpacity>
@@ -454,8 +651,10 @@ const UserProfileHeader: React.FC<{
     avatarUrl: string;
     joinedAt: string;
   };
+  palette: SettingsPalette;
+  styles: ReturnType<typeof createStyles>;
   onPressEdit: () => void;
-}> = ({ profile, onPressEdit }) => {
+}> = ({ profile, palette, styles, onPressEdit }) => {
   const membershipType = useAppStore((state) => state.membershipType);
   const joinedText = formatJoinedAt(profile.joinedAt);
   const displayName = profile.displayName || 'User';
@@ -475,7 +674,7 @@ const UserProfileHeader: React.FC<{
         <View style={styles.profileLeft}>
           {isPremium ? (
             <LinearGradient
-              colors={['#8FE58C', '#8872F8']}
+              colors={[palette.plusGradientStart, palette.plusGradientEnd]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={styles.avatarRingLegend}
@@ -518,7 +717,7 @@ const UserProfileHeader: React.FC<{
               <Text style={styles.displayName}>{displayName}</Text>
               {isPremium ? (
                 <LinearGradient
-                  colors={['#8FE58C', '#8872F8']}
+                  colors={[palette.plusGradientStart, palette.plusGradientEnd]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   style={styles.plusBadge}
@@ -535,366 +734,403 @@ const UserProfileHeader: React.FC<{
           </View>
         </View>
         <TouchableOpacity style={styles.profileEditButton} onPress={onPressEdit}>
-          <HugeiconsIcon icon={Edit01Icon} size={18} color="#2F2F2F" strokeWidth={2.2} />
+          <HugeiconsIcon icon={Edit01Icon} size={18} color={palette.profileEditIcon} strokeWidth={2.2} />
         </TouchableOpacity>
       </View>
     </View>
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F8F8F8',
-    position: 'relative',
-    zIndex: 9000,
-    elevation: 30,
-  },
-  glassHeader: {
-    backgroundColor: 'rgba(248, 248, 248, 0.62)',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.45)',
-    overflow: 'hidden',
-    paddingHorizontal: 20,
-    paddingBottom: 10,
-  },
-  content: {
-    paddingHorizontal: 20,
-    paddingTop: 28,
-    paddingBottom: 120,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    marginBottom: 20,
-  },
-  title: {
-    fontSize: 26,
-    color: '#333333',
-    fontWeight: '800'
-  },
-  paywallBannerTouchable: {
-    marginTop: 15,
-    marginBottom: 12,
-  },
-  paywallBanner: {
-    position: 'relative',
-    borderRadius: 20,
-    minHeight: 120,
-    paddingLeft: 18,
-    paddingRight: 12,
-    paddingVertical: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    overflow: 'hidden',
-  },
-  paywallBannerTextBlock: {
-    flex: 1,
-    paddingLeft: 8,
-  },
-  paywallBannerCaption: {
-    color: 'rgba(255,255,255,0.72)',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0.8,
-    marginBottom: 8,
-  },
-  paywallBannerTitle: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '800',
-    letterSpacing: -0.3,
-  },
-  paywallBannerAction: {
-    color: '#8FE58C',
-    fontSize: 13,
-    fontWeight: '700',
-    marginTop: 12,
-  },
-  paywallBannerImage: {
-    position: 'absolute',
-    top: 0,
-    right: 5,
-    width: 140,
-    height: 113,
-    marginLeft: 8,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 20,
-    elevation: 8,
-  },
-  bentoCardContainer: {
-    backgroundColor: 'transparent',
-    borderRadius: 0,
-    padding: 0,
-    shadowColor: 'transparent',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    elevation: 0,
-    marginBottom: 0,
-    overflow: 'hidden',
-  },
-  bentoCardBackground: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  bentoGrid: {
-    gap: 10,
-    marginBottom: 0,
-  },
-  profileCard: {
-    backgroundColor: '#F8F8F8',
-    paddingHorizontal: 8,
-    paddingVertical: 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderRadius: 18,
-  },
-  profileLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    flex: 1,
-  },
-  avatarRing: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
-  },
-  avatarRingLegend: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    padding: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarRingInner: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    padding: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
-  },
-  avatarImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-  },
-  avatarFallback: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#D9DEE8',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarInitials: {
-    color: '#3B4454',
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  profileText: {
-    flex: 1,
-  },
-  nameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  displayName: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#2D2D2D',
-  },
-  plusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginLeft: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  plusBadgeText: {
-    color: '#fff',
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  freeBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginLeft: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#E7E7E7',
-  },
-  freeBadgeText: {
-    color: '#5A5A5A',
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  userMeta: {
-    marginTop: 8,
-    fontSize: 12,
-    color: '#9C9C9C',
-  },
-  profileEditButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sectionWrapper: {
-    marginTop: 22,
-  },
-  sectionLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#9A9A9A',
-    marginBottom: 10,
-    marginLeft: 8,
-  },
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    shadowColor: '#d2d2d2',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 20,
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#E8E8E8',
-  },
-  rowLast: {
-    borderBottomWidth: 0,
-  },
-  rowLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#000000',
-  },
-  rowLabelDestructive: {
-    color: '#FF3B30',
-  },
-  rowRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  rowValue: {
-    fontSize: 10,
-    color: '#8E8E93',
-    marginRight: 0,
-  },
-  rowContent: {
-    flex: 1,
-    flexDirection: 'column',
-    alignItems: 'flex-start',
-  },
-  backupMeta: {
-    marginTop: 3,
-    marginHorizontal: 0,
-    fontSize: 11,
-    color: '#8E8E93',
-    lineHeight: 16,
-  },
-  backupHint: {
-    marginTop: 3,
-    marginHorizontal: 0,
-    fontSize: 10,
-    color: '#B0B0B0',
-    lineHeight: 14,
-  },
-  backupNote: {
-    marginTop: 10,
-    marginHorizontal: 20,
-    marginBottom: 14,
-    gap: 8,
-  },
-  backupNoteHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  backupNoteTitle: {
-    flex: 1,
-    marginLeft: 8,
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#8E8E93',
-  },
-  backupNoteBody: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 6,
-  },
-  backupNoteText: {
-    flex: 1,
-    fontSize: 10,
-    color: '#8E8E93',
-    lineHeight: 16,
-  },
-  footer: {
-    flexDirection: 'row',
-    marginTop: 80,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  footerLogo: {
-    width: 28,
-    height: 28,
-    resizeMode: 'contain',
-    opacity: 0.6,
-  },
-  version: {
-    fontSize: 11,
-    color: '#8E8E93',
-    lineHeight: 14,
-  },
-});
+const createStyles = (palette: SettingsPalette) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: palette.screenBackground,
+      position: 'relative',
+      zIndex: 9000,
+      elevation: 30,
+    },
+    glassHeader: {
+      backgroundColor: palette.headerBackground,
+      borderBottomWidth: 1,
+      borderBottomColor: palette.headerBorder,
+      overflow: 'hidden',
+      paddingHorizontal: 20,
+      paddingBottom: 10,
+    },
+    content: {
+      paddingHorizontal: 20,
+      paddingTop: 28,
+      paddingBottom: 120,
+    },
+    titleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'flex-start',
+      marginBottom: 20,
+    },
+    title: {
+      fontSize: 26,
+      color: palette.titleText,
+      fontWeight: '800',
+    },
+    paywallBannerTouchable: {
+      marginTop: 15,
+      marginBottom: 12,
+    },
+    paywallBanner: {
+      position: 'relative',
+      borderRadius: 20,
+      minHeight: 120,
+      paddingLeft: 18,
+      paddingRight: 12,
+      paddingVertical: 14,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      overflow: 'hidden',
+    },
+    paywallBannerTextBlock: {
+      flex: 1,
+      paddingLeft: 8,
+    },
+    paywallBannerCaption: {
+      color: palette.paywallCaption,
+      fontSize: 12,
+      fontWeight: '800',
+      letterSpacing: 0.8,
+      marginBottom: 8,
+    },
+    paywallBannerTitle: {
+      color: palette.paywallTitle,
+      fontSize: 18,
+      fontWeight: '800',
+      letterSpacing: -0.3,
+    },
+    paywallBannerAction: {
+      color: palette.paywallAction,
+      fontSize: 13,
+      fontWeight: '700',
+      marginTop: 12,
+    },
+    paywallBannerImage: {
+      position: 'absolute',
+      top: 0,
+      right: 5,
+      width: 140,
+      height: 113,
+      marginLeft: 8,
+      shadowColor: '#232323',
+      shadowOffset: { width: 0, height: 0 },
+      shadowOpacity: 0.8,
+      shadowRadius: 20,
+      elevation: 8,
+    },
+    bentoCardContainer: {
+      backgroundColor: palette.transparent,
+      borderRadius: 0,
+      padding: 0,
+      shadowColor: palette.transparent,
+      shadowOffset: { width: 0, height: 0 },
+      shadowOpacity: 0,
+      shadowRadius: 0,
+      elevation: 0,
+      marginBottom: 0,
+      overflow: 'hidden',
+    },
+    bentoCardBackground: {
+      ...StyleSheet.absoluteFillObject,
+    },
+    bentoGrid: {
+      gap: 10,
+      marginBottom: 0,
+    },
+    profileCard: {
+      backgroundColor: palette.screenBackground,
+      paddingHorizontal: 8,
+      paddingVertical: 18,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      borderRadius: 18,
+    },
+    profileLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      flex: 1,
+    },
+    avatarRing: {
+      width: 68,
+      height: 68,
+      borderRadius: 34,
+      borderWidth: 2,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: palette.avatarRingBackground,
+    },
+    avatarRingLegend: {
+      width: 68,
+      height: 68,
+      borderRadius: 34,
+      padding: 2,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    avatarRingInner: {
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+      padding: 2,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: palette.avatarRingBackground,
+    },
+    avatarImage: {
+      width: 60,
+      height: 60,
+      borderRadius: 30,
+    },
+    avatarFallback: {
+      width: 60,
+      height: 60,
+      borderRadius: 30,
+      backgroundColor: palette.avatarFallbackBackground,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    avatarInitials: {
+      color: palette.avatarFallbackText,
+      fontSize: 18,
+      fontWeight: '800',
+    },
+    profileText: {
+      flex: 1,
+    },
+    nameRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    displayName: {
+      fontSize: 20,
+      fontWeight: '800',
+      color: palette.titleText,
+    },
+    plusBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 12,
+      marginLeft: 6,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    plusBadgeText: {
+      color: palette.plusText,
+      fontSize: 9,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+      shadowColor: palette.primaryText,
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.2,
+      shadowRadius: 2,
+      elevation: 2,
+    },
+    freeBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 12,
+      marginLeft: 6,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: palette.freeBadgeBackground,
+    },
+    freeBadgeText: {
+      color: palette.freeBadgeText,
+      fontSize: 9,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+    },
+    userMeta: {
+      marginTop: 8,
+      fontSize: 12,
+      color: palette.secondaryText,
+    },
+    profileEditButton: {
+      width: 30,
+      height: 30,
+      borderRadius: 18,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    sectionWrapper: {
+      marginTop: 22,
+    },
+    sectionLabel: {
+      fontSize: 14,
+      fontWeight: '500',
+      color: palette.tertiaryText,
+      marginBottom: 10,
+      marginLeft: 8,
+    },
+    card: {
+      backgroundColor: palette.cardBackground,
+      borderRadius: 20,
+      shadowColor: palette.sectionShadow,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.16,
+      shadowRadius: 8,
+      elevation: 8,
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingVertical: 20,
+      borderBottomWidth: 0.5,
+      borderBottomColor: palette.rowBorder,
+    },
+    rowLast: {
+      borderBottomWidth: 0,
+    },
+    rowLabel: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: palette.primaryText,
+    },
+    rowLabelDestructive: {
+      color: palette.destructiveText,
+    },
+    rowRight: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    rowValue: {
+      fontSize: 10,
+      color: palette.secondaryText,
+      marginRight: 0,
+    },
+    rowContent: {
+      flex: 1,
+      flexDirection: 'column',
+      alignItems: 'flex-start',
+    },
+    backupMeta: {
+      marginTop: 3,
+      marginHorizontal: 0,
+      fontSize: 11,
+      color: palette.secondaryText,
+      lineHeight: 16,
+    },
+    backupHint: {
+      marginTop: 3,
+      marginHorizontal: 0,
+      fontSize: 10,
+      color: palette.tertiaryText,
+      lineHeight: 14,
+    },
+    backupNote: {
+      marginTop: 10,
+      marginHorizontal: 20,
+      marginBottom: 14,
+      gap: 8,
+    },
+    backupNoteHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    backupNoteTitle: {
+      flex: 1,
+      marginLeft: 8,
+      fontSize: 11,
+      fontWeight: '600',
+      color: palette.secondaryText,
+    },
+    backupNoteBody: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 6,
+    },
+    backupNoteText: {
+      flex: 1,
+      fontSize: 10,
+      color: palette.secondaryText,
+      lineHeight: 16,
+    },
+    footer: {
+      flexDirection: 'row',
+      marginTop: 80,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+    },
+    footerLogo: {
+      width: 28,
+      height: 28,
+      resizeMode: 'contain',
+      opacity: 0.6,
+    },
+    version: {
+      fontSize: 11,
+      color: palette.secondaryText,
+      lineHeight: 14,
+    },
+  });
 
 // ================ FAQ Screen Component ================
 export function FAQScreen({ navigation }: any) {
   const { t } = useTranslation();
+  const { isDark: isSystemDark } = useTheme();
   const insets = useSafeAreaInsets();
+  const [manualDarkMode, setManualDarkMode] = useState<boolean | null | undefined>(() => getCachedThemePreference());
+
+  const loadThemePreference = useCallback(async () => {
+    const value = await hydrateThemePreference();
+    setManualDarkMode(value);
+  }, []);
+
+  useEffect(() => {
+    void loadThemePreference();
+  }, [loadThemePreference]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadThemePreference();
+    }, [loadThemePreference])
+  );
+
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener('theme:changed', (nextValue?: boolean) => {
+      if (typeof nextValue !== 'boolean') return;
+      setManualDarkMode(nextValue);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  const isDarkMode = manualDarkMode ?? false;
+  const themeForFaq = isDarkMode ? darkTheme : lightTheme;
+  const palette = useMemo(
+    () => buildPalette(isDarkMode, themeForFaq.primary),
+    [isDarkMode, themeForFaq.primary]
+  );
+  const faqStyles = useMemo(() => createFaqStyles(palette), [palette]);
   const faqData = t('settings.faq.sections', { returnObjects: true }) as Array<{
     category: string;
     items: Array<{ question: string; answer: string }>;
   }>;
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F8F8' }} edges={['left', 'right', 'bottom']}>
-      <BlurView tint="light" intensity={80} style={[faqStyles.glassHeader, { paddingTop: insets.top + 8 }]}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: palette.screenBackground }} edges={['left', 'right', 'bottom']}>
+      <BlurView tint={isDarkMode ? 'dark' : 'light'} intensity={80} style={[faqStyles.glassHeader, { paddingTop: insets.top + 8 }]}>
         <View style={faqStyles.header}>
           <TouchableOpacity style={faqStyles.backButton} onPress={() => navigation.goBack()}>
-            <MaterialIcons name="arrow-back-ios" size={22} color="#000" />
+            <MaterialIcons name="arrow-back-ios" size={22} color={palette.primaryText} />
           </TouchableOpacity>
           <Text style={faqStyles.headerTitle}>{t('settings.faq.header')}</Text>
           <View style={{ width: 44 }} />
@@ -928,95 +1164,98 @@ export function FAQScreen({ navigation }: any) {
   );
 }
 
-const faqStyles = StyleSheet.create({
-  glassHeader: {
-    backgroundColor: 'rgba(248, 248, 248, 0.62)',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.45)',
-    overflow: 'hidden',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 16,
-  },
-  backButton: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  content: {
-    padding: 20,
-    paddingBottom: 40,
-  },
-  section: {
-    marginBottom: 32,
-  },
-  categoryTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    marginBottom: 16,
-  },
-  faqItem: {
-    marginBottom: 20,
-    backgroundColor: '#F8F8F8',
-    borderRadius: 12,
-    padding: 16,
-  },
-  questionRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 10,
-  },
-  qLabel: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#000',
-    marginRight: 8,
-  },
-  questionText: {
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#000',
-    lineHeight: 22,
-  },
-  answerRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  aLabel: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#666',
-    marginRight: 8,
-  },
-  answerText: {
-    flex: 1,
-    fontSize: 14,
-    color: '#666',
-    lineHeight: 21,
-  },
-  footer: {
-    marginTop: 10,
-    marginBottom: 100,
-    padding: 16,
-    backgroundColor: '#F0F0F0',
-    borderRadius: 12,
-  },
-  footerText: {
-    fontSize: 13,
-    color: '#666',
-    lineHeight: 20,
-    textAlign: 'center',
-  },
-});
+const createFaqStyles = (palette: SettingsPalette) =>
+  StyleSheet.create({
+    glassHeader: {
+      backgroundColor: palette.headerBackground,
+      borderBottomWidth: 1,
+      borderBottomColor: palette.headerBorder,
+      overflow: 'hidden',
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 12,
+      paddingTop: 10,
+      paddingBottom: 16,
+    },
+    backButton: {
+      width: 44,
+      height: 44,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    headerTitle: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: palette.titleText,
+    },
+    content: {
+      padding: 20,
+      paddingBottom: 40,
+    },
+    section: {
+      marginBottom: 32,
+    },
+    categoryTitle: {
+      fontSize: 20,
+      fontWeight: '800',
+      marginBottom: 16,
+      color: palette.titleText,
+    },
+    faqItem: {
+      marginBottom: 20,
+      backgroundColor: palette.cardBackground,
+      borderRadius: 12,
+      padding: 16,
+    },
+    questionRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      marginBottom: 10,
+    },
+    qLabel: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: palette.faqQuestionLabel,
+      marginRight: 8,
+    },
+    questionText: {
+      flex: 1,
+      fontSize: 15,
+      fontWeight: '600',
+      color: palette.primaryText,
+      lineHeight: 22,
+    },
+    answerRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+    },
+    aLabel: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: palette.faqAnswerLabel,
+      marginRight: 8,
+    },
+    answerText: {
+      flex: 1,
+      fontSize: 14,
+      color: palette.subtleText,
+      lineHeight: 21,
+    },
+    footer: {
+      marginTop: 10,
+      marginBottom: 100,
+      padding: 16,
+      backgroundColor: palette.mutedCardBackground,
+      borderRadius: 12,
+    },
+    footerText: {
+      fontSize: 13,
+      color: palette.subtleText,
+      lineHeight: 20,
+      textAlign: 'center',
+    },
+  });
 

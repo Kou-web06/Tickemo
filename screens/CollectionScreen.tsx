@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { View, FlatList, TouchableOpacity, Alert, StyleSheet, Text, TextInput, ScrollView, Modal, Animated, ActivityIndicator, useWindowDimensions, ImageBackground, Linking, Easing, LayoutAnimation, UIManager, Platform, Keyboard } from 'react-native';
+import { View, FlatList, TouchableOpacity, Alert, StyleSheet, Text, TextInput, ScrollView, Modal, Animated, ActivityIndicator, useWindowDimensions, ImageBackground, Linking, Easing, LayoutAnimation, UIManager, Platform, Keyboard, DeviceEventEmitter } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { BlurView } from 'expo-blur';
@@ -34,12 +34,29 @@ import { getAppWidth } from '../utils/layout';
 import { useFonts, LINESeedJP_400Regular, LINESeedJP_700Bold, LINESeedJP_800ExtraBold } from '@expo-google-fonts/line-seed-jp';
 import { ArtistGridItem } from '../components/ArtistGridItem';
 import ArtistDetailScreen from './ArtistDetailScreen';
+import { useTheme } from '../src/theme';
+import { getCachedThemePreference, hydrateThemePreference } from '../lib/themePreference';
 
 const Stack = createNativeStackNavigator();
 const FREE_TICKET_LIMIT = 3;
 const APPLE_MUSIC_DEVELOPER_TOKEN = 'eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjMyTVlRNk5WOTYifQ.eyJpc3MiOiJRMkxMMkI3OTJWIiwiaWF0IjoxNzY5ODQ5MDA5LCJleHAiOjE3ODU0MDEwMDksImF1ZCI6Imh0dHBzOi8vYXBwbGVpZC5hcHBsZS5jb20iLCJzdWIiOiJtZWRpYS5jb20uYW5vbnltb3VzLlRpY2tlbW8ifQ.ect6vO1q3aC9XJVYCUBVLlTHaVEcZebm0-dVZ3ak6uglI33e1ra3qcwkawXaScFFcLB8sgX5TEcFEj9QGF1Z8A';
 
 const APPLE_MUSIC_BADGE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 124.09227 26.77606"><g><g><g><path d="M38.16589,20.42H33.429l-1.13685,3.35888H30.28544l4.48712-12.42727h2.08423L41.3439,23.77891H39.30274Zm-4.246-1.55025H37.675l-1.85169-5.45114H35.77161Z" fill="#fff"/><path d="M51.02436,19.24873c0,2.81686-1.50719,4.62549-3.78089,4.62549a3.07055,3.07055,0,0,1-2.85074-1.5847H44.34966v4.48654h-1.8603V14.71856h1.8v1.50776h0.03445A3.211,3.211,0,0,1,47.209,14.62439C49.50855,14.62439,51.02436,16.44106,51.02436,19.24873Zm-1.912,0c0-1.83389-.94738-3.03964-2.39428-3.03964-1.42106,0-2.37705,1.231-2.37705,3.03964,0,1.82585.956,3.04883,2.37705,3.04883C48.165,22.29756,49.11238,21.101,49.11238,19.24873Z" fill="#fff"/><path d="M60.989,19.24873c0,2.81686-1.50719,4.62549-3.78089,4.62549a3.07055,3.07055,0,0,1-2.85074-1.5847H54.31433v4.48654H52.454V14.71856h1.8v1.50776H54.2885a3.211,3.211,0,0,1,2.88519-1.60193C59.47322,14.62439,60.989,16.44106,60.989,19.24873Zm-1.912,0c0-1.83389-.94738-3.03964-2.39428-3.03964-1.42106,0-2.37705,1.231-2.37705,3.03964,0,1.82585.956,3.04883,2.37705,3.04883C58.12967,22.29756,59.077,21.101,59.077,19.24873Z" fill="#fff"/><path d="M62.4876,11.35164h1.8603V23.77891H62.4876V11.35164Z" fill="#fff"/><path d="M74.02836,21.11822c-0.24976,1.64441-1.85169,2.77323-3.90146,2.77323-2.63543,0-4.2718-1.76614-4.2718-4.59908,0-2.84213,1.645-4.6852,4.19429-4.6852,2.50624,0,4.08233,1.7225,4.08233,4.46932v0.63733H67.73262v0.11254A2.35969,2.35969,0,0,0,70.17,22.39287a2.0515,2.0515,0,0,0,2.09284-1.27465h1.76556Zm-6.28713-2.70433h4.53018a2.179,2.179,0,0,0-2.222-2.30011A2.29426,2.29426,0,0,0,67.74123,18.41389Z" fill="#fff"/><path d="M90.17623,23.77891V14.63243H90.11652l-3.747,9.05232H84.93983l-3.75505-9.05232H81.12506v9.14648h-1.757V11.35164h2.23006l4.02261,9.80907h0.0689l4.01343-9.80907h2.23925V23.77891H90.17623Z" fill="#fff"/><path d="M101.8479,23.77891h-1.78221V22.22062H100.022a2.83019,2.83019,0,0,1-2.80768,1.66164,3.02075,3.02075,0,0,1-3.17744-3.34969v-5.814h1.8603v5.45229a1.80745,1.80745,0,0,0,1.93724,2.10949,2.09861,2.09861,0,0,0,2.15313-2.3426V14.71856h1.8603v9.06036Z" fill="#fff"/><path d="M107.13827,14.61521c2.00614,0,3.445,1.11159,3.48749,2.71351H108.878a1.56135,1.56135,0,0,0-1.7914-1.29188c-1.00824,0-1.68.46508-1.68,1.1713,0,.542.44785.90374,1.38719,1.13685l1.52384.35254c1.82585.43981,2.51485,1.11159,2.51485,2.43791,0,1.63638-1.55025,2.756-3.76309,2.756-2.1359,0-3.57476-1.09436-3.71256-2.748h1.84308A1.68663,1.68663,0,0,0,107.1555,22.479c1.11044,0,1.80863-.457,1.80863-1.18049,0-.55924-0.3445-0.86125-1.29188-1.1024l-1.61915-.39618c-1.63638-.39618-2.46318-1.231-2.46318-2.48844C103.58992,15.70957,105.02763,14.61521,107.13827,14.61521Z" fill="#fff"/><path d="M112.28166,12.33347a1.08081,1.08081,0,1,1,1.076,1.05876A1.06406,1.06406,0,0,1,112.28166,12.33347Zm0.14584,2.38509h1.8603v9.06036h-1.8603V14.71856Z" fill="#fff"/><path d="M122.30087,17.83628a2.00232,2.00232,0,0,0-2.1359-1.67083c-1.42968,0-2.37705,1.19771-2.37705,3.08328,0,1.9292.95541,3.09246,2.39428,3.09246a1.95079,1.95079,0,0,0,2.11868-1.62834h1.7914a3.62162,3.62162,0,0,1-3.9273,3.17859c-2.58375,0-4.2718-1.76614-4.2718-4.64271,0-2.81572,1.68805-4.64157,4.25458-4.64157a3.64183,3.64183,0,0,1,3.9273,3.22912h-1.77418Z" fill="#fff"/></g><path d="M24.665,3.35321a5.326,5.326,0,0,0-3.38091-3.033A10.95611,10.95611,0,0,0,18.24294,0H6.91979A10.95611,10.95611,0,0,0,3.87864.32024a5.326,5.326,0,0,0-3.38091,3.033A9.86307,9.86307,0,0,0,0,6.91972V18.24294a9.86307,9.86307,0,0,0,.49773,3.56651,5.326,5.326,0,0,0,3.38091,3.033,10.95611,10.95611,0,0,0,3.04115.32024H18.24294a10.95611,10.95611,0,0,0,3.04115-.32024,5.326,5.326,0,0,0,3.38091-3.033,9.86283,9.86283,0,0,0,.49766-3.56651V6.91972A9.86283,9.86283,0,0,0,24.665,3.35321Zm-6.3088,13.95341a2.3331,2.3331,0,0,1-.36653.86326,2.19508,2.19508,0,0,1-.68843.63668,2.74433,2.74433,0,0,1-.874.3178,3.3446,3.3446,0,0,1-1.34936.06833,1.87928,1.87928,0,0,1-.9079-0.461,1.95637,1.95637,0,0,1-.09919-2.81,2.18135,2.18135,0,0,1,.81632-0.52465,8.53745,8.53745,0,0,1,1.3841-.35031q0.24406-.0492.48826-0.09847a0.84762,0.84762,0,0,0,.5456-0.27876,0.91272,0.91272,0,0,0,.15151-0.62039l0.00014-5.54523c0-.42409-0.19019-0.53965-0.5952-0.46185-0.28945.05648-6.50617,1.31025-6.50617,1.31025a0.51676,0.51676,0,0,0-.4739.63438l0.00014,8.12518a4.27936,4.27936,0,0,1-.08368.92032,2.33425,2.33425,0,0,1-.36661.86333,2.194,2.194,0,0,1-.68843.63661,2.75352,2.75352,0,0,1-.874.32247,3.34456,3.34456,0,0,1-1.34936.06833,1.88559,1.88559,0,0,1-.9079-0.46558,1.99119,1.99119,0,0,1-.09912-2.81,2.18016,2.18016,0,0,1,.81625-0.52465,8.53944,8.53944,0,0,1,1.3841-.35031q0.24406-.0492.48826-0.09847a0.84778,0.84778,0,0,0,.5456-0.27876,0.91641,0.91641,0,0,0,.165-0.61608V6.4217a1.65067,1.65067,0,0,1,.01737-0.2522,0.7605,0.7605,0,0,1,.25163-0.4856A1.04382,1.04382,0,0,1,9.647,5.47425l0.00287-.00057,7.47881-1.50891c0.06488-.01321.60539-0.10916.66618-0.11447a0.56829,0.56829,0,0,1,.63122.6613l0.00036,11.87033A4.304,4.304,0,0,1,18.35619,17.30661Z" fill="#fff"/></g></g></svg>`;
+
+const buildCollectionPalette = (isDarkMode: boolean) => ({
+  screenBackground: isDarkMode ? '#121212' : '#F8F8F8',
+  headerBackground: isDarkMode ? 'rgba(18, 18, 18, 0.74)' : 'rgba(248, 248, 248, 0.62)',
+  headerBorder: isDarkMode ? 'rgba(255, 255, 255, 0.10)' : 'rgba(255, 255, 255, 0.45)',
+  primaryText: isDarkMode ? '#F5F5F7' : '#333333',
+  secondaryText: isDarkMode ? '#B7B7C2' : '#777777',
+  tertiaryText: isDarkMode ? '#8A8A94' : '#8A8A8A',
+  searchFieldBackground: isDarkMode ? '#2A2A2F' : '#EBEBEB',
+  emptyText: isDarkMode ? '#A1A1AA' : '#555555',
+  modalSurface: isDarkMode ? 'rgba(34, 34, 39, 0.9)' : 'rgba(255, 255, 255, 0.5)',
+  modalBorder: isDarkMode ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.3)',
+  iconOnDark: isDarkMode ? '#F5F5F7' : '#000000',
+  searchEmptyIcon: isDarkMode ? '#8F8F9A' : '#B4B4B4',
+});
 
 const seededRandom = (seed: number): number => {
   const x = Math.sin(seed) * 10000;
@@ -119,7 +136,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255, 255, 255, 0.45)',
     paddingHorizontal: 24,
-    paddingBottom: 14,
+    paddingBottom: 5,
   },
   headerContainer: {
     flexDirection: 'row',
@@ -1020,6 +1037,7 @@ interface ArtistItem {
 
 const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewRecord: (record: ChekiRecord) => Promise<void>; deleteRecord: (id: string) => Promise<void>; isPremium: boolean }> = ({ navigation, records, addNewRecord, deleteRecord, isPremium }) => {
   const { t, i18n } = useTranslation();
+  const { isDark: isSystemDark } = useTheme();
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const setlists = useAppStore((state) => state.setlists);
@@ -1031,7 +1049,6 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
   const [selectedRecord, setSelectedRecord] = useState<ChekiRecord | null>(null);
   const [animatingCardId, setAnimatingCardId] = useState<string | null>(null);
   const [closingRecordId, setClosingRecordId] = useState<string | null>(null);
-  const [showAfterAnimId, setShowAfterAnimId] = useState<string | null>(null);
   const [filterType, setFilterType] = useState<'all' | 'upcoming' | 'past'>('all');
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [isGridLayout, setIsGridLayout] = useState(false);
@@ -1039,8 +1056,10 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
   const [searchQuery, setSearchQuery] = useState('');
   const [headerHeight, setHeaderHeight] = useState(0);
   const [isListAnimating, setIsListAnimating] = useState(false);
+  const [isThemeTransitioning, setIsThemeTransitioning] = useState(false);
   const [isNextLiveFlipped, setIsNextLiveFlipped] = useState(false);
   const [todaySongForNextLive, setTodaySongForNextLive] = useState<AppleMusicSong | null>(null);
+  const [manualDarkMode, setManualDarkMode] = useState<boolean | null | undefined>(() => getCachedThemePreference());
   const itemAnimations = useRef(new Map<string, Animated.Value>()).current;
   const nextLiveFlipAnim = useRef(new Animated.Value(0)).current;
   const nextLiveFlippedRef = useRef(false);
@@ -1050,6 +1069,58 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
   const renderCountRef = useRef(0);
   
   renderCountRef.current++;
+
+  const loadThemePreference = useCallback(async () => {
+    const value = await hydrateThemePreference();
+    setManualDarkMode(value);
+  }, []);
+
+  useEffect(() => {
+    void loadThemePreference();
+  }, [loadThemePreference]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadThemePreference();
+    }, [loadThemePreference])
+  );
+
+  useEffect(() => {
+    let resetTimer: ReturnType<typeof setTimeout> | null = null;
+    const subscription = DeviceEventEmitter.addListener('theme:changed', (nextValue?: boolean) => {
+      if (typeof nextValue === 'boolean') {
+        setManualDarkMode(nextValue);
+      } else {
+        void loadThemePreference();
+      }
+
+      // Theme switches can interrupt list fade animations and leave cards visually hidden.
+      setIsThemeTransitioning(true);
+      setIsListAnimating(false);
+      setAnimatingCardId(null);
+      setClosingRecordId(null);
+      itemAnimations.forEach((value) => {
+        value.setValue(1);
+      });
+
+      if (resetTimer) {
+        clearTimeout(resetTimer);
+      }
+      resetTimer = setTimeout(() => {
+        setIsThemeTransitioning(false);
+      }, 260);
+    });
+
+    return () => {
+      if (resetTimer) {
+        clearTimeout(resetTimer);
+      }
+      subscription.remove();
+    };
+  }, [itemAnimations, loadThemePreference]);
+
+  const isDarkMode = manualDarkMode ?? false;
+  const palette = useMemo(() => buildCollectionPalette(isDarkMode), [isDarkMode]);
 
   useEffect(() => {
     if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -1455,6 +1526,24 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
 
   const artistGridData = useMemo((): ArtistItem[] => {
     if (!isGridLayout) return [];
+    const nowTs = Date.now();
+
+    const toLiveTimeWithStart = (record: ChekiRecord) => {
+      if (!record?.date) return 0;
+
+      const date = new Date(record.date.replace(/\./g, '-'));
+      const [hour, minute] = (record.startTime || '').split(':').map((value) => Number(value));
+
+      if (!Number.isNaN(hour)) {
+        date.setHours(hour, Number.isNaN(minute) ? 0 : minute, 0, 0);
+      } else {
+        date.setHours(23, 59, 59, 999);
+      }
+
+      const ts = date.getTime();
+      return Number.isFinite(ts) ? ts : 0;
+    };
+
     const map = new Map<string, ArtistItem>();
     filteredRecords.forEach((record) => {
       const names =
@@ -1473,21 +1562,21 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
             : chekiImgUrl
             ? resolveLocalImageUri(chekiImgUrl)
             : null;
-          const latestDateTs = toTime(record);
+
           map.set(key, {
             id: key,
             name,
             imageUri: resolvedUri,
             showCount: 0,
-            latestDate: record.date || '-',
-            latestDateTs,
+            latestDate: '-',
+            latestDateTs: 0,
           });
         }
         const artistItem = map.get(key)!;
         artistItem.showCount++;
 
-        const currentRecordDateTs = toTime(record);
-        if (currentRecordDateTs > artistItem.latestDateTs) {
+        const currentRecordDateTs = toLiveTimeWithStart(record);
+        if (currentRecordDateTs > 0 && currentRecordDateTs < nowTs && currentRecordDateTs > artistItem.latestDateTs) {
           artistItem.latestDateTs = currentRecordDateTs;
           artistItem.latestDate = record.date || '-';
         }
@@ -1525,7 +1614,7 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
   const getItemAnimation = (id: string) => {
     const existing = itemAnimations.get(id);
     if (existing) return existing;
-    const value = new Animated.Value(0);
+    const value = new Animated.Value(1);
     itemAnimations.set(id, value);
     return value;
   };
@@ -1576,7 +1665,7 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
   }, [displayData, itemAnimations, filterType]);
 
   if (!fontsLoaded) {
-    return <View style={styles.listContainer} />;
+    return <View style={[styles.listContainer, { backgroundColor: palette.screenBackground }]} />;
   }
 
   const renderEmptyState = () => (
@@ -1599,17 +1688,24 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
 
   const renderSearchEmptyState = () => (
     <View style={styles.searchEmptyStateContainer}>
-      <MaterialIcons name="sentiment-dissatisfied" size={44} color="#B4B4B4" />
-      <Text style={styles.searchEmptyStateText}>この条件のライブ記録は見つかりません</Text>
+      <MaterialIcons name="sentiment-dissatisfied" size={44} color={palette.searchEmptyIcon} />
+      <Text style={[styles.searchEmptyStateText, { color: palette.secondaryText }]}>この条件のライブ記録は見つかりません</Text>
     </View>
   );
 
   return (
-    <SafeAreaView style={styles.listContainer} edges={['left', 'right', 'bottom']}> 
+    <SafeAreaView style={[styles.listContainer, { backgroundColor: palette.screenBackground }]} edges={['left', 'right', 'bottom']}> 
       <BlurView
-        tint="light"
+        tint={isDarkMode ? 'dark' : 'light'}
         intensity={80}
-        style={[styles.glassHeader, { paddingTop: insets.top + 10 }]}
+        style={[
+          styles.glassHeader,
+          {
+            paddingTop: insets.top + 10,
+            backgroundColor: palette.headerBackground,
+            borderBottomColor: palette.headerBorder,
+          },
+        ]}
         onLayout={(event) => {
           const nextHeight = Math.ceil(event.nativeEvent.layout.height);
           setHeaderHeight((prev) => (prev === nextHeight ? prev : nextHeight));
@@ -1617,13 +1713,13 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
       >
         {isSearching ? (
           <View style={styles.searchingHeaderContainer}>
-            <View style={styles.inlineSearchField}>
+            <View style={[styles.inlineSearchField, { backgroundColor: palette.searchFieldBackground }]}>
               <TextInput
                 value={searchQuery}
                 onChangeText={setSearchQuery}
                 placeholder="アーティスト、会場、曲名で検索..."
-                placeholderTextColor="#8A8A8A"
-                style={styles.inlineSearchInput}
+                placeholderTextColor={palette.tertiaryText}
+                style={[styles.inlineSearchInput, { color: palette.primaryText }]}
                 autoFocus={true}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -1631,26 +1727,26 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
               />
               {searchQuery.length > 0 ? (
                 <TouchableOpacity style={styles.searchClearButton} onPress={handleClearSearch} activeOpacity={0.7}>
-                  <Text style={styles.searchClearButtonText}>×</Text>
+                  <Text style={[styles.searchClearButtonText, { color: palette.tertiaryText }]}>×</Text>
                 </TouchableOpacity>
               ) : null}
             </View>
             <TouchableOpacity onPress={handleCancelSearch} activeOpacity={0.7}>
-              <Text style={styles.cancelSearchText}>キャンセル</Text>
+              <Text style={[styles.cancelSearchText, { color: '#A226D9' }]}>キャンセル</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <View style={styles.headerContainer}>
-            <Text style={styles.title}>Collection</Text>
+            <Text style={[styles.title, { color: palette.primaryText }]}>Collection</Text>
             <View style={styles.headerActions}>
               <TouchableOpacity style={styles.headerIconButton} activeOpacity={0.7} onPress={handleSearchPress}>
-                <HugeiconsIcon icon={Search01Icon} size={24} color="#333333" strokeWidth={2} />
+                <HugeiconsIcon icon={Search01Icon} size={24} color={palette.primaryText} strokeWidth={2} />
               </TouchableOpacity>
               <TouchableOpacity style={styles.headerIconButton} activeOpacity={0.7} onPress={handleToggleLayoutPress}>
                 <HugeiconsIcon
                   icon={isGridLayout ? LeftToRightListDashIcon : LayoutGridIcon}
                   size={24}
-                  color="#333333"
+                  color={palette.primaryText}
                   strokeWidth={2}
                 />
               </TouchableOpacity>
@@ -1666,7 +1762,7 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
           </View>
         ) : (
         <FlatList
-          key={isGridLayout ? 'artist-grid' : 'collection-list'}
+          key={isGridLayout ? 'artist-grid' : `collection-list-${isDarkMode ? 'dark' : 'light'}`}
           data={(isGridLayout ? artistGridData : displayData) as any[]}
           numColumns={isGridLayout ? 2 : 1}
           keyExtractor={(item) => (item as { id: string }).id}
@@ -1674,7 +1770,7 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
           ListHeaderComponent={
             !isSearching && !isGridLayout && nextLiveRecord ? (
               <View style={styles.nextLiveSection}>
-                <Text style={styles.nextLiveLabel}>{isNextLivePast ? 'LAST LIVE' : 'NEXT LIVE'}</Text>
+                <Text style={[styles.nextLiveLabel, { color: palette.primaryText }]}>{isNextLivePast ? 'LAST LIVE' : 'NEXT LIVE'}</Text>
                 <View>
                   <ImageBackground
                     source={nextLiveImageUri ? { uri: nextLiveImageUri } : require('../assets/ticketEmpty.png')}
@@ -1848,47 +1944,20 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
           const isSlideIn = isClosing && isAnimating;
           const animationDirection: 'out' | 'in' = isSlideIn ? 'in' : 'out';
 
-          // opacityとタップ可否を状態ごとに決定
-          let opacity = 0; // デフォルト非表示
-          let pointerEvents: 'auto' | 'none' = 'none';
-          
-          // 1. クローズ対象だがアニメ未開始: 非表示
-          if (isClosing && !isAnimating) {
-            opacity = 0;
-            pointerEvents = 'none';
-          }
-          // 2. モーダル表示中: 非表示
-          else if (isModal) {
-            opacity = 0;
-            pointerEvents = 'none';
-          }
-          // 3. スライドアウト中: 非表示
-          else if (isAnimating && !isSlideIn) {
-            opacity = 0;
-            pointerEvents = 'none';
-          }
-          // 4. スライドイン中: 表示（操作不可）
-          else if (isSlideIn && isAnimating) {
-            opacity = 1;
-            pointerEvents = 'none';
-          }
-          // 5. アニメ完了直後: 表示（操作可）
-          else if (showAfterAnimId === recordItem.id) {
-            opacity = 1;
-            pointerEvents = 'auto';
-          }
-          // 6. 通常状態: 表示（操作可）
-          else {
-            opacity = 1;
-            pointerEvents = 'auto';
-          }
+          // 常時表示を基本にして、必要時のみ非表示化する。
+          const shouldHideCard = !isThemeTransitioning && (
+            isModal ||
+            (isClosing && !isAnimating) ||
+            (isAnimating && !isSlideIn)
+          );
+          const opacity = shouldHideCard ? 0 : 1;
+          const pointerEvents: 'auto' | 'none' = shouldHideCard || (isSlideIn && isAnimating) ? 'none' : 'auto';
 
           // スライドイン完了時に状態をリセット
           const handleCardAnimationEnd = () => {
             if (animationDirection === 'in') {
               setAnimatingCardId(null);
               setClosingRecordId(null);
-              setShowAfterAnimId(recordItem.id);
             }
           };
           if (isListAnimating) {
@@ -1911,7 +1980,7 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
                   <TicketCard
                     record={recordItem}
                     width={currentCardWidth}
-                    isAnimating={isAnimating}
+                    isAnimating={isThemeTransitioning ? false : isAnimating}
                     animationDirection={animationDirection}
                     onAnimationEnd={handleCardAnimationEnd}
                   />
@@ -1931,7 +2000,7 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
               <TicketCard
                 record={recordItem}
                 width={currentCardWidth}
-                isAnimating={isAnimating}
+                isAnimating={isThemeTransitioning ? false : isAnimating}
                 animationDirection={animationDirection}
                 onAnimationEnd={handleCardAnimationEnd}
               />
@@ -1944,7 +2013,7 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
           windowSize={5}
           maxToRenderPerBatch={5}
           initialNumToRender={8}
-          removeClippedSubviews={true}
+          removeClippedSubviews={false}
         />
         )}
       </View>
@@ -1985,7 +2054,7 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
             onPress={() => setShowFilterModal(false)}
           >
             <View style={[styles.filterDropdownContainer, { top: filterTop, right: filterRight, minWidth: Math.max(180, windowWidth * 0.52) }]}>
-              <BlurView intensity={30} tint="light" style={styles.filterDropdown}>
+              <BlurView intensity={30} tint={isDarkMode ? 'dark' : 'light'} style={[styles.filterDropdown, { backgroundColor: palette.modalSurface, borderColor: palette.modalBorder }]}>
                 <TouchableOpacity
                   style={styles.filterDropdownItem}
                   onPress={() => {
@@ -1994,11 +2063,11 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
                   }}
                 >
                   {filterType === 'all' ? (
-                    <Ionicons name="checkmark" size={20} color="#000" />
+                    <Ionicons name="checkmark" size={20} color={palette.iconOnDark} />
                   ) : (
                     <View style={{ width: Math.max(18, windowWidth * 0.05) }} />
                   )}
-                  <Text style={styles.filterDropdownItemText}>{t('collection.filters.all')}</Text>
+                  <Text style={[styles.filterDropdownItemText, { color: palette.primaryText }]}>{t('collection.filters.all')}</Text>
                 </TouchableOpacity>
                 
                 <TouchableOpacity
@@ -2009,11 +2078,11 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
                   }}
                 >
                   {filterType === 'upcoming' ? (
-                    <Ionicons name="checkmark" size={20} color="#000" />
+                    <Ionicons name="checkmark" size={20} color={palette.iconOnDark} />
                   ) : (
                     <View style={{ width: Math.max(18, windowWidth * 0.05) }} />
                   )}
-                  <Text style={styles.filterDropdownItemText}>{t('collection.filters.upcoming')}</Text>
+                  <Text style={[styles.filterDropdownItemText, { color: palette.primaryText }]}>{t('collection.filters.upcoming')}</Text>
                 </TouchableOpacity>
                 
                 <TouchableOpacity
@@ -2024,11 +2093,11 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
                   }}
                 >
                   {filterType === 'past' ? (
-                    <Ionicons name="checkmark" size={20} color="#000" />
+                    <Ionicons name="checkmark" size={20} color={palette.iconOnDark} />
                   ) : (
                     <View style={{ width: Math.max(18, windowWidth * 0.05) }} />
                   )}
-                  <Text style={styles.filterDropdownItemText}>{t('collection.filters.past')}</Text>
+                  <Text style={[styles.filterDropdownItemText, { color: palette.primaryText }]}>{t('collection.filters.past')}</Text>
                 </TouchableOpacity>
               </BlurView>
             </View>

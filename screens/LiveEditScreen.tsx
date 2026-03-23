@@ -3,6 +3,9 @@ import {
   View,
   Text,
   StyleSheet,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
+  DeviceEventEmitter,
   TextInput,
   TouchableOpacity,
   ScrollView,
@@ -28,6 +31,8 @@ import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Crypto from 'expo-crypto';
+import * as Haptics from 'expo-haptics';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import LottieView from 'lottie-react-native';
 import TextRecognition, { TextRecognitionScript } from '@react-native-ml-kit/text-recognition';
 import { theme } from '../theme';
@@ -71,6 +76,7 @@ interface Props {
 
 const LIVE_TYPES = LIVE_TYPE_KEYS;
 const OCR_IMAGE_QUALITY = 0.55;
+const HAPTICS_ENABLED_KEY = '@haptics_enabled';
 
 interface OcrReviewItem {
   id: string;
@@ -205,14 +211,17 @@ function TimePickerModal({
   selectedTime,
   onSelect,
   onClose,
+  shouldTriggerHaptics,
 }: {
   visible: boolean;
   title: string;
   selectedTime: string;
   onSelect: (time: string) => void;
   onClose: () => void;
+  shouldTriggerHaptics: boolean;
 }) {
   const scrollRef = useRef<ScrollView>(null);
+  const lastHapticsIndexRef = useRef(-1);
   const timeOptionHeight = 48;
   const timeOptions: string[] = [];
   for (let hour = 0; hour < 24; hour++) {
@@ -223,12 +232,33 @@ function TimePickerModal({
   useEffect(() => {
     if (!visible) return;
     const index = Math.max(0, timeOptions.indexOf(selectedTime));
+    lastHapticsIndexRef.current = index;
     const targetOffset = index * timeOptionHeight;
     const timer = setTimeout(() => {
       scrollRef.current?.scrollTo({ y: targetOffset, animated: false });
     }, 50);
     return () => clearTimeout(timer);
   }, [visible]);
+
+  const handleTimeScrollEnd = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const offsetY = event.nativeEvent.contentOffset.y;
+      const maxIndex = timeOptions.length - 1;
+      const nextIndex = Math.max(0, Math.min(maxIndex, Math.round(offsetY / timeOptionHeight)));
+      const snappedOffset = nextIndex * timeOptionHeight;
+      scrollRef.current?.scrollTo({ y: snappedOffset, animated: true });
+
+      const nextTime = timeOptions[nextIndex];
+      if (nextTime && nextTime !== selectedTime) {
+        onSelect(nextTime);
+      }
+    },
+    [onSelect, selectedTime, timeOptions]
+  );
+
+  const handleTimeScrollEndDrag = useCallback(() => {
+    // Do nothing on scroll end drag - let momentum continue smoothly
+  }, []);
 
   const { t } = useTranslation();
 
@@ -245,7 +275,17 @@ function TimePickerModal({
               <Text style={styles.timeModalDone}>{t('liveEdit.timePicker.done')}</Text>
             </TouchableOpacity>
           </View>
-          <ScrollView ref={scrollRef} style={styles.timeOptionsScroll}>
+          <ScrollView
+            ref={scrollRef}
+            style={styles.timeOptionsScroll}
+            onMomentumScrollEnd={handleTimeScrollEnd}
+            onScrollEndDrag={handleTimeScrollEndDrag}
+            scrollEventThrottle={8}
+            decelerationRate="fast"
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+            overScrollMode="never"
+          >
             {timeOptions.map((time) => (
               <TouchableOpacity
                 key={time}
@@ -351,6 +391,8 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
   const [ocrReviewItems, setOcrReviewItems] = useState<OcrReviewItem[]>(OCR_REVIEW_DUMMY_ITEMS);
   const [setlistSourceAnchor, setSetlistSourceAnchor] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const [showSuccess, setShowSuccess] = useState(false);
+  const [isHapticsEnabled, setIsHapticsEnabled] = useState(true);
+  const shouldTriggerHaptics = !isHapticsEnabled;
   const [successOverlayKey, setSuccessOverlayKey] = useState(0);
   const isMultiArtistLive = liveType === 'two-man' || liveType === 'festival';
 
@@ -366,6 +408,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
   const onCancelRef = useRef(onCancel);
   const isSubmittingRef = useRef(false);
   const hasUserEditedImages = useRef(false);
+  const hasTriggeredSuccessHaptics = useRef(false);
   const { width: windowWidth } = useWindowDimensions();
   const ocrSpinRotate = ocrSpinAnim.interpolate({
     inputRange: [0, 1],
@@ -405,6 +448,32 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
   }, [onCancel]);
 
   useEffect(() => {
+    const loadHapticsPreference = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(HAPTICS_ENABLED_KEY);
+        if (stored === null) {
+          setIsHapticsEnabled(true);
+          return;
+        }
+        setIsHapticsEnabled(stored === 'true');
+      } catch {
+        setIsHapticsEnabled(true);
+      }
+    };
+
+    void loadHapticsPreference();
+
+    const subscription = DeviceEventEmitter.addListener('haptics:changed', (nextValue?: boolean) => {
+      if (typeof nextValue !== 'boolean') return;
+      setIsHapticsEnabled(nextValue);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
     if (!showSuccess) {
       hasStartedSuccessSequence.current = false;
       return;
@@ -417,14 +486,30 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
     hasHandledSuccessClose.current = false;
     hasSuccessMinHoldElapsed.current = false;
     hasSuccessAnimationFinished.current = false;
+    hasTriggeredSuccessHaptics.current = false;
     if (successCloseTimeout.current) clearTimeout(successCloseTimeout.current);
+    
+    // Trigger haptics when checkmark appears (~500ms after animation start)
+    const hapticsTimer = setTimeout(() => {
+      if (!hasTriggeredSuccessHaptics.current && shouldTriggerHaptics) {
+        hasTriggeredSuccessHaptics.current = true;
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {
+          // Ignore haptics errors on unsupported devices.
+        });
+      }
+    }, 500);
+    
     successCloseTimeout.current = setTimeout(() => {
       hasSuccessMinHoldElapsed.current = true;
       if (hasSuccessAnimationFinished.current) {
         finalizeSuccessAndClose();
       }
     }, successHoldDuration);
-  }, [showSuccess, successHoldDuration, finalizeSuccessAndClose]);
+    
+    return () => {
+      if (hapticsTimer) clearTimeout(hapticsTimer);
+    };
+  }, [showSuccess, successHoldDuration, finalizeSuccessAndClose, shouldTriggerHaptics]);
 
   useEffect(() => {
     return () => {
@@ -955,7 +1040,19 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
   }
 
   const handleSave = async () => {
-    if (!isFormValid || isSubmittingRef.current) return;
+    if (isSubmittingRef.current) return;
+    if (!isFormValid) {
+      if (shouldTriggerHaptics) {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {
+          // Ignore haptics errors on unsupported devices.
+        });
+      }
+      Alert.alert(
+        t('liveEdit.alerts.inputError'),
+        t('liveEdit.alerts.requiredFields')
+      );
+      return;
+    }
 
     const validArtistEntries = isMultiArtistLive
       ? performances
@@ -1269,7 +1366,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
         <TouchableOpacity
           style={[styles.bottomCta, !isFormValid && styles.bottomCtaDisabled]}
           onPress={handleSave}
-          disabled={!isFormValid}
+          disabled={false}
         >
           <Text style={styles.bottomCtaText}>{isEditMode ? 'Save' : 'Add New Live'}</Text>
         </TouchableOpacity>
@@ -1281,6 +1378,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
         selectedTime={startTime}
         onSelect={setStartTime}
         onClose={() => setShowStartTimeModal(false)}
+        shouldTriggerHaptics={shouldTriggerHaptics}
       />
       <TimePickerModal
         visible={showEndTimeModal}
@@ -1288,6 +1386,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
         selectedTime={endTime}
         onSelect={setEndTime}
         onClose={() => setShowEndTimeModal(false)}
+        shouldTriggerHaptics={shouldTriggerHaptics}
       />
 
       <Modal visible={showLiveTypeModal} transparent animationType="none" onRequestClose={() => setShowLiveTypeModal(false)}>

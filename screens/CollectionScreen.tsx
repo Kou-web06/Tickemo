@@ -6,18 +6,18 @@ import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context'
 import { Image } from 'expo-image';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import { Feather, Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { HugeiconsIcon } from '@hugeicons/react-native';
-import { Tap03Icon, Search01Icon, LayoutGridIcon, LeftToRightListDashIcon, CalendarAdd01Icon } from '@hugeicons/core-free-icons';
+import { Tap03Icon, Search01Icon, LayoutGridIcon, LeftToRightListDashIcon, CalendarAdd01Icon, Ticket01Icon, UserMultiple02Icon } from '@hugeicons/core-free-icons';
 import QRCode from 'react-native-qrcode-svg';
-import { SvgXml } from 'react-native-svg';
 import * as ImagePicker from 'expo-image-picker';
+import * as Haptics from 'expo-haptics';
 import * as Crypto from 'expo-crypto';
 import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { TicketCard } from '../components/TicketCard';
 import { TicketDetail } from '../components/TicketDetail';
-import SettingsScreen from './SettingsScreen';
+import SettingsScreen, { MusicProviderScreen } from './SettingsScreen';
 import ProfileEditScreen from './ProfileEditScreen';
 import LiveEditScreen from './LiveEditScreen';
 import PaywallScreen from './PaywallScreen';
@@ -26,6 +26,7 @@ import { useRecords, ChekiRecord } from '../contexts/RecordsContext';
 import { useAppStore } from '../store/useAppStore';
 import { uploadImage, normalizeStoredImageUri, resolveLocalImageUri, deleteImage } from '../lib/imageUpload';
 import { saveSetlist } from '../lib/setlistDb';
+import { buildSpotifyCommunityFallbackUrl, searchSpotifyTrackId } from '../utils/spotifyApi';
 import type { SetlistItem } from '../types/setlist';
 import { getArtworkUrl, searchAppleMusicSongs, AppleMusicSong, getAppleMusicSongUrl } from '../utils/appleMusicApi';
 import { useTranslation } from 'react-i18next';
@@ -41,12 +42,14 @@ const Stack = createNativeStackNavigator();
 const FREE_TICKET_LIMIT = 3;
 const APPLE_MUSIC_DEVELOPER_TOKEN = 'eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjMyTVlRNk5WOTYifQ.eyJpc3MiOiJRMkxMMkI3OTJWIiwiaWF0IjoxNzY5ODQ5MDA5LCJleHAiOjE3ODU0MDEwMDksImF1ZCI6Imh0dHBzOi8vYXBwbGVpZC5hcHBsZS5jb20iLCJzdWIiOiJtZWRpYS5jb20uYW5vbnltb3VzLlRpY2tlbW8ifQ.ect6vO1q3aC9XJVYCUBVLlTHaVEcZebm0-dVZ3ak6uglI33e1ra3qcwkawXaScFFcLB8sgX5TEcFEj9QGF1Z8A';
 
-const APPLE_MUSIC_BADGE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 124.09227 26.77606"><g><g><g><path d="M38.16589,20.42H33.429l-1.13685,3.35888H30.28544l4.48712-12.42727h2.08423L41.3439,23.77891H39.30274Zm-4.246-1.55025H37.675l-1.85169-5.45114H35.77161Z" fill="#fff"/><path d="M51.02436,19.24873c0,2.81686-1.50719,4.62549-3.78089,4.62549a3.07055,3.07055,0,0,1-2.85074-1.5847H44.34966v4.48654h-1.8603V14.71856h1.8v1.50776h0.03445A3.211,3.211,0,0,1,47.209,14.62439C49.50855,14.62439,51.02436,16.44106,51.02436,19.24873Zm-1.912,0c0-1.83389-.94738-3.03964-2.39428-3.03964-1.42106,0-2.37705,1.231-2.37705,3.03964,0,1.82585.956,3.04883,2.37705,3.04883C48.165,22.29756,49.11238,21.101,49.11238,19.24873Z" fill="#fff"/><path d="M60.989,19.24873c0,2.81686-1.50719,4.62549-3.78089,4.62549a3.07055,3.07055,0,0,1-2.85074-1.5847H54.31433v4.48654H52.454V14.71856h1.8v1.50776H54.2885a3.211,3.211,0,0,1,2.88519-1.60193C59.47322,14.62439,60.989,16.44106,60.989,19.24873Zm-1.912,0c0-1.83389-.94738-3.03964-2.39428-3.03964-1.42106,0-2.37705,1.231-2.37705,3.03964,0,1.82585.956,3.04883,2.37705,3.04883C58.12967,22.29756,59.077,21.101,59.077,19.24873Z" fill="#fff"/><path d="M62.4876,11.35164h1.8603V23.77891H62.4876V11.35164Z" fill="#fff"/><path d="M74.02836,21.11822c-0.24976,1.64441-1.85169,2.77323-3.90146,2.77323-2.63543,0-4.2718-1.76614-4.2718-4.59908,0-2.84213,1.645-4.6852,4.19429-4.6852,2.50624,0,4.08233,1.7225,4.08233,4.46932v0.63733H67.73262v0.11254A2.35969,2.35969,0,0,0,70.17,22.39287a2.0515,2.0515,0,0,0,2.09284-1.27465h1.76556Zm-6.28713-2.70433h4.53018a2.179,2.179,0,0,0-2.222-2.30011A2.29426,2.29426,0,0,0,67.74123,18.41389Z" fill="#fff"/><path d="M90.17623,23.77891V14.63243H90.11652l-3.747,9.05232H84.93983l-3.75505-9.05232H81.12506v9.14648h-1.757V11.35164h2.23006l4.02261,9.80907h0.0689l4.01343-9.80907h2.23925V23.77891H90.17623Z" fill="#fff"/><path d="M101.8479,23.77891h-1.78221V22.22062H100.022a2.83019,2.83019,0,0,1-2.80768,1.66164,3.02075,3.02075,0,0,1-3.17744-3.34969v-5.814h1.8603v5.45229a1.80745,1.80745,0,0,0,1.93724,2.10949,2.09861,2.09861,0,0,0,2.15313-2.3426V14.71856h1.8603v9.06036Z" fill="#fff"/><path d="M107.13827,14.61521c2.00614,0,3.445,1.11159,3.48749,2.71351H108.878a1.56135,1.56135,0,0,0-1.7914-1.29188c-1.00824,0-1.68.46508-1.68,1.1713,0,.542.44785.90374,1.38719,1.13685l1.52384.35254c1.82585.43981,2.51485,1.11159,2.51485,2.43791,0,1.63638-1.55025,2.756-3.76309,2.756-2.1359,0-3.57476-1.09436-3.71256-2.748h1.84308A1.68663,1.68663,0,0,0,107.1555,22.479c1.11044,0,1.80863-.457,1.80863-1.18049,0-.55924-0.3445-0.86125-1.29188-1.1024l-1.61915-.39618c-1.63638-.39618-2.46318-1.231-2.46318-2.48844C103.58992,15.70957,105.02763,14.61521,107.13827,14.61521Z" fill="#fff"/><path d="M112.28166,12.33347a1.08081,1.08081,0,1,1,1.076,1.05876A1.06406,1.06406,0,0,1,112.28166,12.33347Zm0.14584,2.38509h1.8603v9.06036h-1.8603V14.71856Z" fill="#fff"/><path d="M122.30087,17.83628a2.00232,2.00232,0,0,0-2.1359-1.67083c-1.42968,0-2.37705,1.19771-2.37705,3.08328,0,1.9292.95541,3.09246,2.39428,3.09246a1.95079,1.95079,0,0,0,2.11868-1.62834h1.7914a3.62162,3.62162,0,0,1-3.9273,3.17859c-2.58375,0-4.2718-1.76614-4.2718-4.64271,0-2.81572,1.68805-4.64157,4.25458-4.64157a3.64183,3.64183,0,0,1,3.9273,3.22912h-1.77418Z" fill="#fff"/></g><path d="M24.665,3.35321a5.326,5.326,0,0,0-3.38091-3.033A10.95611,10.95611,0,0,0,18.24294,0H6.91979A10.95611,10.95611,0,0,0,3.87864.32024a5.326,5.326,0,0,0-3.38091,3.033A9.86307,9.86307,0,0,0,0,6.91972V18.24294a9.86307,9.86307,0,0,0,.49773,3.56651,5.326,5.326,0,0,0,3.38091,3.033,10.95611,10.95611,0,0,0,3.04115.32024H18.24294a10.95611,10.95611,0,0,0,3.04115-.32024,5.326,5.326,0,0,0,3.38091-3.033,9.86283,9.86283,0,0,0,.49766-3.56651V6.91972A9.86283,9.86283,0,0,0,24.665,3.35321Zm-6.3088,13.95341a2.3331,2.3331,0,0,1-.36653.86326,2.19508,2.19508,0,0,1-.68843.63668,2.74433,2.74433,0,0,1-.874.3178,3.3446,3.3446,0,0,1-1.34936.06833,1.87928,1.87928,0,0,1-.9079-0.461,1.95637,1.95637,0,0,1-.09919-2.81,2.18135,2.18135,0,0,1,.81632-0.52465,8.53745,8.53745,0,0,1,1.3841-.35031q0.24406-.0492.48826-0.09847a0.84762,0.84762,0,0,0,.5456-0.27876,0.91272,0.91272,0,0,0,.15151-0.62039l0.00014-5.54523c0-.42409-0.19019-0.53965-0.5952-0.46185-0.28945.05648-6.50617,1.31025-6.50617,1.31025a0.51676,0.51676,0,0,0-.4739.63438l0.00014,8.12518a4.27936,4.27936,0,0,1-.08368.92032,2.33425,2.33425,0,0,1-.36661.86333,2.194,2.194,0,0,1-.68843.63661,2.75352,2.75352,0,0,1-.874.32247,3.34456,3.34456,0,0,1-1.34936.06833,1.88559,1.88559,0,0,1-.9079-0.46558,1.99119,1.99119,0,0,1-.09912-2.81,2.18016,2.18016,0,0,1,.81625-0.52465,8.53944,8.53944,0,0,1,1.3841-.35031q0.24406-.0492.48826-0.09847a0.84778,0.84778,0,0,0,.5456-0.27876,0.91641,0.91641,0,0,0,.165-0.61608V6.4217a1.65067,1.65067,0,0,1,.01737-0.2522,0.7605,0.7605,0,0,1,.25163-0.4856A1.04382,1.04382,0,0,1,9.647,5.47425l0.00287-.00057,7.47881-1.50891c0.06488-.01321.60539-0.10916.66618-0.11447a0.56829,0.56829,0,0,1,.63122.6613l0.00036,11.87033A4.304,4.304,0,0,1,18.35619,17.30661Z" fill="#fff"/></g></g></svg>`;
+const MUSIC_PROVIDER_KEY = '@music_provider';
+
+type MusicProvider = 'spotify' | 'apple';
 
 const buildCollectionPalette = (isDarkMode: boolean) => ({
   screenBackground: isDarkMode ? '#121212' : '#F8F8F8',
   headerBackground: isDarkMode ? 'rgba(18, 18, 18, 0.74)' : 'rgba(248, 248, 248, 0.62)',
-  headerBorder: isDarkMode ? 'rgba(255, 255, 255, 0.10)' : 'rgba(255, 255, 255, 0.45)',
+  headerBorder: 'transparent',
   primaryText: isDarkMode ? '#F5F5F7' : '#333333',
   secondaryText: isDarkMode ? '#B7B7C2' : '#777777',
   tertiaryText: isDarkMode ? '#8A8A94' : '#8A8A8A',
@@ -134,7 +137,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: 'rgba(248, 248, 248, 0.62)',
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.45)',
+    borderBottomColor: 'transparent',
     paddingHorizontal: 24,
     paddingBottom: 5,
   },
@@ -153,6 +156,9 @@ const styles = StyleSheet.create({
   searchingHeaderContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  searchHeaderContent: {
+    gap: 10,
   },
   inlineSearchField: {
     flex: 1,
@@ -189,6 +195,33 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginLeft: 12,
     fontSize: 16,
+  },
+  quickFilterWrap: {
+    marginTop: 2,
+  },
+  quickFilterContent: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    columnGap: 8,
+    rowGap: 8,
+  },
+  quickFilterChip: {
+    minHeight: 30,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 30,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  quickFilterChipText: {
+    fontSize: 12,
+    letterSpacing: 0.8,
+    fontFamily: Platform.select({
+      ios: 'Menlo',
+      android: 'monospace',
+      default: 'monospace',
+    }),
   },
   headerIconButton: {
     width: 28,
@@ -909,6 +942,37 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 14,
     bottom: 14,
+    minHeight: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+    borderRadius: 30,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(12,12,12,0.38)',
+  },
+  todaySongProviderIcon: {
+    width: 15,
+    height: 15,
+    marginRight: 6,
+  },
+  todaySongProviderText: {
+    color: 'rgba(255,255,255,0.92)',
+    fontSize: 10,
+    fontFamily: 'LINESeedJP_700Bold',
+    letterSpacing: 0.2,
+  },
+  todaySongProviderActionIcon: {
+    marginLeft: 6,
+  },
+  sectionLeadLabelText: {
+    color: '#343434',
+    fontSize: 14,
+    fontFamily: 'LINESeedJP_800ExtraBold',
+    letterSpacing: 0.4,
+    marginBottom: 12,
+    marginLeft: 2,
   },
   emptyStateContainer: {
     flex: 1,
@@ -1035,6 +1099,8 @@ interface ArtistItem {
   latestDateTs: number;
 }
 
+type QuickFilterKey = 'year-current' | 'upcoming' | 'archive' | 'one-man';
+
 const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewRecord: (record: ChekiRecord) => Promise<void>; deleteRecord: (id: string) => Promise<void>; isPremium: boolean }> = ({ navigation, records, addNewRecord, deleteRecord, isPremium }) => {
   const { t, i18n } = useTranslation();
   const { isDark: isSystemDark } = useTheme();
@@ -1047,18 +1113,18 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
     LINESeedJP_800ExtraBold,
   });
   const [selectedRecord, setSelectedRecord] = useState<ChekiRecord | null>(null);
-  const [animatingCardId, setAnimatingCardId] = useState<string | null>(null);
-  const [closingRecordId, setClosingRecordId] = useState<string | null>(null);
   const [filterType, setFilterType] = useState<'all' | 'upcoming' | 'past'>('all');
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [isGridLayout, setIsGridLayout] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeQuickFilter, setActiveQuickFilter] = useState<QuickFilterKey | null>(null);
   const [headerHeight, setHeaderHeight] = useState(0);
   const [isListAnimating, setIsListAnimating] = useState(false);
-  const [isThemeTransitioning, setIsThemeTransitioning] = useState(false);
   const [isNextLiveFlipped, setIsNextLiveFlipped] = useState(false);
+  const [isOpeningTodaySongCta, setIsOpeningTodaySongCta] = useState(false);
   const [todaySongForNextLive, setTodaySongForNextLive] = useState<AppleMusicSong | null>(null);
+  const [musicProvider, setMusicProvider] = useState<MusicProvider>('spotify');
   const [manualDarkMode, setManualDarkMode] = useState<boolean | null | undefined>(() => getCachedThemePreference());
   const itemAnimations = useRef(new Map<string, Animated.Value>()).current;
   const nextLiveFlipAnim = useRef(new Animated.Value(0)).current;
@@ -1086,38 +1152,49 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
   );
 
   useEffect(() => {
-    let resetTimer: ReturnType<typeof setTimeout> | null = null;
     const subscription = DeviceEventEmitter.addListener('theme:changed', (nextValue?: boolean) => {
       if (typeof nextValue === 'boolean') {
         setManualDarkMode(nextValue);
       } else {
         void loadThemePreference();
       }
-
-      // Theme switches can interrupt list fade animations and leave cards visually hidden.
-      setIsThemeTransitioning(true);
       setIsListAnimating(false);
-      setAnimatingCardId(null);
-      setClosingRecordId(null);
       itemAnimations.forEach((value) => {
         value.setValue(1);
       });
-
-      if (resetTimer) {
-        clearTimeout(resetTimer);
-      }
-      resetTimer = setTimeout(() => {
-        setIsThemeTransitioning(false);
-      }, 260);
     });
 
     return () => {
-      if (resetTimer) {
-        clearTimeout(resetTimer);
-      }
       subscription.remove();
     };
   }, [itemAnimations, loadThemePreference]);
+
+  useEffect(() => {
+    const loadMusicProvider = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(MUSIC_PROVIDER_KEY);
+        if (stored === 'spotify' || stored === 'apple') {
+          setMusicProvider(stored);
+          return;
+        }
+        setMusicProvider('spotify');
+      } catch {
+        setMusicProvider('spotify');
+      }
+    };
+
+    void loadMusicProvider();
+
+    const subscription = DeviceEventEmitter.addListener('music-provider:changed', (nextValue?: MusicProvider) => {
+      if (nextValue === 'spotify' || nextValue === 'apple') {
+        setMusicProvider(nextValue);
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
 
   const isDarkMode = manualDarkMode ?? false;
   const palette = useMemo(() => buildCollectionPalette(isDarkMode), [isDarkMode]);
@@ -1173,33 +1250,26 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
   const filterTop = insets.top + windowHeight * 0.10;
   const filterRight = windowWidth * 0.2;
   const emptyImageSize = Math.min(150, windowWidth * 0.38);
-  const fallbackHeaderHeight = insets.top + (isSearching ? 104 : 68);
+  const fallbackHeaderHeight = insets.top + (isSearching ? 152 : 68);
   const headerContentPaddingTop = Math.max(headerHeight + (isSearching ? 18 : 0), fallbackHeaderHeight);
+  const currentYear = new Date().getFullYear();
+
+  const quickFilterChips = useMemo(
+    () => [
+      { key: 'year-current' as const, label: `${currentYear}` },
+      { key: 'upcoming' as const, label: '#UPCOMING' },
+      { key: 'archive' as const, label: '#ARCHIVE' },
+      { key: 'one-man' as const, label: 'ONE-MAN' },
+    ],
+    [currentYear]
+  );
 
   const handleCardPress = (record: ChekiRecord) => {
-    // Close animation stateを先にリセット
-    setClosingRecordId(null);
-    setAnimatingCardId(record.id);
-    // Wait for animation to complete before showing modal
-    setTimeout(() => {
-      setSelectedRecord(record);
-      setTimeout(() => setAnimatingCardId(null), 0);
-    }, 200);
+    setSelectedRecord(record);
   };
 
-  // モーダルを閉じるときのスライドイン制御
   const handleCloseModal = () => {
-    if (selectedRecord) {
-      const recordId = selectedRecord.id;
-      // 先にclosingRecordIdを設定して戻りアニメ対象を記録
-      setClosingRecordId(recordId);
-      // モーダルを閉じる
-      setSelectedRecord(null);
-      // Fade out完了後にカードの戻りアニメを開始
-      setTimeout(() => {
-        setAnimatingCardId(recordId);
-      }, 200);
-    }
+    setSelectedRecord(null);
   };
 
   const handleAddPress = () => {
@@ -1228,6 +1298,13 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
 
   const handleClearSearch = useCallback(() => {
     setSearchQuery('');
+  }, []);
+
+  const handleQuickFilterPress = useCallback((nextFilter: QuickFilterKey) => {
+    setActiveQuickFilter((prev) => (prev === nextFilter ? null : nextFilter));
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {
+      // Ignore haptics errors on unsupported devices.
+    });
   }, []);
 
   const handleDuplicateRecord = async (record: ChekiRecord) => {
@@ -1319,8 +1396,43 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
   
   const sortedRecords = useMemo(() => [...records].sort((a, b) => toTime(b) - toTime(a)), [records]);
   const normalizedSearchQuery = useMemo(() => searchQuery.trim().toLowerCase(), [searchQuery]);
-  const filteredRecords = useMemo(() => {
+
+  const quickFilteredRecords = useMemo(() => {
     const baseRecords = filterRecords(sortedRecords);
+    if (!activeQuickFilter) {
+      return baseRecords;
+    }
+
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+
+    return baseRecords.filter((record) => {
+      const recordDate = new Date(record.date.replace(/\./g, '-'));
+      recordDate.setHours(0, 0, 0, 0);
+      const normalizedLiveType = normalizeLiveType(record.liveType);
+
+      if (activeQuickFilter === 'year-current') {
+        return recordDate.getFullYear() === currentYear;
+      }
+
+      if (activeQuickFilter === 'upcoming') {
+        return recordDate >= now;
+      }
+
+      if (activeQuickFilter === 'archive') {
+        return recordDate < now;
+      }
+
+      if (activeQuickFilter === 'one-man') {
+        return normalizedLiveType === 'one-man';
+      }
+
+      return true;
+    });
+  }, [activeQuickFilter, currentYear, filterType, sortedRecords]);
+
+  const filteredRecords = useMemo(() => {
+    const baseRecords = quickFilteredRecords;
     if (!normalizedSearchQuery) {
       return baseRecords;
     }
@@ -1341,7 +1453,7 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
 
       return setlistMatches || haystacks.some((value) => value?.toLowerCase().includes(normalizedSearchQuery));
     });
-  }, [sortedRecords, filterType, normalizedSearchQuery, setlists]);
+  }, [quickFilteredRecords, normalizedSearchQuery, setlists]);
   const nextLiveRecord = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -1463,6 +1575,22 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
       return null;
     }
 
+    const spotifyTrackIdCandidates = [
+      nextLiveRecord?.detail,
+      nextLiveRecord?.memo,
+      nextLiveRecord?.qrCode,
+    ]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => {
+        const webMatch = value.match(/open\.spotify\.com\/track\/([A-Za-z0-9]+)/i);
+        if (webMatch?.[1]) return webMatch[1];
+        const appMatch = value.match(/spotify:track:([A-Za-z0-9]+)/i);
+        return appMatch?.[1] || '';
+      })
+      .filter((value) => value.length > 0);
+
+    const spotifyTrackId = spotifyTrackIdCandidates[0] || undefined;
+
     return {
       title: todaySongForNextLive.attributes.name || 'Unknown song',
       artist: todaySongForNextLive.attributes.artistName || nextLiveRecord?.artist || '-',
@@ -1474,8 +1602,9 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
         ? getArtworkUrl(todaySongForNextLive.attributes.artwork.url, 200)
         : undefined,
       appleMusicUrl: todaySongForNextLive.id ? getAppleMusicSongUrl(todaySongForNextLive.id) : undefined,
+      spotifyTrackId,
     };
-  }, [todaySongForNextLive, nextLiveRecord?.artist]);
+  }, [nextLiveRecord?.artist, nextLiveRecord?.detail, nextLiveRecord?.memo, nextLiveRecord?.qrCode, todaySongForNextLive]);
 
   useEffect(() => {
     nextLiveFlippedRef.current = false;
@@ -1522,6 +1651,31 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
       return [{ id: 'empty-state' }];
     }
     return filteredRecords;
+  }, [filteredRecords]);
+
+  const firstSectionLabelRecordIds = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    let firstUpcomingId: string | null = null;
+    let firstArchiveId: string | null = null;
+
+    filteredRecords.forEach((record) => {
+      const recordDate = new Date((record.date || '').replace(/\./g, '-'));
+      recordDate.setHours(0, 0, 0, 0);
+      const ts = recordDate.getTime();
+      if (!Number.isFinite(ts)) return;
+
+      if (firstUpcomingId === null && ts >= today.getTime()) {
+        firstUpcomingId = record.id;
+      }
+
+      if (firstArchiveId === null && ts < today.getTime()) {
+        firstArchiveId = record.id;
+      }
+    });
+
+    return { firstUpcomingId, firstArchiveId };
   }, [filteredRecords]);
 
   const artistGridData = useMemo((): ArtistItem[] => {
@@ -1599,17 +1753,85 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
   }, [nextLiveRecord]);
 
   const handleOpenTodaySongLink = useCallback(async () => {
-    const url = todaySongDisplay?.appleMusicUrl?.trim();
-    if (!url) return;
+    if (musicProvider === 'spotify') {
+      if (isOpeningTodaySongCta) return;
+      setIsOpeningTodaySongCta(true);
 
-    const canOpen = await Linking.canOpenURL(url);
+      const songName = todaySongDisplay?.title || '';
+      const artistName = todaySongDisplay?.artist || nextLiveRecord?.artist || '';
+
+      try {
+        const trackId = await searchSpotifyTrackId(songName, artistName);
+        const fallbackTrackId = trackId || todaySongDisplay?.spotifyTrackId;
+
+        if (!fallbackTrackId) {
+          Alert.alert('Unable to open', 'Spotify track could not be found.');
+          return;
+        }
+
+        const appUrl = `spotify:track:${fallbackTrackId}`;
+        const webUrl = buildSpotifyCommunityFallbackUrl(fallbackTrackId);
+
+        try {
+          const canOpenApp = await Linking.canOpenURL(appUrl);
+          if (canOpenApp) {
+            await Linking.openURL(appUrl);
+          } else {
+            await Linking.openURL(webUrl);
+          }
+        } catch {
+          await Linking.openURL(webUrl);
+        }
+
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {
+          // Ignore haptics errors on unsupported devices.
+        });
+      } catch {
+        const fallbackTrackId = todaySongDisplay?.spotifyTrackId;
+        if (fallbackTrackId) {
+          const webUrl = buildSpotifyCommunityFallbackUrl(fallbackTrackId);
+          await Linking.openURL(webUrl);
+          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {
+            // Ignore haptics errors on unsupported devices.
+          });
+        } else {
+          Alert.alert('Unable to open', 'Spotify track could not be found.');
+        }
+      } finally {
+        setIsOpeningTodaySongCta(false);
+      }
+      return;
+    }
+
+    const appleUrl = todaySongDisplay?.appleMusicUrl?.trim();
+    if (!appleUrl) return;
+
+    const canOpen = await Linking.canOpenURL(appleUrl);
     if (!canOpen) {
       Alert.alert('Unable to open', 'Apple Music URL is invalid.');
       return;
     }
 
-    await Linking.openURL(url);
-  }, [todaySongDisplay]);
+    await Linking.openURL(appleUrl);
+  }, [isOpeningTodaySongCta, musicProvider, nextLiveRecord?.artist, todaySongDisplay]);
+
+  const todaySongProviderCta = useMemo(() => {
+    const isSpotify = musicProvider === 'spotify';
+    const iconSource = isSpotify ? require('../assets/spotify.webp') : require('../assets/apple.webp');
+    const label = isSpotify ? 'Spotifyで聞く' : 'Apple Musicで聞く';
+    const spotifyQuery = `${todaySongDisplay?.title || ''} ${todaySongDisplay?.artist || nextLiveRecord?.artist || ''}`.trim();
+    const url = isSpotify
+      ? (todaySongDisplay?.spotifyTrackId
+        ? `https://open.spotify.com/track/${todaySongDisplay.spotifyTrackId}`
+        : (spotifyQuery ? `https://open.spotify.com/search/${encodeURIComponent(spotifyQuery)}` : ''))
+      : (todaySongDisplay?.appleMusicUrl?.trim() || '');
+
+    const isEnabled = isSpotify
+      ? Boolean(todaySongDisplay?.title || todaySongDisplay?.artist || nextLiveRecord?.artist)
+      : Boolean(todaySongDisplay?.appleMusicUrl?.trim());
+
+    return { iconSource, label, url, isEnabled };
+  }, [musicProvider, nextLiveRecord?.artist, todaySongDisplay]);
 
   const getItemAnimation = (id: string) => {
     const existing = itemAnimations.get(id);
@@ -1712,28 +1934,64 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
         }}
       >
         {isSearching ? (
-          <View style={styles.searchingHeaderContainer}>
-            <View style={[styles.inlineSearchField, { backgroundColor: palette.searchFieldBackground }]}>
-              <TextInput
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                placeholder="アーティスト、会場、曲名で検索..."
-                placeholderTextColor={palette.tertiaryText}
-                style={[styles.inlineSearchInput, { color: palette.primaryText }]}
-                autoFocus={true}
-                autoCapitalize="none"
-                autoCorrect={false}
-                returnKeyType="search"
-              />
-              {searchQuery.length > 0 ? (
-                <TouchableOpacity style={styles.searchClearButton} onPress={handleClearSearch} activeOpacity={0.7}>
-                  <Text style={[styles.searchClearButtonText, { color: palette.tertiaryText }]}>×</Text>
-                </TouchableOpacity>
-              ) : null}
+          <View style={styles.searchHeaderContent}>
+            <View style={styles.searchingHeaderContainer}>
+              <View style={[styles.inlineSearchField, { backgroundColor: palette.searchFieldBackground }]}>
+                <TextInput
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  placeholder="アーティスト、会場、曲名で検索..."
+                  placeholderTextColor={palette.tertiaryText}
+                  style={[styles.inlineSearchInput, { color: palette.primaryText }]}
+                  autoFocus={true}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="search"
+                />
+                {searchQuery.length > 0 ? (
+                  <TouchableOpacity style={styles.searchClearButton} onPress={handleClearSearch} activeOpacity={0.7}>
+                    <Text style={[styles.searchClearButtonText, { color: palette.tertiaryText }]}>×</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+              <TouchableOpacity onPress={handleCancelSearch} activeOpacity={0.7}>
+                <Text style={[styles.cancelSearchText, { color: '#A226D9' }]}>キャンセル</Text>
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity onPress={handleCancelSearch} activeOpacity={0.7}>
-              <Text style={[styles.cancelSearchText, { color: '#A226D9' }]}>キャンセル</Text>
-            </TouchableOpacity>
+
+            <View style={styles.quickFilterWrap}>
+              <View style={styles.quickFilterContent}>
+              {quickFilterChips.map((chip) => {
+                const isActive = activeQuickFilter === chip.key;
+                return (
+                  <TouchableOpacity
+                    key={chip.key}
+                    activeOpacity={0.75}
+                    onPress={() => handleQuickFilterPress(chip.key)}
+                    style={[
+                      styles.quickFilterChip,
+                      {
+                        borderColor: isActive ? '#A226D9' : palette.secondaryText,
+                        backgroundColor: isActive ? '#A226D9' : 'transparent',
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.quickFilterChipText,
+                        {
+                          color: isActive ? '#F8F8F8' : palette.secondaryText,
+                          fontWeight: isActive ? '800' : '600',
+                        },
+                      ]}
+                    >
+                      {chip.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+              </View>
+            </View>
           </View>
         ) : (
           <View style={styles.headerContainer}>
@@ -1744,7 +2002,7 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
               </TouchableOpacity>
               <TouchableOpacity style={styles.headerIconButton} activeOpacity={0.7} onPress={handleToggleLayoutPress}>
                 <HugeiconsIcon
-                  icon={isGridLayout ? LeftToRightListDashIcon : LayoutGridIcon}
+                  icon={isGridLayout ? Ticket01Icon : UserMultiple02Icon}
                   size={24}
                   color={palette.primaryText}
                   strokeWidth={2}
@@ -1758,12 +2016,13 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
       <View style={{ flex: 1 }}>
         {filteredRecords.length === 0 ? (
           <View style={{ flex: 1, paddingTop: headerContentPaddingTop }}>
-            {normalizedSearchQuery ? renderSearchEmptyState() : renderEmptyState()}
+            {normalizedSearchQuery || activeQuickFilter ? renderSearchEmptyState() : renderEmptyState()}
           </View>
         ) : (
         <FlatList
           key={isGridLayout ? 'artist-grid' : `collection-list-${isDarkMode ? 'dark' : 'light'}`}
           data={(isGridLayout ? artistGridData : displayData) as any[]}
+          extraData={isDarkMode}
           numColumns={isGridLayout ? 2 : 1}
           keyExtractor={(item) => (item as { id: string }).id}
           columnWrapperStyle={isGridLayout ? styles.artistColumnWrapper : undefined}
@@ -1887,17 +2146,25 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
                         </View>
                         <TouchableOpacity
                           style={styles.appleMusicBadge}
-                          activeOpacity={todaySongDisplay?.appleMusicUrl ? 0.8 : 1}
+                          activeOpacity={todaySongProviderCta.isEnabled && !isOpeningTodaySongCta ? 0.8 : 1}
                           onPress={() => {
                             void handleOpenTodaySongLink();
                           }}
-                          disabled={!todaySongDisplay?.appleMusicUrl}
+                          disabled={!todaySongProviderCta.isEnabled || isOpeningTodaySongCta}
                         >
-                          <SvgXml
-                            xml={APPLE_MUSIC_BADGE_SVG}
-                            width={90}
-                            height={22}
-                          />
+                          {isOpeningTodaySongCta ? (
+                            <ActivityIndicator size="small" color="rgba(255,255,255,0.92)" />
+                          ) : (
+                            <>
+                              <Image
+                                source={todaySongProviderCta.iconSource}
+                                style={styles.todaySongProviderIcon}
+                                contentFit="contain"
+                                transition={0}
+                              />
+                              <Text style={styles.todaySongProviderText}>{todaySongProviderCta.label}</Text>
+                            </>
+                          )}
                         </TouchableOpacity>
                       </Animated.View>
                     </View>
@@ -1936,53 +2203,32 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
           if (item.id === 'empty-state') return null;
 
           const recordItem = item as ChekiRecord;
-          
-          // アニメーション状態の計算
-          const isAnimating = animatingCardId === item.id;
-          const isModal = selectedRecord?.id === recordItem.id;
-          const isClosing = closingRecordId === recordItem.id;
-          const isSlideIn = isClosing && isAnimating;
-          const animationDirection: 'out' | 'in' = isSlideIn ? 'in' : 'out';
+          const sectionLabel = recordItem.id === firstSectionLabelRecordIds.firstUpcomingId
+            ? '#UP COMING'
+            : recordItem.id === firstSectionLabelRecordIds.firstArchiveId
+              ? '#ARCHIVE'
+              : null;
 
-          // 常時表示を基本にして、必要時のみ非表示化する。
-          const shouldHideCard = !isThemeTransitioning && (
-            isModal ||
-            (isClosing && !isAnimating) ||
-            (isAnimating && !isSlideIn)
-          );
-          const opacity = shouldHideCard ? 0 : 1;
-          const pointerEvents: 'auto' | 'none' = shouldHideCard || (isSlideIn && isAnimating) ? 'none' : 'auto';
-
-          // スライドイン完了時に状態をリセット
-          const handleCardAnimationEnd = () => {
-            if (animationDirection === 'in') {
-              setAnimatingCardId(null);
-              setClosingRecordId(null);
-            }
-          };
           if (isListAnimating) {
             return (
               <Animated.View
-                style={[
-                  animatedStyle,
-                  {
-                    opacity: Animated.multiply(itemAnim, opacity),
-                  },
-                ]}
+                style={animatedStyle}
               >
                 <TouchableOpacity
                   style={{ width: currentCardWidth, marginBottom: 12, alignSelf: isGridLayout ? 'auto' : 'center' }}
                   onPress={() => handleCardPress(recordItem)}
                   onLongPress={() => handleLongPress(recordItem)}
                   activeOpacity={0.9}
-                  disabled={pointerEvents === 'none'}
                 >
+                  {sectionLabel ? (
+                    <Text style={styles.sectionLeadLabelText}>{sectionLabel}</Text>
+                  ) : null}
                   <TicketCard
                     record={recordItem}
                     width={currentCardWidth}
-                    isAnimating={isThemeTransitioning ? false : isAnimating}
-                    animationDirection={animationDirection}
-                    onAnimationEnd={handleCardAnimationEnd}
+                    isAnimating={false}
+                    animationDirection="out"
+                    onAnimationEnd={() => {}}
                   />
                 </TouchableOpacity>
               </Animated.View>
@@ -1991,18 +2237,20 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
 
           return (
             <TouchableOpacity
-              style={{ width: currentCardWidth, marginBottom: 12, alignSelf: isGridLayout ? 'auto' : 'center', opacity }}
+              style={{ width: currentCardWidth, marginBottom: 12, alignSelf: isGridLayout ? 'auto' : 'center' }}
               onPress={() => handleCardPress(recordItem)}
               onLongPress={() => handleLongPress(recordItem)}
               activeOpacity={0.9}
-              disabled={pointerEvents === 'none'}
             >
+              {sectionLabel ? (
+                <Text style={styles.sectionLeadLabelText}>{sectionLabel}</Text>
+              ) : null}
               <TicketCard
                 record={recordItem}
                 width={currentCardWidth}
-                isAnimating={isThemeTransitioning ? false : isAnimating}
-                animationDirection={animationDirection}
-                onAnimationEnd={handleCardAnimationEnd}
+                isAnimating={false}
+                animationDirection="out"
+                onAnimationEnd={() => {}}
               />
             </TouchableOpacity>
           );
@@ -2435,6 +2683,18 @@ const CollectionStack = ({ records, addNewRecord, updateRecord, deleteRecord, na
         {(props) => <SettingsScreen {...props} />}
       </Stack.Screen>
       <Stack.Screen
+        name="MusicProvider"
+        options={{
+          headerShown: false,
+          animation: 'slide_from_right',
+          presentation: 'card',
+          gestureEnabled: false,
+          fullScreenGestureEnabled: false,
+        }}
+      >
+        {(props) => <MusicProviderScreen {...props} />}
+      </Stack.Screen>
+      <Stack.Screen
         name="ProfileEdit"
         options={{
           headerShown: false,
@@ -2560,6 +2820,18 @@ function CollectionStackWrapper({ records, addNewRecord, updateRecord, deleteRec
         }}
       >
         {(props) => <SettingsScreen {...props} />}
+      </Stack.Screen>
+      <Stack.Screen
+        name="MusicProvider"
+        options={{
+          headerShown: false,
+          animation: 'slide_from_right',
+          presentation: 'card',
+          gestureEnabled: false,
+          fullScreenGestureEnabled: false,
+        }}
+      >
+        {(props) => <MusicProviderScreen {...props} />}
       </Stack.Screen>
       <Stack.Screen
         name="ProfileEdit"

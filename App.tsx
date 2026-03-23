@@ -11,7 +11,7 @@ import { useFonts, Anton_400Regular } from '@expo-google-fonts/anton';
 import CollectionScreen from './screens/CollectionScreen';
 import CalendarScreen from './screens/CalendarScreen';
 import StatisticsScreen from './screens/StatisticsScreen';
-import SettingsScreen, { FAQScreen } from './screens/SettingsScreen';
+import SettingsScreen, { FAQScreen, MusicProviderScreen } from './screens/SettingsScreen';
 import ProfileEditScreen from './screens/ProfileEditScreen';
 import ICloudSyncScreen from './screens/ICloudSyncScreen';
 import { PaywallScreen } from './screens';
@@ -102,6 +102,16 @@ function SettingsStackScreen() {
       <SettingsStack.Screen
         name="FAQ"
         component={FAQScreen}
+        options={{
+          animation: 'slide_from_right',
+          presentation: 'card',
+          gestureEnabled: false,
+          fullScreenGestureEnabled: false,
+        }}
+      />
+      <SettingsStack.Screen
+        name="MusicProvider"
+        component={MusicProviderScreen}
         options={{
           animation: 'slide_from_right',
           presentation: 'card',

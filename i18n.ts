@@ -63,12 +63,14 @@ i18n.use(initReactI18next).init({
           },
           items: {
             darkMode: 'テーマ',
+            haptics: '触覚',
             icloudSync: 'iCloud同期',
             notifications: '通知',
             appleMusic: 'Data provided by Apple Music',
             terms: '利用規約',
             privacy: 'プライバシーポリシー',
-            review: 'アプリをレビューする',
+            review: 'アプリを応援する',
+            shareApp: 'アプリをシェアする',
             faq: 'よくある質問',
             feedback: 'フィードバック',
             sns: 'Instagram',
@@ -115,6 +117,10 @@ i18n.use(initReactI18next).init({
               {
                 category: 'トラブル・不具合',
                 items: [
+                  {
+                    question: '触覚（Haptics）が動きません。',
+                    answer: 'iPhoneの設定が原因のことが多いです。まず「低電力モード」をOFFにし、「設定 > サウンドと触覚 > システムハプティクス（または触覚）」がONになっているか確認してください。',
+                  },
                   {
                     question: 'チケットの画像が表示されなくなりました。',
                     answer: '端末のストレージ最適化やOSの更新により、画像のリンクが切れる場合があります。お手数ですが、一度その画像を削除し、再度アルバムから選択し直して保存してください。',
@@ -549,12 +555,14 @@ i18n.use(initReactI18next).init({
           },
           items: {
             darkMode: 'Theme',
+            haptics: 'Haptics',
             icloudSync: 'iCloud Sync',
             notifications: 'Notifications',
             appleMusic: 'Data provided by Apple Music',
             terms: 'Terms of Use',
             privacy: 'Privacy Policy',
             review: 'Review the app',
+            shareApp: 'Share this app',
             faq: 'FAQ',
             feedback: 'Feedback',
             sns: 'Instagram',
@@ -601,6 +609,10 @@ i18n.use(initReactI18next).init({
               {
                 category: 'Troubleshooting',
                 items: [
+                  {
+                    question: 'Haptics does not work.',
+                    answer: 'This is often caused by iPhone settings. Please turn off Low Power Mode and check that "Settings > Sounds & Haptics > System Haptics" is enabled.',
+                  },
                   {
                     question: 'Ticket images are no longer displayed.',
                     answer: 'Image links may break due to storage optimization or OS updates on your device. Please delete the affected image once, then select it again from your album and save.',

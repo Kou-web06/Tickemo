@@ -343,7 +343,7 @@ export default function PaywallScreen({ navigation }: PaywallScreenProps) {
 
       <View style={styles.foregroundContent}>
       <TouchableOpacity
-        style={[styles.restoreFloatingButtonWrap, { top: insets.top + 2 }]}
+        style={[styles.restoreFloatingButtonWrap, { top: Math.max(2, insets.top - 16) }]}
         onPress={handleRestore}
         activeOpacity={0.75}
       >
@@ -354,7 +354,7 @@ export default function PaywallScreen({ navigation }: PaywallScreenProps) {
 
       {/* Close Button */}
       <TouchableOpacity
-        style={[styles.closeButton, { top: insets.top }]}
+        style={[styles.closeButton, { top: Math.max(0, insets.top - 18) }]}
         onPress={handleClose}
         activeOpacity={0.6}
       >
@@ -536,7 +536,7 @@ const styles = StyleSheet.create({
   },
   restoreGlassButtonText: {
     fontSize: 12,
-    color: '#2B2B2B',
+    color: '#4c4c4c',
     fontFamily: 'LINESeedJP_700Bold',
   },
   scrollView: {
@@ -635,8 +635,8 @@ const styles = StyleSheet.create({
     zIndex: 15,
   },
   bottomIslandPanel: {
-    borderRadius: 28,
-    padding: 12,
+    borderRadius: 38,
+    padding: 18,
     backgroundColor: 'rgba(255, 255, 255, 0.94)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.92)',
@@ -651,8 +651,8 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#8B5CF6',
     borderRadius: 24,
-    paddingVertical: 16,
-    paddingHorizontal: 16,
+    paddingVertical: 17,
+    paddingHorizontal: 17,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -687,7 +687,7 @@ const styles = StyleSheet.create({
   },
   planCurrentPrice: {
     fontSize: 20,
-    color: '#111111',
+    color: '#181817',
     fontFamily: 'LINESeedJP_800ExtraBold',
     lineHeight: 20,
   },
@@ -703,8 +703,8 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   purchaseButtonText: {
-    fontSize: 18,
-    fontFamily: 'LINESeedJP_800ExtraBold',
+    fontSize: 17,
+    fontFamily: 'LINESeedJP_700Bold',
     color: '#FFFFFF',
   },
   purchaseButtonContent: {

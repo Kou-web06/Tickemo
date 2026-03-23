@@ -16,7 +16,7 @@ import TextTicker from 'react-native-text-ticker';
 import Reanimated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { theme } from '../theme';
 import LiveEditScreen from './LiveEditScreen';
-import SettingsScreen from './SettingsScreen';
+import SettingsScreen, { MusicProviderScreen } from './SettingsScreen';
 import ProfileEditScreen from './ProfileEditScreen';
 import PaywallScreen from './PaywallScreen';
 import { useRecords, ChekiRecord } from '../contexts/RecordsContext';
@@ -1092,6 +1092,16 @@ export default function CountdownScreen() {
         component={SettingsScreen}
         options={{
           animation: 'none',
+          presentation: 'card',
+          gestureEnabled: false,
+          fullScreenGestureEnabled: false,
+        }}
+      />
+      <Stack.Screen
+        name="MusicProvider"
+        component={MusicProviderScreen}
+        options={{
+          animation: 'slide_from_right',
           presentation: 'card',
           gestureEnabled: false,
           fullScreenGestureEnabled: false,

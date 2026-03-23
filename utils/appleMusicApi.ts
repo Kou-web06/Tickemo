@@ -44,6 +44,8 @@ export interface AppleMusicSong {
   type: 'songs';
   attributes: {
     name: string;
+    url?: string;
+    isrc?: string;
     artistName: string;
     albumName?: string;
     releaseDate?: string;

@@ -8,10 +8,12 @@ import {
   Easing,
   StyleSheet,
   ScrollView,
+  Share,
   Image,
   Alert,
   Linking,
   DeviceEventEmitter,
+  InteractionManager,
   useWindowDimensions,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
@@ -21,12 +23,13 @@ import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { HugeiconsIcon } from '@hugeicons/react-native';
-import { Edit01Icon, Sun01Icon, Moon01Icon, Moon02Icon } from '@hugeicons/core-free-icons';
+import { Edit01Icon, Sun01Icon, Moon01Icon, Moon02Icon, AppleMusicIcon, SpotifyIcon } from '@hugeicons/core-free-icons';
 import Svg, { Path } from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
+import * as Haptics from 'expo-haptics';
 import { useTranslation } from 'react-i18next';
 // import changeIcon from 'react-native-change-icon';
 import { useRecords } from '../contexts/RecordsContext';
@@ -60,6 +63,10 @@ interface SettingSection {
 
 const APP_STORE_URL = 'https://apps.apple.com/ja/app/tickemo-%E3%83%A9%E3%82%A4%E3%83%96%E3%81%AE%E6%80%9D%E3%81%84%E5%87%BA%E3%82%92%E8%A8%98%E9%8C%B2/id6758604980';
 const APP_STORE_REVIEW_URL = `${APP_STORE_URL}?action=write-review`;
+const HAPTICS_ENABLED_KEY = '@haptics_enabled';
+const MUSIC_PROVIDER_KEY = '@music_provider';
+
+type MusicProvider = 'spotify' | 'apple';
 
 const buildPalette = (isDarkMode: boolean, primaryColor: string) => ({
   screenBackground: isDarkMode ? '#121212' : '#F8F8F8',
@@ -103,7 +110,16 @@ type SettingsPalette = ReturnType<typeof buildPalette>;
 const CustomThemeToggle: React.FC<{
   isDarkMode: boolean;
   onToggle: () => void;
-}> = ({ isDarkMode, onToggle }) => {
+  showIcons?: boolean;
+  trackOnColor?: string;
+  trackOffColor?: string;
+}> = ({
+  isDarkMode,
+  onToggle,
+  showIcons = true,
+  trackOnColor = '#333333',
+  trackOffColor = '#8B5CF6',
+}) => {
   const thumbTranslateX = useRef(new Animated.Value(isDarkMode ? 28 : 0)).current;
   const backgroundProgress = useRef(new Animated.Value(isDarkMode ? 1 : 0)).current;
 
@@ -126,20 +142,22 @@ const CustomThemeToggle: React.FC<{
 
   const trackBackgroundColor = backgroundProgress.interpolate({
     inputRange: [0, 1],
-    outputRange: ['#8B5CF6', '#333333'],
+    outputRange: [trackOffColor, trackOnColor],
   });
 
   return (
     <Pressable onPress={onToggle} hitSlop={8} style={toggleStyles.pressable}>
       <Animated.View style={[toggleStyles.track, { backgroundColor: trackBackgroundColor as any }]}>
-        <View style={toggleStyles.iconLayer} pointerEvents="none">
-          <View style={toggleStyles.iconSlot}>
-            <HugeiconsIcon icon={Sun01Icon} size={14} color="#FFFFFF" strokeWidth={2.1} />
+        {showIcons ? (
+          <View style={toggleStyles.iconLayer} pointerEvents="none">
+            <View style={toggleStyles.iconSlot}>
+              <HugeiconsIcon icon={Sun01Icon} size={14} color="#FFFFFF" strokeWidth={2.1} />
+            </View>
+            <View style={toggleStyles.iconSlot}>
+              <HugeiconsIcon icon={Moon02Icon} size={14} color="#FFFFFF" strokeWidth={2.1} />
+            </View>
           </View>
-          <View style={toggleStyles.iconSlot}>
-            <HugeiconsIcon icon={Moon02Icon} size={14} color="#FFFFFF" strokeWidth={2.1} />
-          </View>
-        </View>
+        ) : null}
 
         <Animated.View
           style={[
@@ -212,6 +230,8 @@ export default function SettingsScreen({ navigation }: any) {
   const [firstLaunchAt, setFirstLaunchAt] = useState('');
   const [resolvedProfileAvatarUri, setResolvedProfileAvatarUri] = useState('');
   const [manualDarkMode, setManualDarkMode] = useState<boolean | null | undefined>(() => getCachedThemePreference());
+  const [isHapticsEnabled, setIsHapticsEnabled] = useState(true);
+  const [musicProvider, setMusicProvider] = useState<MusicProvider>('spotify');
   const scrollViewRef = useRef<ScrollView>(null);
 
   const loadThemePreference = useCallback(async () => {
@@ -222,6 +242,41 @@ export default function SettingsScreen({ navigation }: any) {
   useEffect(() => {
     void loadThemePreference();
   }, [loadThemePreference]);
+
+  useEffect(() => {
+    const loadHapticsPreference = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(HAPTICS_ENABLED_KEY);
+        if (stored === null) {
+          setIsHapticsEnabled(true);
+          return;
+        }
+        setIsHapticsEnabled(stored === 'true');
+      } catch {
+        setIsHapticsEnabled(true);
+      }
+    };
+
+    void loadHapticsPreference();
+  }, []);
+
+  useEffect(() => {
+    const loadMusicProvider = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(MUSIC_PROVIDER_KEY);
+        if (stored === 'spotify' || stored === 'apple') {
+          setMusicProvider(stored);
+          return;
+        }
+        setMusicProvider('spotify');
+        await AsyncStorage.setItem(MUSIC_PROVIDER_KEY, 'spotify');
+      } catch {
+        setMusicProvider('spotify');
+      }
+    };
+
+    void loadMusicProvider();
+  }, []);
 
   useEffect(() => {
     const subscription = DeviceEventEmitter.addListener('theme:changed', (nextValue?: boolean) => {
@@ -241,13 +296,38 @@ export default function SettingsScreen({ navigation }: any) {
     [activeTheme.primary, isDarkMode, systemTheme.primary]
   );
   const styles = useMemo(() => createStyles(palette), [palette]);
+  const hapticsLabel = useMemo(() => {
+    const translated = t('settings.items.haptics');
+    return translated === 'settings.items.haptics' ? '触覚' : translated;
+  }, [t]);
+
+  const musicProviderValueLabel = useMemo(() => {
+    if (musicProvider === 'spotify') return 'Spotify';
+    if (musicProvider === 'apple') return 'Apple Music';
+    return 'Spotify';
+  }, [musicProvider]);
 
   const handleToggleDarkMode = useCallback(async (nextValue: boolean) => {
     setManualDarkMode(nextValue);
     setThemePreferenceCache(nextValue);
     DeviceEventEmitter.emit('theme:changed', nextValue);
+    if (!isHapticsEnabled) {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {
+        // Ignore haptics errors on unsupported devices.
+      });
+    }
     try {
       await saveThemePreference(nextValue);
+    } catch {
+      // Ignore preference save errors.
+    }
+  }, [isHapticsEnabled]);
+
+  const handleToggleHaptics = useCallback(async (nextValue: boolean) => {
+    setIsHapticsEnabled(nextValue);
+    DeviceEventEmitter.emit('haptics:changed', nextValue);
+    try {
+      await AsyncStorage.setItem(HAPTICS_ENABLED_KEY, String(nextValue));
     } catch {
       // Ignore preference save errors.
     }
@@ -258,6 +338,8 @@ export default function SettingsScreen({ navigation }: any) {
       title: t('settings.sections.general'),
       data: [
         { id: 'dark-mode', label: t('settings.items.darkMode') },
+        { id: 'haptics', label: hapticsLabel },
+        { id: 'music-provider', label: 'Music Provider', value: musicProviderValueLabel },
         { id: 'icloud-sync', label: t('settings.items.icloudSync') },
       ],
     },
@@ -276,6 +358,7 @@ export default function SettingsScreen({ navigation }: any) {
       title: t('settings.sections.support'),
       data: [
         { id: 'review', label: t('settings.items.review') },
+        { id: 'share-app', label: t('settings.items.shareApp') },
         { id: 'faq', label: t('settings.items.faq') },
         { id: 'feedback', label: t('settings.items.feedback') },
       ],
@@ -355,6 +438,20 @@ export default function SettingsScreen({ navigation }: any) {
     };
   }, []);
 
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener('music-provider:changed', (nextValue?: MusicProvider) => {
+      if (nextValue === 'spotify' || nextValue === 'apple') {
+        setMusicProvider(nextValue);
+        return;
+      }
+      setMusicProvider('spotify');
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
   const profile = useMemo(() => {
     const displayName = userProfile?.name || 'User';
     const rawUsername = userProfile?.username || 'user';
@@ -418,10 +515,12 @@ export default function SettingsScreen({ navigation }: any) {
                 '@profile_avatar_url',
               ]);
               DeviceEventEmitter.emit('app:resetToWelcome');
-              DeviceEventEmitter.emit('app:goToHome');
               if (navigation?.popToTop && navigation?.canGoBack?.()) {
                 navigation.popToTop();
               }
+              InteractionManager.runAfterInteractions(() => {
+                DeviceEventEmitter.emit('app:goToHome');
+              });
             } catch (error) {
               console.log('Failed to delete account:', error);
             }
@@ -532,10 +631,12 @@ export default function SettingsScreen({ navigation }: any) {
                       isLast && styles.rowLast,
                     ]}
                     activeOpacity={0.7}
-                    disabled={item.id === 'dark-mode'}
+                    disabled={item.id === 'dark-mode' || item.id === 'haptics'}
                     onPress={() => {
                       if (item.id === 'icloud-sync') {
                         navigation.navigate('ICloudSync');
+                      } else if (item.id === 'music-provider') {
+                        navigation.navigate('MusicProvider');
                       } else if (item.id === 'delete') {
                         handleAccountDelete();
                       } else if (item.id === 'notifications') {
@@ -547,6 +648,14 @@ export default function SettingsScreen({ navigation }: any) {
                       } else if (item.id === 'review') {
                         Linking.openURL(APP_STORE_REVIEW_URL).catch(() => {
                           Alert.alert(t('settings.common.errorTitle'), t('settings.alerts.openAppStoreFailed'));
+                        });
+                      } else if (item.id === 'share-app') {
+                        Share.share({
+                          title: 'Tickemo',
+                          message: `Tickemo\n${APP_STORE_URL}`,
+                          url: APP_STORE_URL,
+                        }).catch(() => {
+                          Alert.alert(t('settings.common.errorTitle'), t('settings.alerts.shareFailed'));
                         });
                       } else if (item.id === 'feedback') {
                         const feedbackUrl = isTestflightMode
@@ -593,11 +702,22 @@ export default function SettingsScreen({ navigation }: any) {
                           }}
                         />
                       ) : null}
+                      {item.id === 'haptics' ? (
+                        <CustomThemeToggle
+                          isDarkMode={!isHapticsEnabled}
+                          showIcons={false}
+                          trackOnColor="#8B5CF6"
+                          trackOffColor="#333333"
+                          onToggle={() => {
+                            void handleToggleHaptics(!isHapticsEnabled);
+                          }}
+                        />
+                      ) : null}
                       {item.value && <Text style={styles.rowValue}>{item.value}</Text>}
-                      {!item.destructive && item.id !== 'about' && item.id !== 'faq' && item.id !== 'icloud-sync' && item.id !== 'dark-mode' && (
+                      {!item.destructive && item.id !== 'about' && item.id !== 'faq' && item.id !== 'icloud-sync' && item.id !== 'music-provider' && item.id !== 'dark-mode' && item.id !== 'haptics' && (
                         <MaterialIcons name="arrow-outward" size={20} color={palette.iconColor} />
                       )}
-                      {(item.id === 'faq' || item.id === 'icloud-sync') && (
+                      {(item.id === 'faq' || item.id === 'icloud-sync' || item.id === 'music-provider') && (
                         <MaterialIcons name="arrow-forward-ios" size={15} color={palette.iconColor} />
                       )}
                     </View>
@@ -1164,6 +1284,128 @@ export function FAQScreen({ navigation }: any) {
   );
 }
 
+export function MusicProviderScreen({ navigation }: any) {
+  const insets = useSafeAreaInsets();
+  const { isDark: isSystemDark } = useTheme();
+  const [manualDarkMode, setManualDarkMode] = useState<boolean | null | undefined>(() => getCachedThemePreference());
+  const [selectedProvider, setSelectedProvider] = useState<MusicProvider>('spotify');
+
+  const loadThemePreference = useCallback(async () => {
+    const value = await hydrateThemePreference();
+    setManualDarkMode(value);
+  }, []);
+
+  useEffect(() => {
+    void loadThemePreference();
+  }, [loadThemePreference]);
+
+  useEffect(() => {
+    const loadProvider = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(MUSIC_PROVIDER_KEY);
+        if (stored === 'spotify' || stored === 'apple') {
+          setSelectedProvider(stored);
+          return;
+        }
+        setSelectedProvider('spotify');
+        await AsyncStorage.setItem(MUSIC_PROVIDER_KEY, 'spotify');
+      } catch {
+        setSelectedProvider('spotify');
+      }
+    };
+
+    void loadProvider();
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadThemePreference();
+    }, [loadThemePreference])
+  );
+
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener('theme:changed', (nextValue?: boolean) => {
+      if (typeof nextValue !== 'boolean') return;
+      setManualDarkMode(nextValue);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  const isDarkMode = manualDarkMode ?? false;
+  const themeForProvider = isDarkMode ? darkTheme : lightTheme;
+  const palette = useMemo(() => buildPalette(isDarkMode, themeForProvider.primary), [isDarkMode, themeForProvider.primary]);
+  const providerStyles = useMemo(() => createMusicProviderStyles(palette), [palette]);
+
+  const saveAndClose = useCallback(
+    async (nextValue: MusicProvider) => {
+      try {
+        await AsyncStorage.setItem(MUSIC_PROVIDER_KEY, nextValue);
+      } catch {
+        // Ignore preference save errors.
+      }
+
+      setSelectedProvider(nextValue);
+      DeviceEventEmitter.emit('music-provider:changed', nextValue);
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {
+        // Ignore haptics errors on unsupported devices.
+      });
+      navigation.goBack();
+    },
+    [navigation]
+  );
+
+  return (
+    <SafeAreaView style={[providerStyles.container, { backgroundColor: palette.screenBackground }]} edges={['left', 'right', 'bottom']}>
+      <BlurView tint={isDarkMode ? 'dark' : 'light'} intensity={80} style={[providerStyles.glassHeader, { paddingTop: insets.top + 8 }]}>
+        <View style={providerStyles.header}>
+          <TouchableOpacity style={providerStyles.backButton} onPress={() => navigation.goBack()}>
+            <MaterialIcons name="arrow-back-ios" size={22} color={palette.primaryText} />
+          </TouchableOpacity>
+          <Text style={providerStyles.headerTitle}>Music Provider</Text>
+          <View style={{ width: 44 }} />
+        </View>
+      </BlurView>
+
+      <View style={providerStyles.content}>
+        <TouchableOpacity
+          style={providerStyles.optionRow}
+          activeOpacity={0.78}
+          onPress={() => {
+            void saveAndClose('apple');
+          }}
+        >
+          <View style={providerStyles.optionLeft}>
+            <View style={[providerStyles.radioOuter, selectedProvider === 'apple' && providerStyles.radioOuterActive]}>
+              {selectedProvider === 'apple' ? <View style={providerStyles.radioInner} /> : null}
+            </View>
+            <HugeiconsIcon icon={AppleMusicIcon} size={20} color={palette.primaryText} strokeWidth={2.0} />
+            <Text style={providerStyles.optionLabel}>Apple Music</Text>
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={providerStyles.optionRow}
+          activeOpacity={0.78}
+          onPress={() => {
+            void saveAndClose('spotify');
+          }}
+        >
+          <View style={providerStyles.optionLeft}>
+            <View style={[providerStyles.radioOuter, selectedProvider === 'spotify' && providerStyles.radioOuterActive]}>
+              {selectedProvider === 'spotify' ? <View style={providerStyles.radioInner} /> : null}
+            </View>
+            <HugeiconsIcon icon={SpotifyIcon} size={20} color={palette.primaryText} strokeWidth={2.0} />
+            <Text style={providerStyles.optionLabel}>Spotify</Text>
+          </View>
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
+  );
+}
+
 const createFaqStyles = (palette: SettingsPalette) =>
   StyleSheet.create({
     glassHeader: {
@@ -1256,6 +1498,84 @@ const createFaqStyles = (palette: SettingsPalette) =>
       color: palette.subtleText,
       lineHeight: 20,
       textAlign: 'center',
+    },
+  });
+
+const createMusicProviderStyles = (palette: SettingsPalette) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: palette.screenBackground,
+    },
+    glassHeader: {
+      backgroundColor: palette.headerBackground,
+      borderBottomWidth: 1,
+      borderBottomColor: palette.headerBorder,
+      overflow: 'hidden',
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 12,
+      paddingTop: 10,
+      paddingBottom: 16,
+    },
+    backButton: {
+      width: 44,
+      height: 44,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    headerTitle: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: palette.titleText,
+    },
+    content: {
+      paddingHorizontal: 20,
+      paddingTop: 24,
+      gap: 10,
+    },
+    optionRow: {
+      minHeight: 56,
+      borderRadius: 4,
+      borderWidth: 1,
+      borderColor: palette.rowBorder,
+      backgroundColor: palette.cardBackground,
+      paddingHorizontal: 14,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    optionLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    radioOuter: {
+      width: 18,
+      height: 18,
+      borderRadius: 9,
+      borderWidth: 1.4,
+      borderColor: palette.secondaryText,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 2,
+    },
+    radioOuterActive: {
+      borderColor: palette.primaryText,
+    },
+    radioInner: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: palette.primaryText,
+    },
+    optionLabel: {
+      color: palette.primaryText,
+      fontSize: 15,
+      fontWeight: '700',
     },
   });
 

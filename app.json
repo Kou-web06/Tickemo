@@ -33,7 +33,8 @@
               "com.googleusercontent.apps.177149194090-q3lsjb53p2bgls307mrsc5q3fkk2kbjt"
             ]
           }
-        ]
+        ],
+        "LSApplicationQueriesSchemes": ["spotify"]
       },
       "entitlements": {
         "com.apple.developer.icloud-services": [
@@ -108,6 +109,8 @@
       "supabaseUrl": "",
       "supabaseAnonKey": "",
       "supabaseStorageBucket": "",
+      "spotifyResolverEndpoint": "",
+      "spotifyResolverApiKey": "",
       "revenueCatAppleApiKey": "appl_hRVOeiwkPvuPNjTIAiZFuKvqELh"
     },
     "experiments": {

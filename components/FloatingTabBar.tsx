@@ -1,7 +1,9 @@
 import React from 'react';
-import { View, TouchableOpacity, StyleSheet, Animated, Easing } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Animated, Easing, DeviceEventEmitter } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
+import * as Haptics from 'expo-haptics';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { HugeiconsIcon } from '@hugeicons/react-native';
 import {
   Home01Icon,
@@ -19,11 +21,42 @@ interface TabBarProps {
   navigation: any;
 }
 
+const HAPTICS_ENABLED_KEY = '@haptics_enabled';
+
 export const FloatingTabBar: React.FC<TabBarProps> = ({ state, descriptors, navigation }) => {
   const insets = useSafeAreaInsets();
   const settingsSpin = React.useRef(new Animated.Value(0)).current;
+  const [isHapticsEnabled, setIsHapticsEnabled] = React.useState(true);
   const routes = Array.isArray(state?.routes) ? state.routes : [];
   const activeIndex = typeof state?.index === 'number' ? state.index : 0;
+
+  React.useEffect(() => {
+    const loadHapticsPreference = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(HAPTICS_ENABLED_KEY);
+        if (stored === null) {
+          setIsHapticsEnabled(true);
+          return;
+        }
+        setIsHapticsEnabled(stored === 'true');
+      } catch {
+        setIsHapticsEnabled(true);
+      }
+    };
+
+    void loadHapticsPreference();
+
+    const subscription = DeviceEventEmitter.addListener('haptics:changed', (nextValue?: boolean) => {
+      if (typeof nextValue !== 'boolean') return;
+      setIsHapticsEnabled(nextValue);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  const shouldTriggerHaptics = !isHapticsEnabled;
 
   if (routes.length === 0) {
     return null;
@@ -90,6 +123,11 @@ export const FloatingTabBar: React.FC<TabBarProps> = ({ state, descriptors, navi
             if (!event.defaultPrevented && isFocused && route.name === 'Settings') {
               navigation.navigate(route.name);
             } else if (!isFocused && !event.defaultPrevented) {
+              if (shouldTriggerHaptics) {
+                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {
+                  // Ignore haptics errors on unsupported devices.
+                });
+              }
               navigation.navigate(route.name);
             }
           };

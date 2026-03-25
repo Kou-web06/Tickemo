@@ -4,10 +4,53 @@ import type { ChekiRecord } from '../types/record';
 import { useAppStore } from '../store/useAppStore';
 
 const REMINDER_TYPE = 'live_reminder';
+
+export interface NotificationSettingsState {
+  beforeLive: boolean;
+  onDay: boolean;
+  nextDayReview: boolean;
+  nextYearReview: boolean;
+  monthlyReport: boolean;
+  campaigns: boolean;
+}
+
+const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettingsState = {
+  beforeLive: true,
+  onDay: true,
+  nextDayReview: false,
+  nextYearReview: false,
+  monthlyReport: false,
+  campaigns: false,
+};
+
+const NOTIFICATION_SETTINGS_KEY = '@notification_settings';
+
+export async function getNotificationSettings(): Promise<NotificationSettingsState> {
+  try {
+    const saved = await AsyncStorage.getItem(NOTIFICATION_SETTINGS_KEY);
+    if (saved) {
+      return { ...DEFAULT_NOTIFICATION_SETTINGS, ...JSON.parse(saved) };
+    }
+  } catch (error) {
+    console.log('[NotificationSettings] Load failed:', error);
+  }
+  return DEFAULT_NOTIFICATION_SETTINGS;
+}
+
+export async function saveNotificationSettings(settings: NotificationSettingsState): Promise<void> {
+  try {
+    await AsyncStorage.setItem(NOTIFICATION_SETTINGS_KEY, JSON.stringify(settings));
+  } catch (error) {
+    console.log('[NotificationSettings] Save failed:', error);
+  }
+}
 const LEGACY_TIMECAPSULE_TYPE = 'timecapsule';
 const LEGACY_YEARLY_REPORT_TYPE = 'yearly_report';
 const NOTIFICATION_TITLE_PREP = 'チケットとタオル、持った？';
 const NOTIFICATION_TITLE_FINAL = 'そろそろスマホしまっておいて🤫';
+const NOTIFICATION_TITLE_NEXT_DAY = 'あのライブどうだった？';
+const NOTIFICATION_TITLE_NEXT_YEAR = '1年前の今日...';
+const NOTIFICATION_TITLE_MONTHLY = '今月のライブレポート';
 const LAST_SCHEDULE_KEY = '@last_live_notification_schedule';
 const SCHEDULE_LOCK_KEY = '@notification_schedule_lock';
 const MAX_SCHEDULED = 64;
@@ -68,20 +111,46 @@ const getScheduleTargets = (record: ChekiRecord) => {
   const startDateTime = getStartDateTime(base, record.startTime);
 
   const dayBefore = {
-    kind: 'day_before',
+    kind: 'beforeLive',
     title: NOTIFICATION_TITLE_PREP,
     body: `いよいよ明日は ${liveName} ！忘れ物ない？もう一回チェックしてね！`,
     date: dateAt(base, 19, 0, -1),
   };
 
-  const fifteenMinutesBefore = {
-    kind: 'fifteen_minutes_before',
+  const onDay = {
+    kind: 'onDay',
     title: NOTIFICATION_TITLE_FINAL,
     body: `${liveName}まもなく始まります！行ってらっしゃい！`,
     date: addMinutes(startDateTime, -15),
   };
 
-  return [dayBefore, fifteenMinutesBefore];
+  const nextDay = {
+    kind: 'nextDayReview',
+    title: NOTIFICATION_TITLE_NEXT_DAY,
+    body: `${liveName}の思い出、チケットに保存しましたか？`,
+    date: dateAt(base, 10, 0, 1),
+  };
+
+  const nextYear = {
+    kind: 'nextYearReview',
+    title: NOTIFICATION_TITLE_NEXT_YEAR,
+    body: `${liveName}から1年経ちました。あの日のこと覚えていますか？`,
+    date: dateAt(base, 10, 0, 365),
+  };
+
+  const monthlyReport = {
+    kind: 'monthlyReport',
+    title: NOTIFICATION_TITLE_MONTHLY,
+    body: '今月のライブ記録をチェック',
+    get date() {
+      // ライブの登録月の月末22:00に通知
+      const lastDayOfMonth = new Date(base.getFullYear(), base.getMonth() + 1, 0);
+      lastDayOfMonth.setHours(22, 0, 0, 0);
+      return lastDayOfMonth;
+    },
+  };
+
+  return [dayBefore, onDay, nextDay, nextYear, monthlyReport];
 };
 
 const getTargetDateByKind = (record: ChekiRecord, kind?: string) => {
@@ -175,6 +244,8 @@ export const scheduleLiveReminders = async (records: ChekiRecord[]) => {
       return;
     }
 
+    const notificationSettings = await getNotificationSettings();
+
     const scheduleKey = `${formatDayKey()}|${buildRecordSignature(records)}`;
     const lastKey = await AsyncStorage.getItem(LAST_SCHEDULE_KEY);
     if (lastKey === scheduleKey) {
@@ -203,7 +274,26 @@ export const scheduleLiveReminders = async (records: ChekiRecord[]) => {
         kind: target.kind,
         reminderSnapshot: buildReminderSnapshot(record),
       }))
-      .filter((item) => item.scheduledDate.getTime() > now);
+      .filter((item) => item.scheduledDate.getTime() > now)
+      // 通知設定に基づいてフィルター
+      .filter((item) => {
+        switch (item.kind) {
+          case 'beforeLive':
+            return notificationSettings.beforeLive;
+          case 'onDay':
+            return notificationSettings.onDay;
+          case 'nextDayReview':
+            return notificationSettings.nextDayReview;
+          case 'nextYearReview':
+            return notificationSettings.nextYearReview;
+          case 'monthlyReport':
+            return notificationSettings.monthlyReport;
+          case 'campaigns':
+            return notificationSettings.campaigns;
+          default:
+            return false;
+        }
+      });
 
     // ライブ通知のみをスケジュール
     const allTargets = futureLiveTargets

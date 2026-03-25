@@ -45,6 +45,7 @@ import {
 } from '../lib/themePreference';
 import { useFonts, LINESeedJP_400Regular, LINESeedJP_700Bold, LINESeedJP_800ExtraBold } from '@expo-google-fonts/line-seed-jp';
 import { useTheme, lightTheme, darkTheme } from '../src/theme';
+import { getNotificationSettings, saveNotificationSettings } from '../utils/liveNotifications';
 
 interface SettingItem {
   id: string;
@@ -339,7 +340,7 @@ export default function SettingsScreen({ navigation }: any) {
       data: [
         { id: 'dark-mode', label: t('settings.items.darkMode') },
         { id: 'haptics', label: hapticsLabel },
-        { id: 'music-provider', label: 'Music Provider', value: musicProviderValueLabel },
+        { id: 'music-provider', label: t('settings.items.musicProvider'), value: musicProviderValueLabel },
         { id: 'icloud-sync', label: t('settings.items.icloudSync') },
       ],
     },
@@ -637,12 +638,10 @@ export default function SettingsScreen({ navigation }: any) {
                         navigation.navigate('ICloudSync');
                       } else if (item.id === 'music-provider') {
                         navigation.navigate('MusicProvider');
+                      } else if (item.id === 'notifications') {
+                        navigation.navigate('NotificationSettings');
                       } else if (item.id === 'delete') {
                         handleAccountDelete();
-                      } else if (item.id === 'notifications') {
-                        Linking.openSettings().catch(() => {
-                          Alert.alert(t('settings.common.errorTitle'), t('settings.alerts.openSettingsFailed'));
-                        });
                       } else if (item.id === 'faq') {
                         navigation.navigate('FAQ');
                       } else if (item.id === 'review') {
@@ -714,10 +713,10 @@ export default function SettingsScreen({ navigation }: any) {
                         />
                       ) : null}
                       {item.value && <Text style={styles.rowValue}>{item.value}</Text>}
-                      {!item.destructive && item.id !== 'about' && item.id !== 'faq' && item.id !== 'icloud-sync' && item.id !== 'music-provider' && item.id !== 'dark-mode' && item.id !== 'haptics' && (
+                      {!item.destructive && item.id !== 'about' && item.id !== 'faq' && item.id !== 'icloud-sync' && item.id !== 'music-provider' && item.id !== 'dark-mode' && item.id !== 'haptics' && item.id !== 'notifications' && (
                         <MaterialIcons name="arrow-outward" size={20} color={palette.iconColor} />
                       )}
-                      {(item.id === 'faq' || item.id === 'icloud-sync' || item.id === 'music-provider') && (
+                      {(item.id === 'faq' || item.id === 'icloud-sync' || item.id === 'music-provider' || item.id === 'notifications') && (
                         <MaterialIcons name="arrow-forward-ios" size={15} color={palette.iconColor} />
                       )}
                     </View>
@@ -1285,6 +1284,7 @@ export function FAQScreen({ navigation }: any) {
 }
 
 export function MusicProviderScreen({ navigation }: any) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { isDark: isSystemDark } = useTheme();
   const [manualDarkMode, setManualDarkMode] = useState<boolean | null | undefined>(() => getCachedThemePreference());
@@ -1364,12 +1364,15 @@ export function MusicProviderScreen({ navigation }: any) {
           <TouchableOpacity style={providerStyles.backButton} onPress={() => navigation.goBack()}>
             <MaterialIcons name="arrow-back-ios" size={22} color={palette.primaryText} />
           </TouchableOpacity>
-          <Text style={providerStyles.headerTitle}>Music Provider</Text>
+          <Text style={providerStyles.headerTitle}>{t('settings.musicProvider.header')}</Text>
           <View style={{ width: 44 }} />
         </View>
       </BlurView>
 
-      <View style={providerStyles.content}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={providerStyles.content}>
+        <Text style={providerStyles.sectionLabel}>{t('settings.musicProvider.sectionLabel')}</Text>
+
+        <View style={providerStyles.card}>
         <TouchableOpacity
           style={providerStyles.optionRow}
           activeOpacity={0.78}
@@ -1382,12 +1385,15 @@ export function MusicProviderScreen({ navigation }: any) {
               {selectedProvider === 'apple' ? <View style={providerStyles.radioInner} /> : null}
             </View>
             <HugeiconsIcon icon={AppleMusicIcon} size={20} color={palette.primaryText} strokeWidth={2.0} />
-            <Text style={providerStyles.optionLabel}>Apple Music</Text>
+            <Text style={providerStyles.optionLabel}>{t('settings.musicProvider.apple')}</Text>
           </View>
+          {selectedProvider === 'apple' ? (
+            <MaterialIcons name="check" size={20} color={palette.primaryText} />
+          ) : null}
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={providerStyles.optionRow}
+          style={[providerStyles.optionRow, providerStyles.optionRowLast]}
           activeOpacity={0.78}
           onPress={() => {
             void saveAndClose('spotify');
@@ -1398,10 +1404,244 @@ export function MusicProviderScreen({ navigation }: any) {
               {selectedProvider === 'spotify' ? <View style={providerStyles.radioInner} /> : null}
             </View>
             <HugeiconsIcon icon={SpotifyIcon} size={20} color={palette.primaryText} strokeWidth={2.0} />
-            <Text style={providerStyles.optionLabel}>Spotify</Text>
+            <Text style={providerStyles.optionLabel}>{t('settings.musicProvider.spotify')}</Text>
           </View>
+          {selectedProvider === 'spotify' ? (
+            <MaterialIcons name="check" size={20} color={palette.primaryText} />
+          ) : null}
         </TouchableOpacity>
-      </View>
+
+        </View>
+
+        <Text style={providerStyles.caption}>{t('settings.musicProvider.caption')}</Text>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+export function NotificationSettingsScreen({ navigation }: any) {
+  const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+  const { isDark: isSystemDark } = useTheme();
+  const [manualDarkMode, setManualDarkMode] = useState<boolean | null | undefined>(() => getCachedThemePreference());
+
+  const [notifyBeforeLive, setNotifyBeforeLive] = useState(true);
+  const [notifyOnDay, setNotifyOnDay] = useState(true);
+  const [notifyNextDayReview, setNotifyNextDayReview] = useState(false);
+  const [notifyNextYearReview, setNotifyNextYearReview] = useState(false);
+  const [notifyMonthlyReport, setNotifyMonthlyReport] = useState(false);
+  const [notifyCampaigns, setNotifyCampaigns] = useState(false);
+
+  const loadThemePreference = useCallback(async () => {
+    const value = await hydrateThemePreference();
+    setManualDarkMode(value);
+  }, []);
+
+  const loadNotifications = useCallback(async () => {
+    const settings = await getNotificationSettings();
+    setNotifyBeforeLive(settings.beforeLive);
+    setNotifyOnDay(settings.onDay);
+    setNotifyNextDayReview(settings.nextDayReview);
+    setNotifyNextYearReview(settings.nextYearReview);
+    setNotifyMonthlyReport(settings.monthlyReport);
+    setNotifyCampaigns(settings.campaigns);
+  }, []);
+
+  useEffect(() => {
+    void loadThemePreference();
+    void loadNotifications();
+  }, [loadThemePreference, loadNotifications]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadThemePreference();
+      void loadNotifications();
+    }, [loadThemePreference, loadNotifications])
+  );
+
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener('theme:changed', (nextValue?: boolean) => {
+      if (typeof nextValue !== 'boolean') return;
+      setManualDarkMode(nextValue);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  const isDarkMode = manualDarkMode ?? false;
+  const themeForNotifications = isDarkMode ? darkTheme : lightTheme;
+  const palette = useMemo(() => buildPalette(isDarkMode, themeForNotifications.primary), [isDarkMode, themeForNotifications.primary]);
+  const notificationStyles = useMemo(() => createNotificationSettingsStyles(palette), [palette]);
+
+  return (
+    <SafeAreaView style={[notificationStyles.container, { backgroundColor: palette.screenBackground }]} edges={['left', 'right', 'bottom']}>
+      <BlurView tint={isDarkMode ? 'dark' : 'light'} intensity={80} style={[notificationStyles.glassHeader, { paddingTop: insets.top + 8 }]}>
+        <View style={notificationStyles.header}>
+          <TouchableOpacity style={notificationStyles.backButton} onPress={() => navigation.goBack()}>
+            <MaterialIcons name="arrow-back-ios" size={22} color={palette.primaryText} />
+          </TouchableOpacity>
+          <Text style={notificationStyles.headerTitle}>{t('settings.notificationSettings.header')}</Text>
+          <View style={{ width: 44 }} />
+        </View>
+      </BlurView>
+
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={notificationStyles.content}>
+        <View style={notificationStyles.card}>
+          <View style={notificationStyles.row}>
+            <View style={notificationStyles.rowTextWrap}>
+              <Text style={notificationStyles.rowTitle}>{t('settings.notificationSettings.items.beforeLive.title')}</Text>
+              <Text style={notificationStyles.rowDesc}>{t('settings.notificationSettings.items.beforeLive.desc')}</Text>
+            </View>
+            <CustomThemeToggle
+              isDarkMode={notifyBeforeLive}
+              showIcons={false}
+              trackOnColor="#8B5CF6"
+              trackOffColor="#333333"
+              onToggle={() => {
+                const newValue = !notifyBeforeLive;
+                setNotifyBeforeLive(newValue);
+                void saveNotificationSettings({
+                  beforeLive: newValue,
+                  onDay: notifyOnDay,
+                  nextDayReview: notifyNextDayReview,
+                  nextYearReview: notifyNextYearReview,
+                  monthlyReport: notifyMonthlyReport,
+                  campaigns: notifyCampaigns,
+                });
+              }}
+            />
+          </View>
+
+          <View style={notificationStyles.row}>
+            <View style={notificationStyles.rowTextWrap}>
+              <Text style={notificationStyles.rowTitle}>{t('settings.notificationSettings.items.onDay.title')}</Text>
+              <Text style={notificationStyles.rowDesc}>{t('settings.notificationSettings.items.onDay.desc')}</Text>
+            </View>
+            <CustomThemeToggle
+              isDarkMode={notifyOnDay}
+              showIcons={false}
+              trackOnColor="#8B5CF6"
+              trackOffColor="#333333"
+              onToggle={() => {
+                const newValue = !notifyOnDay;
+                setNotifyOnDay(newValue);
+                void saveNotificationSettings({
+                  beforeLive: notifyBeforeLive,
+                  onDay: newValue,
+                  nextDayReview: notifyNextDayReview,
+                  nextYearReview: notifyNextYearReview,
+                  monthlyReport: notifyMonthlyReport,
+                  campaigns: notifyCampaigns,
+                });
+              }}
+            />
+          </View>
+
+          <View style={notificationStyles.row}>
+            <View style={notificationStyles.rowTextWrap}>
+              <Text style={notificationStyles.rowTitle}>{t('settings.notificationSettings.items.nextDayReview.title')}</Text>
+              <Text style={notificationStyles.rowDesc}>{t('settings.notificationSettings.items.nextDayReview.desc')}</Text>
+            </View>
+            <CustomThemeToggle
+              isDarkMode={notifyNextDayReview}
+              showIcons={false}
+              trackOnColor="#8B5CF6"
+              trackOffColor="#333333"
+              onToggle={() => {
+                const newValue = !notifyNextDayReview;
+                setNotifyNextDayReview(newValue);
+                void saveNotificationSettings({
+                  beforeLive: notifyBeforeLive,
+                  onDay: notifyOnDay,
+                  nextDayReview: newValue,
+                  nextYearReview: notifyNextYearReview,
+                  monthlyReport: notifyMonthlyReport,
+                  campaigns: notifyCampaigns,
+                });
+              }}
+            />
+          </View>
+
+          <View style={notificationStyles.row}>
+            <View style={notificationStyles.rowTextWrap}>
+              <Text style={notificationStyles.rowTitle}>{t('settings.notificationSettings.items.nextYearReview.title')}</Text>
+              <Text style={notificationStyles.rowDesc}>{t('settings.notificationSettings.items.nextYearReview.desc')}</Text>
+            </View>
+            <CustomThemeToggle
+              isDarkMode={notifyNextYearReview}
+              showIcons={false}
+              trackOnColor="#8B5CF6"
+              trackOffColor="#333333"
+              onToggle={() => {
+                const newValue = !notifyNextYearReview;
+                setNotifyNextYearReview(newValue);
+                void saveNotificationSettings({
+                  beforeLive: notifyBeforeLive,
+                  onDay: notifyOnDay,
+                  nextDayReview: notifyNextDayReview,
+                  nextYearReview: newValue,
+                  monthlyReport: notifyMonthlyReport,
+                  campaigns: notifyCampaigns,
+                });
+              }}
+            />
+          </View>
+
+          <View style={notificationStyles.row}>
+            <View style={notificationStyles.rowTextWrap}>
+              <Text style={notificationStyles.rowTitle}>{t('settings.notificationSettings.items.monthlyReport.title')}</Text>
+              <Text style={notificationStyles.rowDesc}>{t('settings.notificationSettings.items.monthlyReport.desc')}</Text>
+            </View>
+            <CustomThemeToggle
+              isDarkMode={notifyMonthlyReport}
+              showIcons={false}
+              trackOnColor="#8B5CF6"
+              trackOffColor="#333333"
+              onToggle={() => {
+                const newValue = !notifyMonthlyReport;
+                setNotifyMonthlyReport(newValue);
+                void saveNotificationSettings({
+                  beforeLive: notifyBeforeLive,
+                  onDay: notifyOnDay,
+                  nextDayReview: notifyNextDayReview,
+                  nextYearReview: notifyNextYearReview,
+                  monthlyReport: newValue,
+                  campaigns: notifyCampaigns,
+                });
+              }}
+            />
+          </View>
+
+          <View style={[notificationStyles.row, notificationStyles.rowLast]}>
+            <View style={notificationStyles.rowTextWrap}>
+              <Text style={notificationStyles.rowTitle}>{t('settings.notificationSettings.items.campaigns.title')}</Text>
+              <Text style={notificationStyles.rowDesc}>{t('settings.notificationSettings.items.campaigns.desc')}</Text>
+            </View>
+            <CustomThemeToggle
+              isDarkMode={notifyCampaigns}
+              showIcons={false}
+              trackOnColor="#8B5CF6"
+              trackOffColor="#333333"
+              onToggle={() => {
+                const newValue = !notifyCampaigns;
+                setNotifyCampaigns(newValue);
+                void saveNotificationSettings({
+                  beforeLive: notifyBeforeLive,
+                  onDay: notifyOnDay,
+                  nextDayReview: notifyNextDayReview,
+                  nextYearReview: notifyNextYearReview,
+                  monthlyReport: notifyMonthlyReport,
+                  campaigns: newValue,
+                });
+              }}
+            />
+          </View>
+        </View>
+
+        <Text style={notificationStyles.caption}>{t('settings.notificationSettings.caption')}</Text>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -1535,18 +1775,36 @@ const createMusicProviderStyles = (palette: SettingsPalette) =>
     content: {
       paddingHorizontal: 20,
       paddingTop: 24,
-      gap: 10,
+      paddingBottom: 36,
+    },
+    sectionLabel: {
+      fontSize: 14,
+      fontWeight: '500',
+      color: palette.tertiaryText,
+      marginBottom: 10,
+      marginLeft: 8,
+    },
+    card: {
+      backgroundColor: palette.cardBackground,
+      borderRadius: 20,
+      shadowColor: palette.sectionShadow,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.16,
+      shadowRadius: 8,
+      elevation: 8,
+      overflow: 'hidden',
     },
     optionRow: {
       minHeight: 56,
-      borderRadius: 4,
-      borderWidth: 1,
-      borderColor: palette.rowBorder,
-      backgroundColor: palette.cardBackground,
       paddingHorizontal: 14,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
+      borderBottomWidth: 0.5,
+      borderBottomColor: palette.rowBorder,
+    },
+    optionRowLast: {
+      borderBottomWidth: 0,
     },
     optionLeft: {
       flexDirection: 'row',
@@ -1576,6 +1834,96 @@ const createMusicProviderStyles = (palette: SettingsPalette) =>
       color: palette.primaryText,
       fontSize: 15,
       fontWeight: '700',
+    },
+    caption: {
+      marginTop: 14,
+      marginHorizontal: 8,
+      fontSize: 12,
+      lineHeight: 18,
+      color: palette.secondaryText,
+    },
+  });
+
+const createNotificationSettingsStyles = (palette: SettingsPalette) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: palette.screenBackground,
+    },
+    glassHeader: {
+      backgroundColor: palette.headerBackground,
+      borderBottomWidth: 1,
+      borderBottomColor: palette.headerBorder,
+      overflow: 'hidden',
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 12,
+      paddingTop: 10,
+      paddingBottom: 16,
+    },
+    backButton: {
+      width: 44,
+      height: 44,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    headerTitle: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: palette.titleText,
+    },
+    content: {
+      paddingHorizontal: 20,
+      paddingTop: 24,
+      paddingBottom: 36,
+    },
+    card: {
+      backgroundColor: palette.cardBackground,
+      borderRadius: 20,
+      shadowColor: palette.sectionShadow,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.16,
+      shadowRadius: 8,
+      elevation: 8,
+      overflow: 'hidden',
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 16,
+      borderBottomWidth: 0.5,
+      borderBottomColor: palette.rowBorder,
+    },
+    rowLast: {
+      borderBottomWidth: 0,
+    },
+    rowTextWrap: {
+      flex: 1,
+      paddingRight: 4,
+    },
+    rowTitle: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: palette.primaryText,
+    },
+    rowDesc: {
+      marginTop: 4,
+      fontSize: 12,
+      lineHeight: 18,
+      color: palette.secondaryText,
+    },
+    caption: {
+      marginTop: 14,
+      marginHorizontal: 8,
+      fontSize: 12,
+      lineHeight: 18,
+      color: palette.secondaryText,
     },
   });
 

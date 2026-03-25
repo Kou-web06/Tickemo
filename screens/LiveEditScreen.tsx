@@ -167,6 +167,39 @@ const parseSetlistTextToItems = (text: string, artistName: string): SetlistItem[
   });
 };
 
+const buildSetlistTextByArtist = (items: SetlistItem[], artists: string[]) => {
+  const normalize = (value: string) => value.trim().toLowerCase();
+  const grouped = new Map<string, string[]>();
+  const fallbackArtist = artists[0] ?? '';
+
+  artists.forEach((artist) => {
+    grouped.set(artist, []);
+  });
+
+  let currentArtist = fallbackArtist;
+
+  for (const item of items) {
+    if (item.type === 'song') {
+      const rawArtist = (item.artistName || '').trim();
+      const matchedArtist = artists.find((artist) => normalize(artist) === normalize(rawArtist));
+      const targetArtist = matchedArtist || currentArtist || fallbackArtist;
+      currentArtist = targetArtist;
+      const lines = grouped.get(targetArtist) ?? [];
+      lines.push(item.songName);
+      grouped.set(targetArtist, lines);
+      continue;
+    }
+
+    const marker = `--- ${item.title} ---`;
+    const targetArtist = currentArtist || fallbackArtist;
+    const lines = grouped.get(targetArtist) ?? [];
+    lines.push(marker);
+    grouped.set(targetArtist, lines);
+  }
+
+  return grouped;
+};
+
 const normalizeNumericText = (value: string) =>
   value
     .replace(/[０-９]/g, (digit) => String(digit.charCodeAt(0) - 0xfee0))
@@ -370,10 +403,12 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
         ? [initialData.artist]
         : [''];
 
+    const setlistByArtist = buildSetlistTextByArtist(initialData?.setlistSongs || [], initialArtists);
+
     return initialArtists.map((artistName, index) => ({
       id: createPerformanceId(),
       artistName,
-      setlist: index === 0 ? initialSetlistText : '',
+      setlist: (setlistByArtist.get(artistName) || []).join('\n'),
       artistImageUrl: initialData?.artistImageUrls?.[index] ?? (index === 0 ? initialData?.artistImageUrl || '' : ''),
     }));
   });
@@ -552,6 +587,8 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
           )
         : [initialData?.artistImageUrl || ''];
 
+    const nextSetlistByArtist = buildSetlistTextByArtist(initialData?.setlistSongs || [], nextArtists);
+
     setName(initialData?.name || '');
     setArtists(nextArtists);
     setArtistImageUrls(nextArtistImageUrls);
@@ -572,7 +609,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
       nextArtists.map((artistName, index) => ({
         id: createPerformanceId(),
         artistName,
-        setlist: index === 0 ? nextInitialSetlistText : '',
+        setlist: (nextSetlistByArtist.get(artistName) || []).join('\n'),
         artistImageUrl: nextArtistImageUrls[index] || '',
       }))
     );
@@ -591,6 +628,22 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
       return [{ id: createPerformanceId(), artistName: firstArtist, setlist: firstSetlist, artistImageUrl: firstArtistImageUrl }];
     });
   }, [isMultiArtistLive, artists, setlistText, artistImageUrls, artistImageUrl]);
+
+  useEffect(() => {
+    if (isMultiArtistLive) return;
+
+    const firstPerformance = performances.find((entry) => entry.artistName.trim().length > 0) ?? performances[0];
+    const fallbackArtist = artists.find((name) => name.trim().length > 0) ?? artists[0] ?? '';
+    const fallbackImageUrl = artistImageUrls[0] ?? artistImageUrl ?? '';
+
+    const nextArtist = firstPerformance?.artistName ?? fallbackArtist;
+    const nextImageUrl = firstPerformance?.artistImageUrl ?? fallbackImageUrl;
+
+    setArtists([nextArtist]);
+    setArtistImageUrls([nextImageUrl]);
+    setArtistImageUrl(nextImageUrl);
+    setPerformances((prev) => (prev.length > 1 ? [prev[0]] : prev));
+  }, [isMultiArtistLive]);
 
   useEffect(() => {
     if (!showSetlistSourceModal) return;

@@ -17,7 +17,7 @@ import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { TicketCard } from '../components/TicketCard';
 import { TicketDetail } from '../components/TicketDetail';
-import SettingsScreen, { MusicProviderScreen } from './SettingsScreen';
+import SettingsScreen, { MusicProviderScreen, NotificationSettingsScreen } from './SettingsScreen';
 import ProfileEditScreen from './ProfileEditScreen';
 import LiveEditScreen from './LiveEditScreen';
 import PaywallScreen from './PaywallScreen';
@@ -59,6 +59,10 @@ const buildCollectionPalette = (isDarkMode: boolean) => ({
   modalBorder: isDarkMode ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.3)',
   iconOnDark: isDarkMode ? '#F5F5F7' : '#000000',
   searchEmptyIcon: isDarkMode ? '#8F8F9A' : '#B4B4B4',
+  quickFilterBorderInactive: isDarkMode ? 'rgba(255, 255, 255, 0.3)' : '#D1D1D6',
+  quickFilterActiveBackground: '#A226D9',
+  quickFilterActiveBorder: '#A226D9',
+  quickFilterActiveText: isDarkMode ? '#F5F5F7' : '#FFFFFF',
 });
 
 const seededRandom = (seed: number): number => {
@@ -1818,7 +1822,7 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
   const todaySongProviderCta = useMemo(() => {
     const isSpotify = musicProvider === 'spotify';
     const iconSource = isSpotify ? require('../assets/spotify.webp') : require('../assets/apple.webp');
-    const label = isSpotify ? 'Spotifyで聞く' : 'Apple Musicで聞く';
+    const label = isSpotify ? 'Spotifyで聴く' : 'Apple Musicで聴く';
     const spotifyQuery = `${todaySongDisplay?.title || ''} ${todaySongDisplay?.artist || nextLiveRecord?.artist || ''}`.trim();
     const url = isSpotify
       ? (todaySongDisplay?.spotifyTrackId
@@ -1971,8 +1975,8 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
                     style={[
                       styles.quickFilterChip,
                       {
-                        borderColor: isActive ? '#A226D9' : palette.secondaryText,
-                        backgroundColor: isActive ? '#A226D9' : 'transparent',
+                        borderColor: isActive ? palette.quickFilterActiveBorder : palette.quickFilterBorderInactive,
+                        backgroundColor: isActive ? palette.quickFilterActiveBackground : 'transparent',
                       },
                     ]}
                   >
@@ -1980,7 +1984,11 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
                       style={[
                         styles.quickFilterChipText,
                         {
-                          color: isActive ? '#F8F8F8' : palette.secondaryText,
+                          color: isDarkMode
+                            ? '#FFFFFF'
+                            : isActive
+                              ? palette.quickFilterActiveText
+                              : palette.secondaryText,
                           fontWeight: isActive ? '800' : '600',
                         },
                       ]}
@@ -2204,7 +2212,7 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
 
           const recordItem = item as ChekiRecord;
           const sectionLabel = recordItem.id === firstSectionLabelRecordIds.firstUpcomingId
-            ? '#UP COMING'
+            ? '#UPCOMING'
             : recordItem.id === firstSectionLabelRecordIds.firstArchiveId
               ? '#ARCHIVE'
               : null;
@@ -2221,7 +2229,7 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
                   activeOpacity={0.9}
                 >
                   {sectionLabel ? (
-                    <Text style={styles.sectionLeadLabelText}>{sectionLabel}</Text>
+                    <Text style={[styles.sectionLeadLabelText, { color: isDarkMode ? '#FFFFFF' : '#343434' }]}>{sectionLabel}</Text>
                   ) : null}
                   <TicketCard
                     record={recordItem}
@@ -2243,7 +2251,7 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
               activeOpacity={0.9}
             >
               {sectionLabel ? (
-                <Text style={styles.sectionLeadLabelText}>{sectionLabel}</Text>
+                <Text style={[styles.sectionLeadLabelText, { color: isDarkMode ? '#FFFFFF' : '#343434' }]}>{sectionLabel}</Text>
               ) : null}
               <TicketCard
                 record={recordItem}
@@ -2413,8 +2421,6 @@ const AddScreen: React.FC<{ navigation: any; addNewRecord: (record: ChekiRecord)
       return;
     }
 
-    const minLoadingMs = 700;
-    const loadingStart = Date.now();
     let caughtError: unknown;
     try {
       
@@ -2487,11 +2493,6 @@ const AddScreen: React.FC<{ navigation: any; addNewRecord: (record: ChekiRecord)
     } catch (error) {
       Alert.alert(t('collection.alerts.error'), t('collection.alerts.saveFailed'));
       caughtError = error;
-    } finally {
-      const elapsed = Date.now() - loadingStart;
-      if (elapsed < minLoadingMs) {
-        await new Promise(resolve => setTimeout(resolve, minLoadingMs - elapsed));
-      }
     }
     if (caughtError) {
       throw caughtError;
@@ -2695,6 +2696,18 @@ const CollectionStack = ({ records, addNewRecord, updateRecord, deleteRecord, na
         {(props) => <MusicProviderScreen {...props} />}
       </Stack.Screen>
       <Stack.Screen
+        name="NotificationSettings"
+        options={{
+          headerShown: false,
+          animation: 'slide_from_right',
+          presentation: 'card',
+          gestureEnabled: false,
+          fullScreenGestureEnabled: false,
+        }}
+      >
+        {(props) => <NotificationSettingsScreen {...props} />}
+      </Stack.Screen>
+      <Stack.Screen
         name="ProfileEdit"
         options={{
           headerShown: false,
@@ -2832,6 +2845,18 @@ function CollectionStackWrapper({ records, addNewRecord, updateRecord, deleteRec
         }}
       >
         {(props) => <MusicProviderScreen {...props} />}
+      </Stack.Screen>
+      <Stack.Screen
+        name="NotificationSettings"
+        options={{
+          headerShown: false,
+          animation: 'slide_from_right',
+          presentation: 'card',
+          gestureEnabled: false,
+          fullScreenGestureEnabled: false,
+        }}
+      >
+        {(props) => <NotificationSettingsScreen {...props} />}
       </Stack.Screen>
       <Stack.Screen
         name="ProfileEdit"

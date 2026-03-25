@@ -8,6 +8,8 @@ const getExtension = (uri: string) => {
   return match ? `.${match[1].toLowerCase()}` : '.jpg';
 };
 
+const normalizeFileUriForCompare = (uri: string) => uri.replace(/^file:\/\//, '');
+
 const buildFileName = (uri: string, baseName: string) => {
   const ext = getExtension(uri);
   const sanitized = baseName.endsWith(ext) ? baseName : `${baseName}${ext}`;
@@ -179,7 +181,17 @@ export const uploadImage = async (
     const targetPath = `${rootDir}lives/${liveId}/${targetFileName}`;
 
     await FileSystem.makeDirectoryAsync(directory, { intermediates: true });
-    await FileSystem.copyAsync({ from: fileUri, to: targetPath });
+
+    const isSamePath = normalizeFileUriForCompare(fileUri) === normalizeFileUriForCompare(targetPath);
+
+    // 既に目的地にある同一ファイルへ copyAsync すると iOS で失敗するためスキップする
+    if (!isSamePath) {
+      const existingTarget = await FileSystem.getInfoAsync(targetPath);
+      if (existingTarget.exists) {
+        await FileSystem.deleteAsync(targetPath, { idempotent: true });
+      }
+      await FileSystem.copyAsync({ from: fileUri, to: targetPath });
+    }
 
     try {
       await pushImageToCloud(relativePath, targetPath);

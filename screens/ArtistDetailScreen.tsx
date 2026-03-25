@@ -8,7 +8,9 @@ import {
   Modal,
   useWindowDimensions,
   DeviceEventEmitter,
+  Linking,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -16,7 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { HugeiconsIcon } from '@hugeicons/react-native';
-import { AiMicIcon, WavingHand02Icon, Wallet01Icon } from '@hugeicons/core-free-icons';
+import { AiMicIcon, WavingHand02Icon, Wallet01Icon, AppleMusicIcon, SpotifyIcon, LinkSquare01Icon } from '@hugeicons/core-free-icons';
 import { useRecords, ChekiRecord } from '../contexts/RecordsContext';
 import { TicketDetail } from '../components/TicketDetail';
 import { resolveLocalImageUri } from '../lib/imageUpload';
@@ -44,6 +46,8 @@ const buildArtistDetailPalette = (isDarkMode: boolean) => ({
 });
 
 type ArtistDetailPalette = ReturnType<typeof buildArtistDetailPalette>;
+type MusicProvider = 'spotify' | 'apple';
+const MUSIC_PROVIDER_KEY = '@music_provider';
 
 const StatPill: React.FC<{ label: string; value: string; icon: any; isDarkMode: boolean; palette: ArtistDetailPalette; largeValue?: boolean }> = ({ label, value, icon, isDarkMode, palette, largeValue = false }) => (
   <BlurView tint={isDarkMode ? 'dark' : 'light'} intensity={45} style={[styles.statPill, { backgroundColor: palette.statPillBackground, borderColor: palette.statPillBorder }]}>
@@ -70,6 +74,7 @@ const ArtistDetailScreen: React.FC<{ route: any; navigation: any }> = ({
   const { width: windowWidth } = useWindowDimensions();
   const [selectedRecord, setSelectedRecord] = useState<ChekiRecord | null>(null);
   const [manualDarkMode, setManualDarkMode] = useState<boolean | null | undefined>(() => getCachedThemePreference());
+  const [musicProvider, setMusicProvider] = useState<MusicProvider>('spotify');
   const isDarkMode = manualDarkMode ?? isSystemDark;
   const palette = useMemo(() => buildArtistDetailPalette(isDarkMode), [isDarkMode]);
 
@@ -78,14 +83,27 @@ const ArtistDetailScreen: React.FC<{ route: any; navigation: any }> = ({
     setManualDarkMode(value);
   }, []);
 
+  const loadMusicProvider = useCallback(async () => {
+    try {
+      const stored = await AsyncStorage.getItem(MUSIC_PROVIDER_KEY);
+      if (stored === 'spotify' || stored === 'apple') {
+        setMusicProvider(stored);
+      }
+    } catch {
+      setMusicProvider('spotify');
+    }
+  }, []);
+
   useEffect(() => {
     void loadThemePreference();
-  }, [loadThemePreference]);
+    void loadMusicProvider();
+  }, [loadThemePreference, loadMusicProvider]);
 
   useFocusEffect(
     useCallback(() => {
       void loadThemePreference();
-    }, [loadThemePreference])
+      void loadMusicProvider();
+    }, [loadThemePreference, loadMusicProvider])
   );
 
   useEffect(() => {
@@ -247,6 +265,34 @@ const ArtistDetailScreen: React.FC<{ route: any; navigation: any }> = ({
     [avatarImageUri]
   );
 
+  const handleSelectRecord = useCallback((record: ChekiRecord) => {
+    setSelectedRecord(record);
+  }, []);
+
+  const handleOpenProviderPage = useCallback(async () => {
+    const searchQuery = encodeURIComponent(artistName);
+    let url: string;
+
+    if (musicProvider === 'spotify') {
+      url = `spotify:search:${searchQuery}`;
+      // Fallback to web URL
+      if (!(await Linking.canOpenURL(url))) {
+        url = `https://open.spotify.com/search/${searchQuery}`;
+      }
+    } else {
+      url = `https://music.apple.com/search?term=${searchQuery}&entity=artist`;
+    }
+
+    try {
+      await Linking.openURL(url);
+    } catch (_error) {
+      // Fallback to web URL if deep link fails
+      if (musicProvider === 'spotify') {
+        void Linking.openURL(`https://open.spotify.com/search/${searchQuery}`);
+      }
+    }
+  }, [musicProvider, artistName]);
+
   const listHeader = useMemo(() => (
     <View>
       <View style={[styles.heroSpacer, { height: heroHeight }]} />
@@ -270,6 +316,20 @@ const ArtistDetailScreen: React.FC<{ route: any; navigation: any }> = ({
         </View>
 
         <Text style={[styles.artistName, { color: palette.artistName }]}>{artistName}</Text>
+
+        <TouchableOpacity
+          style={styles.providerCreditBadge}
+          onPress={handleOpenProviderPage}
+          activeOpacity={0.8}
+        >
+          <HugeiconsIcon
+            icon={musicProvider === 'spotify' ? SpotifyIcon : AppleMusicIcon}
+            size={15}
+            color="rgba(255,255,255,0.92)"
+            strokeWidth={2}
+          />
+          <Text style={styles.providerCreditText}>{musicProvider === 'spotify' ? 'Spotify' : 'Apple Music'}</Text>
+        </TouchableOpacity>
 
         <View style={styles.statsRow}>
           <StatPill icon={AiMicIcon} label="LIVE" value={String(stats.totalLives)} isDarkMode={isDarkMode} palette={palette} largeValue={true} />
@@ -297,11 +357,9 @@ const ArtistDetailScreen: React.FC<{ route: any; navigation: any }> = ({
     isDarkMode,
     palette,
     heroHeight,
+    musicProvider,
+    handleOpenProviderPage,
   ]);
-
-  const handleSelectRecord = useCallback((record: ChekiRecord) => {
-    setSelectedRecord(record);
-  }, []);
 
   const renderListItem = useCallback(
     ({ item }: { item: ArtistDetailListItem }) => {
@@ -447,7 +505,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   profileWrap: {
-    marginTop: -280,
+    marginTop: -300,
     paddingHorizontal: 20,
     alignItems: 'center',
     zIndex: 20,
@@ -487,12 +545,36 @@ const styles = StyleSheet.create({
   },
   artistName: {
     marginTop: 10,
+    marginBottom: 5,
     fontSize: 18,
     lineHeight: 34,
     fontWeight: '800',
     color: '#0C0C0D',
     letterSpacing: -0.6,
     textAlign: 'center',
+  },
+  providerCreditBadge: {
+    minHeight: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+    borderRadius: 30,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(12,12,12,0.38)',
+    marginBottom: 10,
+    alignSelf: 'center',
+  },
+  providerCreditText: {
+    color: 'rgba(255,255,255,0.92)',
+    fontSize: 10,
+    fontFamily: 'LINESeedJP_700Bold',
+    letterSpacing: 0.2,
+    marginLeft: 6,
+  },
+  providerCreditActionIcon: {
+    marginLeft: 6,
   },
   statsRow: {
     marginTop: 18,

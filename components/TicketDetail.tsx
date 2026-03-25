@@ -1,25 +1,36 @@
-import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TouchableWithoutFeedback, Animated, Alert, Modal, useWindowDimensions } from 'react-native';
-import { PanGestureHandler, State } from 'react-native-gesture-handler';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Dimensions,
+  LayoutAnimation,
+  Linking,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  UIManager,
+  View,
+} from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
-import { useNavigation } from '@react-navigation/native';
-import { FontAwesome, Ionicons, Octicons, MaterialIcons, MaterialCommunityIcons, Feather } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { HugeiconsIcon } from '@hugeicons/react-native';
-import { Share06Icon, Edit01Icon, Settings03Icon, Delete01Icon, Ticket03Icon } from '@hugeicons/core-free-icons';
-import Svg, { Path, Rect, Defs, Pattern, Use, Image as SvgImage } from 'react-native-svg';
+import { AppleMusicIcon, Delete01Icon, Edit01Icon, NewReleasesIcon, QuoteUpIcon, Share06Icon, SpotifyIcon, Ticket01Icon, Wallet03Icon } from '@hugeicons/core-free-icons';
 import QRCode from 'react-native-qrcode-svg';
-import TextTicker from 'react-native-text-ticker';
 import { ChekiRecord, useRecords } from '../contexts/RecordsContext';
 import LiveEditScreen from '../screens/LiveEditScreen';
-import { buildLiveAlbumName, deleteImage, normalizeStoredImageUri, uploadImage, resolveLocalImageUri } from '../lib/imageUpload';
-import { saveSetlist, getSetlist } from '../lib/setlistDb';
+import { deleteImage, uploadMultipleImages } from '../lib/imageUpload';
+import { getSetlist, saveSetlist } from '../lib/setlistDb';
+import { buildSpotifyCommunityFallbackUrl, searchSpotifyTrackId } from '../utils/spotifyApi';
+import { getAppleMusicSongUrl, searchAppleMusicSongs } from '../utils/appleMusicApi';
+import { LIVE_TYPE_ICON_MAP, normalizeLiveType } from '../utils/liveType';
 import ShareImageGenerator from './ShareImageGenerator';
 import type { SetlistItem } from '../types/setlist';
-import { NO_IMAGE_URI } from '../hooks/useResolvedImageUri';
-import { useTranslation } from 'react-i18next';
-import { LIVE_TYPE_ICON_MAP, normalizeLiveType, getLiveTypeLabel } from '../utils/liveType';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { DummyJacket } from './DummyJacket';
 
 interface TicketDetailProps {
   record: ChekiRecord;
@@ -39,7 +50,6 @@ interface LiveInfo {
   ticketPrice?: number;
   startTime: string;
   endTime: string;
-  imageUrl?: string;
   imageUrls?: string[];
   qrCode?: string;
   memo?: string;
@@ -47,216 +57,439 @@ interface LiveInfo {
   setlistSongs?: SetlistItem[];
 }
 
-const isPersistedImageUri = (uri: string) => {
-  return uri.startsWith('Tickemo/') || uri.startsWith('http://') || uri.startsWith('https://');
-};
+const FALLBACK_PRICE = '¥15,000';
+const COLLAPSED_TRACK_COUNT = 5;
+const MUSIC_PROVIDER_KEY = '@music_provider';
+const SEEN_NEW_SETLIST_TRACKS_KEY = '@seen_new_setlist_tracks';
+const APPLE_MUSIC_DEVELOPER_TOKEN = 'eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjMyTVlRNk5WOTYifQ.eyJpc3MiOiJRMkxMMkI3OTJWIiwiaWF0IjoxNzY5ODQ5MDA5LCJleHAiOjE3ODU0MDEwMDksImF1ZCI6Imh0dHBzOi8vYXBwbGVpZC5hcHBsZS5jb20iLCJzdWIiOiJtZWRpYS5jb20uYW5vbnltb3VzLlRpY2tlbW8ifQ.ect6vO1q3aC9XJVYCUBVLlTHaVEcZebm0-dVZ3ak6uglI33e1ra3qcwkawXaScFFcLB8sgX5TEcFEj9QGF1Z8A';
 
-const sanitizeTicketPrice = (value: unknown): number | undefined => {
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : undefined;
+type MusicProvider = 'spotify' | 'apple';
+
+const parseDateParts = (dateText?: string) => {
+  const [year = '----', month = '--', day = '--'] = (dateText || '').split('.');
+
+  let weekday = '';
+  const numericYear = Number(year);
+  const numericMonth = Number(month);
+  const numericDay = Number(day);
+  if (Number.isFinite(numericYear) && Number.isFinite(numericMonth) && Number.isFinite(numericDay)) {
+    const date = new Date(numericYear, numericMonth - 1, numericDay);
+    const WEEKDAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+    weekday = WEEKDAYS[date.getDay()] || '';
   }
 
-  if (typeof value === 'string') {
-    const normalized = value
-      .replace(/[０-９]/g, (digit) => String(digit.charCodeAt(0) - 0xfee0))
-      .replace(/[^0-9]/g, '');
-    if (!normalized) return undefined;
-    const parsed = Number(normalized);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  }
-
-  return undefined;
+  return {
+    year,
+    monthDay: `${Number(month) || '--'}.${Number(day) || '--'}`,
+    weekday,
+  };
 };
 
-const TICKET_BASE_LAYOUT = {
-  width: 350,
-  height: 852,
-  qrSize: 160,
-  titleTickerWidth: 240,
-  contentTop: 200,
-  contentPaddingTop: 80,
-  contentPaddingHorizontal: 0,
-  contentPaddingBottom: 10,
-  qrTop: 130,
-  jacketTop: 400,
-  jacketLeft: -18,
-  infoSectionTop: 360,
-  titleTop: 100,
-  titleLeft: 90,
-  liveTypeTop: 200,
-  artistTop: 250,
-  artistRight: 20,
-  infoTop: 330,
-  infoRight: -20,
-  infoLabelWidth: 100,
-  venueTickerHeight: 28,
-  infoGap: 100,
-  infoMarginTop: 40,
-} as const;
+const getSetlistLabel = (item: SetlistItem) => {
+  if (item.type === 'song') {
+    return item.songName;
+  }
+  return item.title;
+};
+
+const SETLIST_MARKER_KEYWORDS = ['SE', 'MC', 'ENCORE', 'SETTION', 'SECTION'];
+
+const isSetlistMarkerLabel = (label: string) => {
+  const normalized = label.replace(/[^a-zA-Z]/g, '').toUpperCase();
+  return SETLIST_MARKER_KEYWORDS.some((keyword) => normalized.includes(keyword));
+};
+
+const isSetlistMarkerItem = (item: SetlistItem) => {
+  if (item.type !== 'song') {
+    return true;
+  }
+  return isSetlistMarkerLabel(getSetlistLabel(item));
+};
+
+const getDisplayPrice = (record: ChekiRecord) => {
+  const source = `${record.detail || ''} ${record.memo || ''}`;
+  const matched = source.match(/([¥$€]\s?\d{1,3}(?:[,\.]\d{3})*)/);
+  return matched?.[1] || FALLBACK_PRICE;
+};
+
+const toUrlLikeValue = (value?: string) => {
+  const raw = (value || '').trim();
+  if (!raw) return '';
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw)) {
+    return raw;
+  }
+  return `https://${raw}`;
+};
+
+const toSetlistSongKey = (songName: string, artistName?: string) => {
+  return `${songName.trim().toLowerCase()}::${(artistName || '').trim().toLowerCase()}`;
+};
+
+const LIVE_TYPE_EN_LABEL_MAP: Record<string, string> = {
+  'one-man': 'One-man',
+  'two-man': 'Two-man',
+  festival: 'Festival',
+  'fc-only': 'FC Only',
+  streaming: 'Streaming',
+};
 
 export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) => {
-  const navigation = useNavigation<any>();
-  const { t } = useTranslation();
-  const insets = useSafeAreaInsets();
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { updateRecord, deleteRecord } = useRecords();
+  const [setlistSongs, setSetlistSongs] = useState<SetlistItem[]>([]);
+  const [isSetlistExpanded, setIsSetlistExpanded] = useState(false);
   const [showEditScreen, setShowEditScreen] = useState(false);
   const [showShareGenerator, setShowShareGenerator] = useState(false);
-  const [setlistSongs, setSetlistSongs] = useState<SetlistItem[]>([]);
-  const pendingCloseAfterSave = useRef(false);
-  const renderCountRef = useRef(0);
-  const recordIdRef = useRef(record.id);
-  const prevShowShareRef = useRef(showShareGenerator);
-  
-  renderCountRef.current++;
-  
-  // showShareGenerator が変わったか即座に検出
-  if (prevShowShareRef.current !== showShareGenerator) {
-    prevShowShareRef.current = showShareGenerator;
-  }
-  
-  // render の時間を記録（毎フレーム何秒ごとに来ているか追跡）
-  const prevRenderTimeRef = useRef<number>(performance.now());
-  const timeSinceLastRender = performance.now() - prevRenderTimeRef.current;
-  prevRenderTimeRef.current = performance.now();
-  
-  // シェアボタン押下：モーダルを即座に開く（UIブロッキングなし）
-  const handleSharePress = useCallback(() => {
-    setShowShareGenerator(true); // ← ユーザータップ時に即座に開始
-  }, [showShareGenerator]);
-  const baseWidth = TICKET_BASE_LAYOUT.width;
-  const baseHeight = TICKET_BASE_LAYOUT.height;
-  const ticketWidth = Math.min(windowWidth * 0.9, baseWidth);
-  const ticketAspectRatio = baseWidth / baseHeight;
-  const toXPct = (value: number): `${number}%` => `${(value / baseWidth) * 100}%`;
-  const toYPct = (value: number): `${number}%` => `${(value / baseHeight) * 100}%`;
-  const qrSize = (TICKET_BASE_LAYOUT.qrSize / baseWidth) * ticketWidth;
-  const titleTickerWidthPct = toXPct(TICKET_BASE_LAYOUT.titleTickerWidth);
-  const topBarBottom = Math.max(insets.bottom + 20, windowHeight * 0.045);
-  const topBarRight = Math.max(16, windowWidth * 0.04);
-  const qrTopPct = toYPct(TICKET_BASE_LAYOUT.qrTop);
-  const qrLeftPct = toXPct((baseWidth - TICKET_BASE_LAYOUT.qrSize) / 2);
-  const qrWidthPct = toXPct(TICKET_BASE_LAYOUT.qrSize);
-  const jacketTopPct = toYPct(TICKET_BASE_LAYOUT.jacketTop);
-  const jacketLeftPct = toXPct(TICKET_BASE_LAYOUT.jacketLeft);
-  const jacketWidthPct = toXPct(TICKET_BASE_LAYOUT.qrSize * 0.6);
-  const infoSectionTopPct = toYPct(TICKET_BASE_LAYOUT.infoSectionTop);
-  const infoSectionBottomPct = toYPct(70);
-  const titleTopPct = toYPct(TICKET_BASE_LAYOUT.titleTop);
-  const titleLeftPct = toXPct(TICKET_BASE_LAYOUT.titleLeft);
-  const liveTypeTopPct = toYPct(TICKET_BASE_LAYOUT.liveTypeTop);
-  const artistTopPct = toYPct(TICKET_BASE_LAYOUT.artistTop);
-  const artistRightPct = toXPct(TICKET_BASE_LAYOUT.artistRight);
-  const infoTopPct = toYPct(TICKET_BASE_LAYOUT.infoTop + TICKET_BASE_LAYOUT.infoMarginTop);
-  const infoRightPct = toXPct(TICKET_BASE_LAYOUT.infoRight);
-  const infoLabelWidthPct = toXPct(TICKET_BASE_LAYOUT.infoLabelWidth);
-  const venueTickerHeightPct = toYPct(TICKET_BASE_LAYOUT.venueTickerHeight);
-  const infoGapPct = toYPct(TICKET_BASE_LAYOUT.infoGap);
-  const liveName = record.liveName || '-';
-  const isLongName = liveName.length >= 8;
-  const liveTypeLabels = t('liveEdit.liveTypes', { returnObjects: true }) as string[];
-  const normalizedLiveType = normalizeLiveType(record.liveType);
-  const isStreamingLiveType = normalizedLiveType === 'streaming';
-  const liveTypeLabel = getLiveTypeLabel(normalizedLiveType, liveTypeLabels);
-  const liveTypeIconName = (LIVE_TYPE_ICON_MAP[normalizedLiveType] ?? 'account') as keyof typeof MaterialCommunityIcons.glyphMap;
-  const ticketPriceValue = sanitizeTicketPrice(record.ticketPrice);
-  const ticketPriceLabel = ticketPriceValue === undefined ? '-' : `¥${ticketPriceValue.toLocaleString('ja-JP')}`;
-  const coverUri = resolveLocalImageUri(record.imageUrls?.[0] ?? record.imagePath ?? '');
-  const hasCoverImage = Boolean(coverUri && coverUri !== NO_IMAGE_URI);
-  const fullArtistText = useMemo(() => {
-    const artists = (record.artists && record.artists.length > 0 ? record.artists : [record.artist || ''])
-      .map((artist) => artist.trim())
-      .filter((artist) => artist.length > 0);
-    if (artists.length === 0) return '-';
-    return artists.join(' / ');
-  }, [record.artists, record.artist]);
-  const editInitialData = useMemo(() => ({
-    name: record.liveName,
-    artists: record.artists && record.artists.length > 0 ? record.artists : [record.artist || ''],
-    artist: record.artist,
-    artistImageUrls: record.artistImageUrls,
-    artistImageUrl: record.artistImageUrl,
-    liveType: record.liveType,
-    date: new Date(record.date.replace(/\./g, '-')),
-    venue: record.venue || '',
-    seat: record.seat,
-    ticketPrice: sanitizeTicketPrice(record.ticketPrice),
-    startTime: record.startTime || '18:00',
-    endTime: record.endTime || '20:00',
-    imageUrls: record.imageUrls,
-    qrCode: record.qrCode,
-    memo: record.memo,
-    detail: record.detail,
-    setlistSongs: setlistSongs,
-  }), [record.liveName, record.artists, record.artist, record.artistImageUrls, record.artistImageUrl, record.liveType, record.date, record.venue, record.seat, record.ticketPrice, record.startTime, record.endTime, record.imageUrls, record.qrCode, record.memo, record.detail, setlistSongs]);
+  const [musicProvider, setMusicProvider] = useState<MusicProvider>('spotify');
+  const [loadingTrackId, setLoadingTrackId] = useState<string | null>(null);
+  const [seenNewSongKeys, setSeenNewSongKeys] = useState<Set<string>>(new Set());
+  const [hasLoadedSeenNewSongKeys, setHasLoadedSeenNewSongKeys] = useState(false);
+  const sheetTranslateY = useState(new Animated.Value(Dimensions.get('window').height))[0];
+  const pendingSeenSongKeysRef = useRef<Set<string>>(new Set());
 
-  const translateY = useRef(new Animated.Value(1000)).current;
-  // jacketTranslateXはtranslateYからinterpolateで算出
-  const lastOffset = useRef(0);
+  const memoText = (record.memo || '').trim();
+  const imageUri = record.imageUrls?.[0] || '';
+  const qrValue = useMemo(() => toUrlLikeValue(record.qrCode), [record.qrCode]);
+  const displayArtists = useMemo(() => {
+    const source = record.artists && record.artists.length > 0
+      ? record.artists
+      : [record.artist || '-'];
 
-  // スライドアウトアニメーション付きで閉じる共通メソッド
-  const handleClose = () => {
-    Animated.timing(translateY, {
-      toValue: 1000,
-      duration: 300,
+    const unique: string[] = [];
+    for (const name of source) {
+      const trimmed = (name || '').trim();
+      if (!trimmed) continue;
+      if (!unique.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
+        unique.push(trimmed);
+      }
+    }
+
+    return unique.length > 0 ? unique : ['-'];
+  }, [record.artist, record.artists]);
+  const liveTypeKey = useMemo(() => normalizeLiveType(record.liveType), [record.liveType]);
+  const liveTypeLabel = LIVE_TYPE_EN_LABEL_MAP[liveTypeKey] || LIVE_TYPE_EN_LABEL_MAP['one-man'];
+
+  const { year, monthDay, weekday } = useMemo(() => parseDateParts(record.date), [record.date]);
+  const priceText = useMemo(() => getDisplayPrice(record), [record]);
+
+  const openTime = record.startTime || '--:--';
+  const startTime = record.endTime || record.startTime || '--:--';
+
+  const sortedSetlist = useMemo(
+    () => [...setlistSongs].sort((a, b) => a.orderIndex - b.orderIndex),
+    [setlistSongs]
+  );
+
+  const songCount = useMemo(
+    () => sortedSetlist.filter((item) => !isSetlistMarkerItem(item)).length,
+    [sortedSetlist]
+  );
+
+  const visibleSetlist = useMemo(() => {
+    if (isSetlistExpanded) {
+      return sortedSetlist;
+    }
+
+    let countedSongs = 0;
+    const clipped: SetlistItem[] = [];
+
+    for (const item of sortedSetlist) {
+      const isMarker = isSetlistMarkerItem(item);
+      if (!isMarker) {
+        if (countedSongs >= COLLAPSED_TRACK_COUNT) {
+          break;
+        }
+        countedSongs += 1;
+      }
+      clipped.push(item);
+    }
+
+    return clipped;
+  }, [isSetlistExpanded, sortedSetlist]);
+
+  const setlistArtistNames = useMemo(() => {
+    const base = record.artists && record.artists.length > 0
+      ? record.artists
+      : [record.artist || ''];
+
+    const unique: string[] = [];
+    for (const name of base) {
+      const trimmed = (name || '').trim();
+      if (!trimmed) continue;
+      if (!unique.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
+        unique.push(trimmed);
+      }
+    }
+
+    return unique;
+  }, [record.artist, record.artists]);
+
+  const groupedVisibleSetlist = useMemo(() => {
+    if (setlistArtistNames.length <= 1) {
+      return null;
+    }
+
+    const grouped = new Map<string, SetlistItem[]>();
+    for (const artistName of setlistArtistNames) {
+      grouped.set(artistName, []);
+    }
+
+    const normalize = (value: string) => value.trim().toLowerCase();
+    let currentArtist = setlistArtistNames[0];
+
+    for (const item of visibleSetlist) {
+      if (item.type === 'song') {
+        const itemArtist = (item.artistName || '').trim();
+        const matchedArtist = setlistArtistNames.find((name) => normalize(name) === normalize(itemArtist));
+        const targetArtist = matchedArtist || currentArtist;
+        currentArtist = targetArtist;
+        grouped.get(targetArtist)?.push(item);
+      } else {
+        grouped.get(currentArtist)?.push(item);
+      }
+    }
+
+    return setlistArtistNames
+      .map((artistName) => ({
+        artistName,
+        items: grouped.get(artistName) || [],
+      }))
+      .filter((group) => group.items.length > 0);
+  }, [setlistArtistNames, visibleSetlist]);
+
+  const lastVisibleSongId = useMemo(() => {
+    for (let i = visibleSetlist.length - 1; i >= 0; i -= 1) {
+      const item = visibleSetlist[i];
+      if (!isSetlistMarkerItem(item)) {
+        return item.id;
+      }
+    }
+    return null;
+  }, [visibleSetlist]);
+
+  const firstAppearanceSongIdToKey = useMemo(() => {
+    const seenKeys = new Set<string>();
+    const firstIdToKey = new Map<string, string>();
+
+    for (const item of sortedSetlist) {
+      if (item.type !== 'song' || isSetlistMarkerItem(item)) {
+        continue;
+      }
+
+      const key = toSetlistSongKey(item.songName, item.artistName);
+      if (seenKeys.has(key)) {
+        continue;
+      }
+
+      seenKeys.add(key);
+      firstIdToKey.set(item.id, key);
+    }
+
+    return firstIdToKey;
+  }, [sortedSetlist]);
+
+  const newBadgeSongIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const [id, key] of firstAppearanceSongIdToKey.entries()) {
+      if (!seenNewSongKeys.has(key)) {
+        ids.add(id);
+      }
+    }
+    return ids;
+  }, [firstAppearanceSongIdToKey, seenNewSongKeys]);
+
+  useEffect(() => {
+    if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    Animated.spring(sheetTranslateY, {
+      toValue: 0,
+      useNativeDriver: true,
+      tension: 42,
+      friction: 9,
+    }).start();
+  }, [sheetTranslateY]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadSetlist = async () => {
+      try {
+        const songs = await getSetlist(record.id);
+        if (mounted) {
+          setSetlistSongs(songs);
+        }
+      } catch (error) {
+        console.error('[TicketDetail] セットリスト読み込みエラー:', error);
+        if (mounted) {
+          setSetlistSongs([]);
+        }
+      }
+    };
+
+    loadSetlist();
+
+    return () => {
+      mounted = false;
+    };
+  }, [record.id]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadSeenNewSongKeys = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(SEEN_NEW_SETLIST_TRACKS_KEY);
+        if (!mounted) return;
+
+        if (stored) {
+          const parsed = JSON.parse(stored) as string[];
+          setSeenNewSongKeys(new Set(parsed));
+        }
+      } catch (error) {
+        console.warn('[TicketDetail] Failed to load seen new setlist tracks:', error);
+      } finally {
+        if (mounted) {
+          setHasLoadedSeenNewSongKeys(true);
+        }
+      }
+    };
+
+    void loadSeenNewSongKeys();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedSeenNewSongKeys) return;
+
+    for (const id of newBadgeSongIds) {
+      const key = firstAppearanceSongIdToKey.get(id);
+      if (!key) continue;
+      pendingSeenSongKeysRef.current.add(key);
+    }
+  }, [firstAppearanceSongIdToKey, hasLoadedSeenNewSongKeys, newBadgeSongIds]);
+
+  useEffect(() => {
+    return () => {
+      const pending = pendingSeenSongKeysRef.current;
+      if (pending.size === 0) return;
+
+      const persistSeenNewSongKeys = async () => {
+        try {
+          const stored = await AsyncStorage.getItem(SEEN_NEW_SETLIST_TRACKS_KEY);
+          const existing = stored ? (JSON.parse(stored) as string[]) : [];
+          const merged = new Set(existing);
+          for (const key of pending) {
+            merged.add(key);
+          }
+          await AsyncStorage.setItem(SEEN_NEW_SETLIST_TRACKS_KEY, JSON.stringify(Array.from(merged)));
+        } catch (error) {
+          console.warn('[TicketDetail] Failed to persist seen new setlist tracks:', error);
+        }
+      };
+
+      void persistSeenNewSongKeys();
+    };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadMusicProvider = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(MUSIC_PROVIDER_KEY);
+        if (!mounted) return;
+        if (stored === 'spotify' || stored === 'apple') {
+          setMusicProvider(stored);
+          return;
+        }
+        setMusicProvider('spotify');
+      } catch (error) {
+        if (mounted) {
+          setMusicProvider('spotify');
+        }
+      }
+    };
+
+    loadMusicProvider();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleClosePress = async () => {
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch (error) {
+      // Hapticsが失敗しても画面遷移は継続
+    }
+
+    Animated.timing(sheetTranslateY, {
+      toValue: Dimensions.get('window').height,
+      duration: 220,
       useNativeDriver: true,
     }).start(() => {
-      if (onBack) {
-        onBack();
-      }
+      onBack?.();
     });
+  };
+
+  const handleUnpackPress = async () => {
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch (error) {
+      // Hapticsが失敗しても展開は継続
+    }
+
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setIsSetlistExpanded(true);
   };
 
   const handleDeletePress = () => {
     Alert.alert(
-      t('ticketDetail.alerts.deleteConfirmTitle'),
-      t('ticketDetail.alerts.deleteConfirmMessage', {
-        liveName: record.liveName || t('ticketDetail.defaultLiveName'),
-      }),
+      '本当に削除しますか？',
+      `${record.liveName || 'このライブ'}を記録から削除します。この操作は取り消せません。`,
       [
+        { text: 'キャンセル', style: 'cancel' },
         {
-          text: t('ticketDetail.alerts.cancel'),
-          onPress: () => {},
-          style: 'cancel',
-        },
-        {
-          text: t('ticketDetail.alerts.delete'),
-          onPress: () => {
-            deleteRecord(record.id);
-            handleClose();
-          },
+          text: '削除',
           style: 'destructive',
+          onPress: async () => {
+            try {
+              await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            } catch (error) {
+              // Hapticsが失敗しても削除は継続
+            }
+            await deleteRecord(record.id);
+            handleClosePress();
+          },
         },
       ]
     );
   };
 
   const handleEditPress = async () => {
-    // セットリストを読み込む
     try {
-      const songs = await getSetlist(record.id);
-      setSetlistSongs(songs);
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } catch (error) {
-      setSetlistSongs([]);
+      // Hapticsが失敗しても編集遷移は継続
     }
     setShowEditScreen(true);
   };
 
-  const handleShareModalClose = useCallback(() => {
-    setShowShareGenerator(false);
-  }, [showShareGenerator]);
-
-  const handleBeforeOpenPaywall = useCallback(() => {
-    setShowShareGenerator(false);
-    if (onBack) {
-      onBack();
+  const handleSharePress = async () => {
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch (error) {
+      // Hapticsが失敗しても共有遷移は継続
     }
-    setTimeout(() => {
-      navigation.navigate('Paywall');
-    }, 0);
-  }, [navigation, onBack]);
-
-
+    setShowShareGenerator(true);
+  };
 
   const handleSaveLiveInfo = async (info: LiveInfo) => {
     try {
@@ -267,383 +500,368 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
         return `${year}.${month}.${day}`;
       };
 
-      // ユーザーIDを取得
       const userId = 'local-user';
-
-      // 新しい画像をアップロード（ジャケット画像の置換）
       let uploadedImageUrls: string[] = [];
-      let uploadedImageAssetIds: Array<string | null> = [];
 
       if (info.imageUrls && info.imageUrls.length > 0) {
-        const rawUri = info.imageUrls[0];
-        if (rawUri) {
-          const normalizedUri = normalizeStoredImageUri(rawUri) || rawUri;
-          
-          if (!isPersistedImageUri(normalizedUri)) {
-            // 新規画像をアップロード
-            // キャッシュ回避のためユニークな名前を使用
-            const newBaseName = `cover-${Date.now()}`;
-            const uploaded = await uploadImage(normalizedUri, userId, record.id, newBaseName);
-            if (uploaded) {
-              // 古い画像を削除
-              if (record.imageUrls && record.imageUrls.length > 0) {
-                try {
-                   await deleteImage(record.imageUrls[0]);
-                } catch (e) {
-                   console.warn('[TicketDetail] Old image delete failed:', e);
-                }
-              }
-              uploadedImageUrls = [uploaded];
-              uploadedImageAssetIds = [null];
-            }
-          } else {
-             // 既存のURL
-            uploadedImageUrls = [normalizedUri];
-            // 既存のアセットIDを探す
-            const originalIndex = (record.imageUrls || []).indexOf(rawUri);
-            const originalAssetId = originalIndex !== -1 ? (record.imageAssetIds?.[originalIndex] ?? null) : null;
-            uploadedImageAssetIds = [originalAssetId];
-          }
+        uploadedImageUrls.push(...info.imageUrls.filter((uri) => !uri.startsWith('file://')));
+        const newImageFileUris = info.imageUrls.filter((uri) => uri.startsWith('file://'));
+        if (newImageFileUris.length > 0) {
+          const uploadResult = await uploadMultipleImages(newImageFileUris, userId, record.id);
+          uploadedImageUrls.push(...uploadResult.imageUrls);
         }
       }
 
-      // アップロード完了待ち（一応）
-      if (uploadedImageUrls.length > 0 && uploadedImageUrls[0].startsWith('file://')) {
-        await new Promise(resolve => setTimeout(resolve, 800));
+      if (uploadedImageUrls.length > 0 && record.imageUrls?.length) {
+        for (const oldImageUrl of record.imageUrls) {
+          try {
+            await deleteImage(oldImageUrl);
+          } catch (error) {
+            // 画像削除失敗時も更新処理は継続
+          }
+        }
       }
-
-      // imageUrls と imageAssetIds のサイズを確保
-      const finalImageUrls = uploadedImageUrls;
-      const finalImageAssetIds = uploadedImageUrls.length > 0 ? uploadedImageAssetIds : [];
-      const filteredArtists = (Array.isArray(info.artists) ? info.artists : [info.artist || record.artist || ''])
-        .map((artistName) => artistName.trim())
-        .filter((artistName) => artistName !== '');
-      const filteredArtistImageUrls = (Array.isArray(info.artistImageUrls) ? info.artistImageUrls : [info.artistImageUrl || record.artistImageUrl || ''])
-        .map((imageUrl) => imageUrl.trim())
-        .slice(0, Math.max(filteredArtists.length, 0));
 
       const updatedRecord: ChekiRecord = {
         ...record,
-        artists: filteredArtists,
-        artist: filteredArtists[0] || '',
-        artistImageUrls: filteredArtistImageUrls,
-        artistImageUrl: filteredArtistImageUrls[0] || info.artistImageUrl || record.artistImageUrl,
+        artist: info.artist,
+        artists: info.artists ?? record.artists,
+        artistImageUrl: info.artistImageUrl || record.artistImageUrl,
+        artistImageUrls: info.artistImageUrls ?? record.artistImageUrls,
+        liveType: info.liveType || record.liveType,
         liveName: info.name,
-        liveType: normalizeLiveType(info.liveType || record.liveType),
         date: formatDate(info.date),
         venue: info.venue,
         seat: info.seat,
-        ticketPrice: sanitizeTicketPrice(info.ticketPrice) ?? sanitizeTicketPrice(record.ticketPrice),
+        ticketPrice: info.ticketPrice ?? record.ticketPrice,
         startTime: info.startTime,
         endTime: info.endTime,
-        imageUrls: finalImageUrls,
-        imageAssetIds: finalImageAssetIds,
-        memo: info.memo || record.memo,
-        detail: info.detail || record.detail,
-        qrCode: info.qrCode || record.qrCode,
+        imageUrls: uploadedImageUrls.length > 0 ? uploadedImageUrls : (info.imageUrls || record.imageUrls || []),
+        memo: info.memo ?? record.memo,
+        detail: info.detail ?? record.detail,
+        qrCode: info.qrCode ?? record.qrCode,
       };
-      await updateRecord(record.id, updatedRecord);
-      
-      // セットリストを保存（既存を削除して新規挿入）
-      if (info.setlistSongs) {
-        try {
-          await saveSetlist(record.id, info.setlistSongs);
-        } catch (setlistError) {
-          // セットリストの保存に失敗してもレコードは更新済みなので続行
-        }
-      }
 
-      pendingCloseAfterSave.current = true;
+      await updateRecord(record.id, updatedRecord);
+
+      if (info.setlistSongs) {
+        await saveSetlist(record.id, info.setlistSongs);
+      }
     } catch (error) {
-      Alert.alert(t('ticketDetail.alerts.error'), t('ticketDetail.alerts.saveFailed'));
-      throw error;
+      console.error('[TicketDetail] ライブ情報保存エラー:', error);
+      Alert.alert('エラー', 'ライブ情報の保存に失敗しました。もう一度お試しください。');
     }
   };
 
-  useEffect(() => {
-    // モーダル本体のアニメーション
-    Animated.spring(translateY, {
-      toValue: 0,
-      useNativeDriver: true,
-      tension: 40,
-      friction: 9,
-    }).start();
-    // jacketTranslateXはtranslateYに連動するので個別アニメーション不要
-  }, []);
+  const handleOpenSongWithProvider = async (item: SetlistItem) => {
+    if (item.type !== 'song') {
+      return;
+    }
 
-  const onGestureEvent = Animated.event(
-    [{ nativeEvent: { translationY: translateY } }],
-    { useNativeDriver: true }
-  );
+    if (loadingTrackId) {
+      return;
+    }
 
-  const onHandlerStateChange = (event: any) => {
-    if (event.nativeEvent.oldState === State.ACTIVE) {
-      const { translationY, velocityY } = event.nativeEvent;
+    const songName = item.songName?.trim();
+    const artistName = (item.artistName || record.artist || '').trim();
+    if (!songName) {
+      return;
+    }
 
-      // If swiped down significantly or with high velocity, close modal
-      if (translationY > 100 || velocityY > 500) {
-        // モーダル本体を下へスライドアウト（ジャケットはtranslateYに連動）
-        Animated.timing(translateY, {
-          toValue: 1000,
-          duration: 300,
-          useNativeDriver: true,
-        }).start(() => {
-          if (onBack) {
-            onBack();
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch (error) {
+      // Hapticsが失敗しても処理は継続
+    }
+
+    setLoadingTrackId(item.id);
+
+    try {
+      if (musicProvider === 'spotify') {
+        try {
+          const trackId = await searchSpotifyTrackId(songName, artistName);
+          if (trackId) {
+            const appUrl = `spotify:track:${trackId}`;
+            const webUrl = buildSpotifyCommunityFallbackUrl(trackId);
+
+            try {
+              const canOpenApp = await Linking.canOpenURL(appUrl);
+              await Linking.openURL(canOpenApp ? appUrl : webUrl);
+            } catch {
+              await Linking.openURL(webUrl);
+            }
+            return;
           }
-        });
+        } catch (searchError) {
+          console.warn('[TicketDetail] Spotify search failed, using web search fallback:', searchError);
+          // Fall through to web search fallback
+        }
+
+        // Fallback: Open Spotify web search with song + artist name
+        const searchQuery = `${songName} ${artistName}`.trim();
+        const webSearchUrl = `https://open.spotify.com/search/${encodeURIComponent(searchQuery)}/songs`;
+        await Linking.openURL(webSearchUrl);
       } else {
-        // Spring back to original position
-        Animated.spring(translateY, {
-          toValue: 0,
-          useNativeDriver: true,
-          tension: 50,
-          friction: 7,
-        }).start();
-        lastOffset.current = 0;
+        // Apple Music API doesn't support "artist:" prefix syntax; use simple full-text search
+        const query = `${songName} ${artistName}`.trim();
+        const songs = await searchAppleMusicSongs(query, APPLE_MUSIC_DEVELOPER_TOKEN, 1);
+        const first = songs[0];
+        const songId = first?.id;
+        const webUrl = songId ? getAppleMusicSongUrl(songId) : first?.attributes?.url;
+        if (webUrl) {
+          await Linking.openURL(webUrl);
+          return;
+        }
+
+        // Fallback: Open Apple Music web search
+        const webSearchUrl = `https://music.apple.com/search?term=${encodeURIComponent(query)}`;
+        await Linking.openURL(webSearchUrl);
       }
+    } catch (error) {
+      console.error('[TicketDetail] 曲リンクオープンエラー:', error);
+      const errorMessage = error instanceof Error ? error.message : '不明なエラーが発生しました';
+      Alert.alert('SYSTEM ERROR', `[ // TRACK LINK ABORTED ]\n${errorMessage}`);
+    } finally {
+      setLoadingTrackId(null);
+    }
+  };
+
+  const handleOpenQrLink = async () => {
+    if (!qrValue) {
+      return;
+    }
+
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch (error) {
+      // Hapticsが失敗してもリンク遷移は継続
+    }
+
+    try {
+      const canOpen = await Linking.canOpenURL(qrValue);
+      if (!canOpen) {
+        Alert.alert('Unable to open', 'QR code URL is invalid.');
+        return;
+      }
+
+      await Linking.openURL(qrValue);
+    } catch (error) {
+      console.error('[TicketDetail] QRリンクオープンエラー:', error);
+      Alert.alert('SYSTEM ERROR', '[ // QR LINK ABORTED ]');
     }
   };
 
   return (
-    <>
-      <TouchableWithoutFeedback onPress={handleClose}>
-        <View style={{ flex: 1 }}>
-          {/* PhotoStack Removed */}
+    <Animated.View
+      style={[
+        styles.sheetShell,
+        {
+          transform: [{ translateY: sheetTranslateY }],
+        },
+      ]}
+    >
+      <View style={styles.root}>
+        <TouchableOpacity style={styles.closeButton} activeOpacity={0.82} onPress={handleClosePress}>
+          <Ionicons name="close" size={34} color="#B7B7B7" />
+        </TouchableOpacity>
 
-          {/* トップバー（ダイナミックアイランド風） */}
-          <Animated.View 
-            style={[
-              styles.topBar,
-              {
-                bottom: topBarBottom,
-                right: topBarRight,
-              },
-              {
-                transform: [{
-                  translateX: translateY.interpolate({
-                    inputRange: [0, 1000],
-                    outputRange: [0, windowWidth * 1.2],
-                    extrapolate: 'clamp',
-                  }),
-                }],
-              },
-            ]}
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.headerWrap}>
+          {imageUri ? (
+            <Image source={{ uri: imageUri }} style={styles.coverImage} contentFit="cover" />
+          ) : (
+            <View style={[styles.coverImage, styles.emptyCover]}>
+              <Text style={styles.emptyCoverText}>NO IMAGE</Text>
+            </View>
+          )}
+
+          <TouchableOpacity
+            style={styles.qrBox}
+            activeOpacity={qrValue ? 0.75 : 1}
+            disabled={!qrValue}
+            onPress={() => {
+              void handleOpenQrLink();
+            }}
           >
-            <TouchableOpacity style={styles.topBarButton} onPress={handleSharePress}>
-              <View style={styles.topBarButtonInner}>
-                <HugeiconsIcon icon={Share06Icon} size={24} color="#FFFFFF" strokeWidth={2.0} />
+            {qrValue ? (
+              <QRCode value={qrValue} size={56} color="#1A1A1A" backgroundColor="#FFFFFF" />
+            ) : (
+              <Image source={require('../assets/no-qr.png')} style={styles.qrFallback} contentFit="contain" />
+            )}
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.body}>
+          <Text style={styles.liveName}>{record.liveName || '-'}</Text>
+
+          <View style={styles.artistPriceRow}>
+            <View style={styles.artistMetaBlock}>
+              <Text style={styles.artistName} numberOfLines={2}>
+                {displayArtists.join(' / ')}
+              </Text>
+              <View style={styles.liveTypeBadge}>
+                <MaterialCommunityIcons
+                  name={LIVE_TYPE_ICON_MAP[liveTypeKey] as keyof typeof MaterialCommunityIcons.glyphMap}
+                  size={14}
+                  color="#7C7C84"
+                />
+                <Text style={styles.liveTypeBadgeText}>{liveTypeLabel}</Text>
               </View>
-            </TouchableOpacity>
+            </View>
+            <View style={styles.priceWrap}>
+              <HugeiconsIcon icon={Wallet03Icon} size={22} color="#9D9D9D" strokeWidth={1.8} />
+              <Text style={styles.priceText}>{priceText}</Text>
+            </View>
+          </View>
 
-            <TouchableOpacity style={styles.topBarButton} onPress={handleEditPress}>
-              <View style={styles.topBarButtonInner}>
-                <HugeiconsIcon icon={Edit01Icon} size={24} color="#FFFFFF" strokeWidth={2.0} />
+          <View style={styles.gridRow}>
+            <View style={styles.leftCol}>
+              <Text style={styles.yearText}>{year}</Text>
+              <View style={styles.monthDayRow}>
+                <Text style={styles.monthDayText}>{monthDay}</Text>
+                {weekday ? <Text style={styles.weekdayText}>{weekday}</Text> : null}
               </View>
-            </TouchableOpacity>
+              <Text style={styles.venueText}>{record.venue || '-'}</Text>
+            </View>
 
-            <TouchableOpacity style={styles.topBarButton} onPress={handleDeletePress}>
-              <View style={styles.topBarButtonInner}>
-                <HugeiconsIcon icon={Delete01Icon} size={24} color="#FF6B6B" strokeWidth={2.0} />
+            <View style={styles.rightCol}>
+              <View style={styles.timeLine}>
+                <Text style={styles.timeLabel}>OPEN</Text>
+                <Text style={styles.timeValue}>{openTime}</Text>
               </View>
-            </TouchableOpacity>
-          </Animated.View>
+              <View style={styles.timeLine}>
+                <Text style={styles.timeLabel}>START</Text>
+                <Text style={styles.timeValue}>{startTime}</Text>
+              </View>
+            </View>
+          </View>
 
-          <PanGestureHandler
-            onGestureEvent={onGestureEvent}
-            onHandlerStateChange={onHandlerStateChange}
-          >
-            <Animated.View
-              style={[
-                styles.container,
-                { width: ticketWidth, aspectRatio: ticketAspectRatio },
-                {
-                  transform: [{
-                    translateY: translateY.interpolate({
-                      inputRange: [-1000, 0, 1000],
-                      outputRange: [0, 0, 1000],
-                      extrapolate: 'clamp',
-                    }),
-                  }],
-                },
-              ]}
-            >
-              <Svg width="100%" height="100%" viewBox="0 0 280 529" fill="none" style={StyleSheet.absoluteFillObject}>
-                <Path d="M279.118 201.1C275.555 201.681 272.834 204.772 272.834 208.5C272.834 212.228 275.555 215.319 279.118 215.9L279.118 531.006C278.95 531.004 278.782 531 278.613 531C259.927 531 244.767 544.319 244.64 560.791L33.9746 560.791C33.8473 544.319 18.6859 531 0 531L0 215.991C0.110743 215.996 0.222045 216 0.333984 216C4.47612 216 7.83398 212.642 7.83398 208.5C7.83398 204.358 4.47612 201 0.333984 201C0.222045 201 0.110743 201.004 0 201.009L0 30C18.4716 29.9996 33.5006 16.9848 33.9658 0.774414L33.9766 0L244.637 0C244.637 16.5684 259.848 29.9998 278.613 30C278.782 30 278.95 29.9963 279.118 29.9941L279.118 201.1ZM27.834 208.5C27.834 204.358 24.4761 201 20.334 201C16.1921 201 12.834 204.358 12.834 208.5C12.834 212.642 16.1921 216 20.334 216C24.4761 216 27.834 212.642 27.834 208.5ZM47.834 208.5C47.834 204.358 44.4761 201 40.334 201C36.1921 201 32.834 204.358 32.834 208.5C32.834 212.642 36.1921 216 40.334 216C44.4761 216 47.834 212.642 47.834 208.5ZM67.834 208.5C67.834 204.358 64.4761 201 60.334 201C56.1921 201 52.834 204.358 52.834 208.5C52.834 212.642 56.1921 216 60.334 216C64.4761 216 67.834 212.642 67.834 208.5ZM87.834 208.5C87.834 204.358 84.4761 201 80.334 201C76.1921 201 72.834 204.358 72.834 208.5C72.834 212.642 76.1921 216 80.334 216C84.4761 216 87.834 212.642 87.834 208.5ZM107.834 208.5C107.834 204.358 104.476 201 100.334 201C96.1921 201 92.834 204.358 92.834 208.5C92.834 212.642 96.1921 216 100.334 216C104.476 216 107.834 212.642 107.834 208.5ZM127.834 208.5C127.834 204.358 124.476 201 120.334 201C116.192 201 112.834 204.358 112.834 208.5C112.834 212.642 116.192 216 120.334 216C124.476 216 127.834 212.642 127.834 208.5ZM147.834 208.5C147.834 204.358 144.476 201 140.334 201C136.192 201 132.834 204.358 132.834 208.5C132.834 212.642 136.192 216 140.334 216C144.476 216 147.834 212.642 147.834 208.5ZM167.834 208.5C167.834 204.358 164.476 201 160.334 201C156.192 201 152.834 204.358 152.834 208.5C152.834 212.642 156.192 216 160.334 216C164.476 216 167.834 212.642 167.834 208.5ZM187.834 208.5C187.834 204.358 184.476 201 180.334 201C176.192 201 172.834 204.358 172.834 208.5C172.834 212.642 176.192 216 180.334 216C184.476 216 187.834 212.642 187.834 208.5ZM207.834 208.5C207.834 204.358 204.476 201 200.334 201C196.192 201 192.834 204.358 192.834 208.5C192.834 212.642 196.192 216 200.334 216C204.476 216 207.834 212.642 207.834 208.5ZM227.834 208.5C227.834 204.358 224.476 201 220.334 201C216.192 201 212.834 204.358 212.834 208.5C212.834 212.642 216.192 216 220.334 216C224.476 216 227.834 212.642 227.834 208.5ZM247.834 208.5C247.834 204.358 244.476 201 240.334 201C236.192 201 232.834 204.358 232.834 208.5C232.834 212.642 236.192 216 240.334 216C244.476 216 247.834 212.642 247.834 208.5ZM267.834 208.5C267.834 204.358 264.476 201 260.334 201C256.192 201 252.834 204.358 252.834 208.5C252.834 212.642 256.192 216 260.334 216C264.476 216 267.834 212.642 267.834 208.5Z" fill="white" />
-              </Svg>
+          {sortedSetlist.length > 0 && (() => {
+            const renderSetlistItems = (items: SetlistItem[], keyPrefix = '') => {
+              let songIndex = 0;
 
-              {/* Content overlay */}
-              <View
-                style={[
-                  styles.responsiveContentContainer,
-                ]}
-                pointerEvents="box-none"
-              >
-                {/* QR Code section at top */}
-                <View
-                  style={[
-                    styles.qrContainer,
-                    {
-                      top: qrTopPct,
-                      left: qrLeftPct,
-                      width: qrWidthPct,
-                      aspectRatio: 1,
-                    },
-                  ]}
-                >
-                  {record.qrCode ? (
-                    <QRCode
-                      value={record.qrCode}
-                      size={qrSize}
-                      color="#000"
-                      backgroundColor="#fff"
-                    />
-                  ) : (
-                    <Image
-                      source={require('../assets/no-qr.png')}
-                      style={{ width: qrSize, height: qrSize }}
-                      contentFit="contain"
-                    />
-                  )}
-                  <Text style={styles.qrText}>
-                    {record.qrCode ? 'M3M0RY-N3V3R-D13' : 'NO DATA'}
-                  </Text>
+              return items.map((item) => {
+                const label = getSetlistLabel(item);
+                const isMarker = isSetlistMarkerItem(item);
+
+                if (isMarker) {
+                  return (
+                    <Text key={`${keyPrefix}${item.id}`} style={styles.trackMarkerText}>
+                      {label}
+                    </Text>
+                  );
+                }
+
+                songIndex += 1;
+                const isFirstAppearance = newBadgeSongIds.has(item.id);
+
+                return (
+                  <View key={`${keyPrefix}${item.id}`} style={styles.trackItem}>
+                    <Text style={styles.trackNo}>{String(songIndex).padStart(2, '0')}</Text>
+                    <View style={styles.trackInfoWrap}>
+                      <Text style={styles.trackName} numberOfLines={1}>
+                        {label}
+                      </Text>
+                      {isFirstAppearance ? (
+                        <View style={styles.trackNewBadge}>
+                          <Text style={styles.trackNewBadgeText}>new</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <TouchableOpacity
+                      style={styles.trackOpenButton}
+                      activeOpacity={0.7}
+                      disabled={loadingTrackId !== null}
+                      onPress={() => {
+                        void handleOpenSongWithProvider(item);
+                      }}
+                    >
+                      {loadingTrackId === item.id ? (
+                        <ActivityIndicator size="small" color="#8A8A8F" />
+                      ) : (
+                        <HugeiconsIcon
+                          icon={musicProvider === 'spotify' ? SpotifyIcon : AppleMusicIcon}
+                          size={18}
+                          color={musicProvider === 'spotify' ? '#1DB954' : '#FA243C'}
+                          strokeWidth={2}
+                        />
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                );
+              });
+            };
+
+            if (groupedVisibleSetlist && groupedVisibleSetlist.length > 0) {
+              return groupedVisibleSetlist.map((group, index) => (
+                <View key={group.artistName} style={[styles.sectionBlock, index > 0 && styles.sectionBlockCompact]}>
+                  <View style={styles.sectionTitleGroup}>
+                    <Text style={styles.sectionTitle}>#set list</Text>
+                    <Text style={styles.setlistSectionArtist}>{group.artistName}</Text>
+                  </View>
+
+                  <View style={styles.setlistContainer}>
+                    {renderSetlistItems(group.items, `${group.artistName}-`)}
+
+                    {!isSetlistExpanded && songCount > COLLAPSED_TRACK_COUNT && group.items.some((item) => item.id === lastVisibleSongId) && (
+                      <TouchableOpacity style={styles.unpackButton} activeOpacity={0.75} onPress={handleUnpackPress}>
+                        <Text style={styles.unpackButtonText}>
+                          [ + UNPACK ALL {songCount} TRACKS ]
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+              ));
+            }
+
+            return (
+              <View style={styles.sectionBlock}>
+                <View style={styles.sectionTitleRow}>
+                  <Text style={styles.sectionTitle}>#set list</Text>
                 </View>
 
-                {/* Jacket image overlay on QR */}
-                <Animated.View
-                  style={[
-                    styles.jacketShadow,
-                    { top: jacketTopPct, left: jacketLeftPct },
-                    { width: jacketWidthPct, aspectRatio: 1 },
-                    {
-                      transform: [
-                        {
-                          translateX: translateY.interpolate({
-                            inputRange: [0, 1000],
-                            outputRange: [0, -ticketWidth],
-                            extrapolate: 'clamp',
-                          }),
-                        },
-                      ],
-                    },
-                  ]}
-                >
-                  <View style={styles.jacketOverlay}>
-                    {hasCoverImage ? (
-                      <Image
-                        source={{ uri: coverUri }}
-                        style={styles.jacketImage}
-                        contentFit="cover"
-                      />
-                    ) : (
-                      <DummyJacket style={styles.jacketImage} iconSize={22} />
-                    )}
-                  </View>
-                </Animated.View>
+                <View style={styles.setlistContainer}>
+                  {renderSetlistItems(visibleSetlist)}
 
-                {/* Info section */}
-                <ScrollView
-                  style={styles.responsiveInfoScroll}
-                  contentContainerStyle={{
-                    flexGrow: 1,
-                    paddingBottom: toYPct(50),
-                  }}
-                  showsVerticalScrollIndicator={false}
-                  pointerEvents="auto"
-                >
-                  <View
-                    style={[
-                      styles.responsiveInfoSection,
-                      {
-                        top: infoSectionTopPct,
-                        bottom: infoSectionBottomPct,
-                      },
-                    ]}
-                    pointerEvents="box-none"
-                  >
-                    {isLongName ? (
-                      <View style={[styles.mainTitleWrapper, { top: titleTopPct, left: titleLeftPct, width: titleTickerWidthPct }]}>
-                        <TextTicker
-                          style={[styles.mainTitleText, { fontSize: 28 }]}
-                          duration={liveName.length * 300}
-                          loop
-                          bounce={false}
-                          repeatSpacer={50}
-                          marqueeDelay={1000}
-                        >
-                          {liveName}
-                        </TextTicker>
-                      </View>
-                    ) : (
-                      <View style={[styles.mainTitleWrapper, { top: titleTopPct, left: titleLeftPct, width: titleTickerWidthPct }]}>
-                        <Text style={styles.mainTitleText} numberOfLines={1}>
-                          {liveName}
-                        </Text>
-                      </View>
-                    )}
-                    <View style={[styles.liveTypeIconRow, { top: liveTypeTopPct, left: titleLeftPct }]}>
-                      {isStreamingLiveType ? (
-                        <Feather name="radio" size={18} color="#A1A1A1" />
-                      ) : (
-                        <MaterialCommunityIcons name={liveTypeIconName} size={18} color="#A1A1A1" />
-                      )}
-                      <Text style={styles.liveTypeText}>{liveTypeLabel}</Text>
-                      <View style={styles.ticketPriceInlineRow}>
-                        <HugeiconsIcon icon={Ticket03Icon} size={16} color="#A1A1A1" strokeWidth={2.0} />
-                        <Text style={styles.ticketPriceInlineText}>{ticketPriceLabel}</Text>
-                      </View>
-                    </View>
-                    <Text
-                      style={[styles.artistName, { top: artistTopPct, left: titleLeftPct, right: artistRightPct }]}
-                      numberOfLines={2}
-                      adjustsFontSizeToFit={true}
-                    >
-                      {fullArtistText}
-                    </Text>
-
-                    <View style={[styles.info, { top: infoTopPct, right: infoRightPct, flexDirection: 'column', gap: infoGapPct }]}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <Text style={[styles.infoLabel, { width: infoLabelWidthPct, textAlign: 'right' }]}>DATE</Text>
-                        <Text style={[styles.infoValue, { flex: 1, textAlign: 'left' }]}>{record.date || '-'}</Text>
-                      </View>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <Text style={[styles.infoLabel, { width: infoLabelWidthPct, textAlign: 'right' }]}>START</Text>
-                        <Text style={[styles.infoValue, { flex: 1, textAlign: 'left' }]}>{record.endTime || '18:00'}</Text>
-                      </View>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <Text style={[styles.infoLabel, { width: infoLabelWidthPct, textAlign: 'right' }]}>VENUE</Text>
-                        {(record.venue || '-').length >= 8 ? (
-                          <View style={{ flex: 1, height: 28, justifyContent: 'center' }}>
-                            <TextTicker
-                              style={[styles.infoValue, { textAlign: 'left' }]}
-                              duration={(record.venue || '-').length * 250}
-                              loop
-                              bounce={false}
-                              repeatSpacer={40}
-                              marqueeDelay={1000}
-                            >
-                              {record.venue || '-'}
-                            </TextTicker>
-                          </View>
-                        ) : (
-                          <Text style={[styles.infoValue, { flex: 1, textAlign: 'left' }]}>
-                            {record.venue || '-'}
-                          </Text>
-                        )}
-                      </View>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <Text style={[styles.infoLabel, { width: infoLabelWidthPct, textAlign: 'right' }]}>SEAT</Text>
-                        <Text style={[styles.infoValue, { flex: 1, textAlign: 'left' }]}>{record.seat || '-'}</Text>
-                      </View>
-                    </View>
-                  </View>
-                </ScrollView>
+                  {!isSetlistExpanded && songCount > COLLAPSED_TRACK_COUNT && (
+                    <TouchableOpacity style={styles.unpackButton} activeOpacity={0.75} onPress={handleUnpackPress}>
+                      <Text style={styles.unpackButtonText}>
+                        [ + UNPACK ALL {songCount} TRACKS ]
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               </View>
-            </Animated.View>
-          </PanGestureHandler>
+            );
+          })()}
+
+          {memoText.length > 0 && (
+            <View style={styles.sectionBlock}>
+              <Text style={styles.sectionTitle}>#memo</Text>
+              <View style={styles.memoRow}>
+                <HugeiconsIcon icon={QuoteUpIcon} size={20} color="#9B9B9B" strokeWidth={1.8} />
+                <Text style={styles.memoText}>{memoText}</Text>
+              </View>
+            </View>
+          )}
         </View>
-      </TouchableWithoutFeedback>
+        </ScrollView>
+
+        <View style={styles.footerTab}>
+          <TouchableOpacity style={styles.footerButton} activeOpacity={0.8} onPress={handleSharePress}>
+            <HugeiconsIcon icon={Share06Icon} size={22} color="#5D5D62" strokeWidth={2} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.footerButton} activeOpacity={0.8} onPress={handleEditPress}>
+            <HugeiconsIcon icon={Edit01Icon} size={22} color="#5D5D62" strokeWidth={2} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.footerButton} activeOpacity={0.8} onPress={handleDeletePress}>
+            <HugeiconsIcon icon={Delete01Icon} size={22} color="#f55632" strokeWidth={2} />
+          </TouchableOpacity>
+        </View>
+      </View>
 
       <Modal
         visible={showEditScreen}
@@ -652,436 +870,385 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
         onRequestClose={() => setShowEditScreen(false)}
       >
         <LiveEditScreen
-          initialData={editInitialData}
+          initialData={{
+            name: record.liveName,
+            artists: record.artists && record.artists.length > 0 ? record.artists : [record.artist || ''],
+            artist: record.artist || '',
+            artistImageUrls: record.artistImageUrls,
+            liveType: record.liveType,
+            artistImageUrl: record.artistImageUrl,
+            date: new Date(record.date.replace(/\./g, '-')),
+            venue: record.venue || '',
+            seat: record.seat,
+            ticketPrice: record.ticketPrice,
+            startTime: record.startTime || '18:00',
+            endTime: record.endTime || '20:00',
+            imageUrls: record.imageUrls,
+            qrCode: record.qrCode,
+            memo: record.memo,
+            detail: record.detail,
+            setlistSongs,
+          }}
           onSave={handleSaveLiveInfo}
-            onCancel={async () => {
-              const shouldCloseDetail = pendingCloseAfterSave.current;
-              pendingCloseAfterSave.current = false;
-              setShowEditScreen(false);
-              if (shouldCloseDetail) {
-                await new Promise(resolve => setTimeout(resolve, 400));
-                handleClose();
-              }
-            }}
+          onCancel={() => setShowEditScreen(false)}
         />
       </Modal>
 
       <ShareImageGenerator
         record={record}
         visible={showShareGenerator}
-        onClose={handleShareModalClose}
-        onBeforeOpenPaywall={handleBeforeOpenPaywall}
+        onClose={() => setShowShareGenerator(false)}
       />
-    </>
+    </Animated.View>
   );
 };
 
-function TicketDetailWrapper(props: TicketDetailProps) {
-  return (
-    <TouchableWithoutFeedback onPress={props.onBack}>
-      <View style={{ flex: 1 }}>
-        <TicketDetail {...props} />
-      </View>
-    </TouchableWithoutFeedback>
-  );
-}
-
-export default TicketDetailWrapper;
-
-export const TicketDetailOld: React.FC<TicketDetailProps> = ({ record, onBack }) => {
-  const { t } = useTranslation();
-  const width = 330;
-  const height = 852;
-  const qrSize = 155;
-  const normalizedLiveType = normalizeLiveType(record.liveType);
-  const isStreamingLiveType = normalizedLiveType === 'streaming';
-  const liveTypeLabels = t('liveEdit.liveTypes', { returnObjects: true }) as string[];
-  const liveTypeLabel = getLiveTypeLabel(normalizedLiveType, liveTypeLabels);
-  const liveTypeIconName = (LIVE_TYPE_ICON_MAP[normalizedLiveType] ?? 'account') as keyof typeof MaterialCommunityIcons.glyphMap;
-  const ticketPriceValue = sanitizeTicketPrice(record.ticketPrice);
-  const ticketPriceLabel = ticketPriceValue === undefined ? '-' : `¥${ticketPriceValue.toLocaleString('ja-JP')}`;
-  const coverUri = resolveLocalImageUri(record.imageUrls?.[0] ?? record.imagePath ?? '');
-  const hasCoverImage = Boolean(coverUri && coverUri !== NO_IMAGE_URI);
-  const fullArtistText = useMemo(() => {
-    const artists = (record.artists && record.artists.length > 0 ? record.artists : [record.artist || ''])
-      .map((artist) => artist.trim())
-      .filter((artist) => artist.length > 0);
-    if (artists.length === 0) return '-';
-    return artists.join(' / ');
-  }, [record.artists, record.artist]);
-
-  const translateY = useRef(new Animated.Value(1000)).current;
-  // jacketTranslateXはtranslateYからinterpolateで算出
-  const lastOffset = useRef(0);
-
-  useEffect(() => {
-    // モーダル本体のアニメーション
-    Animated.spring(translateY, {
-      toValue: 0,
-      useNativeDriver: true,
-      tension: 40,
-      friction: 9,
-    }).start();
-    // jacketTranslateXはtranslateYに連動するので個別アニメーション不要
-  }, []);
-
-  const onGestureEvent = Animated.event(
-    [{ nativeEvent: { translationY: translateY } }],
-    { useNativeDriver: true }
-  );
-
-  const onHandlerStateChange = (event: any) => {
-    if (event.nativeEvent.oldState === State.ACTIVE) {
-      const { translationY, velocityY } = event.nativeEvent;
-
-      // If swiped down significantly or with high velocity, close modal
-      if (translationY > 100 || velocityY > 500) {
-        // モーダル本体を下へスライドアウト（ジャケットはtranslateYに連動）
-        Animated.timing(translateY, {
-          toValue: 1000,
-          duration: 300,
-          useNativeDriver: true,
-        }).start(() => {
-          if (onBack) {
-            onBack();
-          }
-        });
-      } else {
-        // Spring back to original position
-        Animated.spring(translateY, {
-          toValue: 0,
-          useNativeDriver: true,
-          tension: 50,
-          friction: 7,
-        }).start();
-        lastOffset.current = 0;
-      }
-    }
-  };
-
-  return (
-    <TouchableWithoutFeedback onPress={onBack}>
-      <View style={{ flex: 1 }}>
-        <PanGestureHandler
-          onGestureEvent={onGestureEvent}
-          onHandlerStateChange={onHandlerStateChange}
-        >
-          <Animated.View
-            style={[
-              styles.container,
-              { width, height, paddingTop: 130 },
-              {
-                transform: [{
-                  translateY: translateY.interpolate({
-                    inputRange: [-1000, 0, 1000],
-                    outputRange: [0, 0, 1000],
-                    extrapolate: 'clamp',
-                  }),
-                }],
-              },
-            ]}
-          >
-            <Svg width={width} height={height} viewBox="0 0 280 529" fill="none">
-              <Path d="M279.118 201.1C275.555 201.681 272.834 204.772 272.834 208.5C272.834 212.228 275.555 215.319 279.118 215.9L279.118 531.006C278.95 531.004 278.782 531 278.613 531C259.927 531 244.767 544.319 244.64 560.791L33.9746 560.791C33.8473 544.319 18.6859 531 0 531L0 215.991C0.110743 215.996 0.222045 216 0.333984 216C4.47612 216 7.83398 212.642 7.83398 208.5C7.83398 204.358 4.47612 201 0.333984 201C0.222045 201 0.110743 201.004 0 201.009L0 30C18.4716 29.9996 33.5006 16.9848 33.9658 0.774414L33.9766 0L244.637 0C244.637 16.5684 259.848 29.9998 278.613 30C278.782 30 278.95 29.9963 279.118 29.9941L279.118 201.1ZM27.834 208.5C27.834 204.358 24.4761 201 20.334 201C16.1921 201 12.834 204.358 12.834 208.5C12.834 212.642 16.1921 216 20.334 216C24.4761 216 27.834 212.642 27.834 208.5ZM47.834 208.5C47.834 204.358 44.4761 201 40.334 201C36.1921 201 32.834 204.358 32.834 208.5C32.834 212.642 36.1921 216 40.334 216C44.4761 216 47.834 212.642 47.834 208.5ZM67.834 208.5C67.834 204.358 64.4761 201 60.334 201C56.1921 201 52.834 204.358 52.834 208.5C52.834 212.642 56.1921 216 60.334 216C64.4761 216 67.834 212.642 67.834 208.5ZM87.834 208.5C87.834 204.358 84.4761 201 80.334 201C76.1921 201 72.834 204.358 72.834 208.5C72.834 212.642 76.1921 216 80.334 216C84.4761 216 87.834 212.642 87.834 208.5ZM107.834 208.5C107.834 204.358 104.476 201 100.334 201C96.1921 201 92.834 204.358 92.834 208.5C92.834 212.642 96.1921 216 100.334 216C104.476 216 107.834 212.642 107.834 208.5ZM127.834 208.5C127.834 204.358 124.476 201 120.334 201C116.192 201 112.834 204.358 112.834 208.5C112.834 212.642 116.192 216 120.334 216C124.476 216 127.834 212.642 127.834 208.5ZM147.834 208.5C147.834 204.358 144.476 201 140.334 201C136.192 201 132.834 204.358 132.834 208.5C132.834 212.642 136.192 216 140.334 216C144.476 216 147.834 212.642 147.834 208.5ZM167.834 208.5C167.834 204.358 164.476 201 160.334 201C156.192 201 152.834 204.358 152.834 208.5C152.834 212.642 156.192 216 160.334 216C164.476 216 167.834 212.642 167.834 208.5ZM187.834 208.5C187.834 204.358 184.476 201 180.334 201C176.192 201 172.834 204.358 172.834 208.5C172.834 212.642 176.192 216 180.334 216C184.476 216 187.834 212.642 187.834 208.5ZM207.834 208.5C207.834 204.358 204.476 201 200.334 201C196.192 201 192.834 204.358 192.834 208.5C192.834 212.642 196.192 216 200.334 216C204.476 216 207.834 212.642 207.834 208.5ZM227.834 208.5C227.834 204.358 224.476 201 220.334 201C216.192 201 212.834 204.358 212.834 208.5C212.834 212.642 216.192 216 220.334 216C224.476 216 227.834 212.642 227.834 208.5ZM247.834 208.5C247.834 204.358 244.476 201 240.334 201C236.192 201 232.834 204.358 232.834 208.5C232.834 212.642 236.192 216 240.334 216C244.476 216 247.834 212.642 247.834 208.5ZM267.834 208.5C267.834 204.358 264.476 201 260.334 201C256.192 201 252.834 204.358 252.834 208.5C252.834 212.642 256.192 216 260.334 216C264.476 216 267.834 212.642 267.834 208.5Z" fill="white" />
-            </Svg>
-
-            {/* Content overlay */}
-            <View style={styles.contentContainer} pointerEvents="box-none">
-              {/* QR Code section at top */}
-              <View style={styles.qrContainer}>
-                {/* QRコードが無い場合は画像を表示 */}
-                <Image
-                  source={require('../assets/no-qr.png')}
-                  style={{ width: qrSize, height: qrSize }}
-                  contentFit="contain"
-                />
-                <Text style={styles.qrText}>M3M0R135-N3V3R-D13</Text>
-              </View>
-
-              {/* Jacket image overlay on QR */}
-              <Animated.View
-                style={[
-                  styles.jacketShadow,
-                  { width: qrSize * 0.6, height: qrSize * 0.6 },
-                  {
-                    transform: [
-                      {
-                        translateX: translateY.interpolate({
-                          inputRange: [0, 1000],
-                          outputRange: [0, -330],
-                          extrapolate: 'clamp',
-                        }),
-                      },
-                    ],
-                  },
-                ]}
-              >
-                <View style={styles.jacketOverlay}>
-                  {hasCoverImage ? (
-                    <Image
-                      source={{ uri: coverUri }}
-                      style={styles.jacketImage}
-                      contentFit="cover"
-                    />
-                  ) : (
-                    <DummyJacket style={styles.jacketImage} iconSize={18} />
-                  )}
-                </View>
-              </Animated.View>
-
-              {/* Info section */}
-              <ScrollView style={styles.infoScroll} showsVerticalScrollIndicator={false} pointerEvents="auto">
-                <View style={styles.infoSection}>
-                  <Text style={[styles.mainTitle, (record.liveName || '').length >= 12 && {fontSize: 22}]}>
-                    {(record.liveName || '').length >= 12 ? `${record.liveName?.substring(0, 10)}\n${record.liveName?.substring(10)}` : (record.liveName || '-')}
-                  </Text>
-                  <View style={[styles.liveTypeIconRow, (record.liveName || '').length >= 12 && { top: 55 }]}> 
-                    {isStreamingLiveType ? (
-                      <Feather name="radio" size={18} color="#A1A1A1" />
-                    ) : (
-                      <MaterialCommunityIcons name={liveTypeIconName} size={18} color="#A1A1A1" />
-                    )}
-                    <Text style={styles.liveTypeText}>{liveTypeLabel}</Text>
-                    <View style={styles.ticketPriceInlineRow}>
-                      <HugeiconsIcon icon={Ticket03Icon} size={16} color="#A1A1A1" strokeWidth={2.0} />
-                      <Text style={styles.ticketPriceInlineText}>{ticketPriceLabel}</Text>
-                    </View>
-                  </View>
-                  <Text
-                    style={[styles.artistName, (record.liveName || '').length >= 12 && { top: 75 }]}
-                    numberOfLines={2}
-                    adjustsFontSizeToFit={true}
-                  >
-                    {fullArtistText}
-                  </Text>
-
-                  <View style={[styles.info, { flexDirection: 'column', gap: 12, marginTop: 24 }]}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                      <Text style={[styles.infoLabel, { width: 100, textAlign: 'right' }]}>DATE</Text>
-                      <Text style={[styles.infoValue, { flex: 1, textAlign: 'left' }]}>{record.date || '-'}</Text>
-                    </View>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <Text style={[styles.infoLabel, { width: 100, textAlign: 'right' }]}>START</Text>
-                      <Text style={[styles.infoValue, { flex: 1, textAlign: 'left' }]}>{record.startTime || '18:00'}</Text>
-                    </View>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                      <Text style={[styles.infoLabel, { width: 100, textAlign: 'right' }]}>VENUE</Text>
-                      {(record.venue || '-').length >= 8 ? (
-                        <View style={{ flex: 1, height: 28, justifyContent: 'center' }}>
-                          <TextTicker
-                            style={[styles.infoValue, { textAlign: 'left' }]}
-                            duration={(record.venue || '-').length * 250}
-                            loop
-                            bounce={false}
-                            repeatSpacer={40}
-                            marqueeDelay={1000}
-                          >
-                            {record.venue || '-'}
-                          </TextTicker>
-                        </View>
-                      ) : (
-                        <Text style={[styles.infoValue, { flex: 1, textAlign: 'left' }]}>
-                          {record.venue || '-'}
-                        </Text>
-                      )}
-                    </View>
-                  </View>
-                </View>
-              </ScrollView>
-            </View>
-          </Animated.View>
-        </PanGestureHandler>
-      </View>
-    </TouchableWithoutFeedback>
-  );
-};
+export default TicketDetail;
 
 const styles = StyleSheet.create({
-  container: {
-    backgroundColor: 'transparent',
-    paddingTop: 0,
-  },
-  responsiveContentContainer: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  responsiveInfoScroll: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  responsiveInfoSection: {
+  sheetShell: {
     position: 'absolute',
-    left: 0,
-    right: 0,
-  },
-  topBar: {
-    position: 'absolute',
-    right: 16,
-    bottom: 28,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 35,
-    paddingHorizontal: 4,
-    paddingVertical: 4,
-    backgroundColor: 'rgba(0, 0, 0, 0.80)',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.34,
-    shadowRadius: 14,
-    elevation: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    zIndex: 100,
-  },
-  topBarButton: {
-    overflow: 'hidden',
-    borderRadius: 24,
-  },
-  topBarButtonInner: {
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    borderRadius: 24,
-  },
-  contentContainer: {
-    position: 'absolute',
-    top: 130,
     left: 0,
     right: 0,
     bottom: 0,
-    paddingTop: 60,
-    paddingHorizontal: 20,
-    paddingBottom: 30,
-  },
-  qrContainer: {
-    position: 'absolute',
-    top: 150,
-    left: (330 - 160) / 2,
-    alignItems: 'center',
-    marginBottom: 24,
-    paddingVertical: 12,
-  },
-  qrText: {
-    marginTop: 12,
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#000',
-    letterSpacing: 1,
-  },
-
-  jacketShadow: {
-    position: 'absolute',
-    top: 415,
-    left: -18,
-    shadowColor: '#000',
-    shadowOffset: { width: 8, height: 10 },
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    elevation: 6,
-  },
-  jacketOverlay: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 8,
+    height: '95%',
+    borderTopLeftRadius: 38,
+    borderTopRightRadius: 38,
     overflow: 'hidden',
-    backgroundColor: '#fff',
   },
-  jacketImage: {
-    width: '100%',
-    height: '100%',
+  root: {
+    flex: 1,
+    backgroundColor: '#f9f9f9',
   },
-  infoScroll: {
+  scroll: {
     flex: 1,
   },
-  infoSection: {
-    paddingBottom: 40,
+  scrollContent: {
+    paddingBottom: 110,
   },
-  mainTitle: {
+  headerWrap: {
+    width: '100%',
+    aspectRatio: 1.11,
+    backgroundColor: '#D6D6D6',
+    position: 'relative',
+  },
+  coverImage: {
+    width: '100%',
+    height: '100%',
+  },
+  emptyCover: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyCoverText: {
+    fontSize: 16,
+    color: '#7F7F7F',
+    fontWeight: '700',
+    letterSpacing: 0.6,
+  },
+  closeButton: {
     position: 'absolute',
-    top: 10,
-    left: 70,
-    fontSize: 30,
+    top: 20,
+    left: 16,
+    width: 48,
+    height: 48,
+    borderRadius: 29,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  qrBox: {
+    position: 'absolute',
+    right: 12,
+    bottom: 14,
+    padding: 8,
+    borderRadius: 7,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  qrFallback: {
+    width: 56,
+    height: 56,
+  },
+  body: {
+    paddingHorizontal: 22,
+    paddingTop: 26,
+  },
+  liveName: {
+    fontSize: 26,
+    lineHeight: 34,
     fontWeight: '900',
-    color: '#000',
-    marginBottom: 5,
+    color: '#2B2B2E',
+    letterSpacing: 0.1,
   },
-  mainTitleWrapper: {
-    position: 'absolute',
-    top: 10,
-    left: 70,
-    height: 36,
+  artistPriceRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
   },
-  mainTitleText: {
-    fontSize: 28,
-    fontWeight: '900',
-    color: '#000',
+  artistMetaBlock: {
+    flex: 1,
+    paddingRight: 8,
   },
-  liveTypeIconRow: {
-    position: 'absolute',
-    top: 30,
-    left: 70,
+  artistName: {
+    color: '#8E8E93',
+    fontSize: 17,
+    fontWeight: '600',
+  },
+  liveTypeBadge: {
+    marginTop: 6,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
   },
-  liveTypeText: {
-    fontSize: 14,
+  liveTypeBadgeText: {
+    color: '#7C7C84',
+    fontSize: 12,
     fontWeight: '700',
-    color: '#A1A1A1',
+    letterSpacing: 0.4,
   },
-  ticketPriceInlineRow: {
+  priceWrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    marginLeft: 12,
+    gap: 7,
   },
-  ticketPriceInlineText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#A1A1A1',
+  priceText: {
+    color: '#8A8A8A',
+    fontSize: 17,
+    fontWeight: '800',
   },
-  artistName: {
-    position: 'absolute',
-    top: 50,
-    left: 70,
-    right: 20,
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#A1A1A1',
-  },
-  info: {
-    position: 'absolute',
-    top: 80,
-    left: 0,
-    right: 20,
+  gridRow: {
+    marginTop: 28,
     flexDirection: 'row',
     justifyContent: 'space-between',
+    gap: 16,
+  },
+  leftCol: {
+    flex: 1,
+  },
+  yearText: {
+    color: '#8F8F95',
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    fontVariant: ['tabular-nums'],
+  },
+  monthDayText: {
+    marginTop: 2,
+    color: '#303036',
+    fontSize: 52,
+    lineHeight: 56,
+    fontWeight: '700',
+    letterSpacing: -2,
+    fontVariant: ['tabular-nums'],
+  },
+  monthDayRow: {
+    marginTop: 2,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  weekdayText: {
+    marginTop: 10,
+    color: '#8E8E93',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 1.1,
+  },
+  venueText: {
+    marginTop: 4,
+    color: '#2F2F34',
+    fontSize: 16,
+    lineHeight: 30,
+    fontWeight: '800',
+  },
+  rightCol: {
+    justifyContent: 'center',
+    minWidth: 144,
+    paddingTop: 10,
+    gap: 16,
+  },
+  timeLine: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: 14,
+  },
+  timeLabel: {
+    color: '#8E8E93',
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  timeValue: {
+    color: '#2E2E33',
+    fontSize: 22,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    fontVariant: ['tabular-nums'],
+  },
+  sectionBlock: {
+    marginTop: 60,
+  },
+  sectionBlockCompact: {
+    marginTop: 22,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    color: '#2E2E32',
+    fontWeight: '900',
+    letterSpacing: 0.4,
+  },
+  setlistSectionArtist: {
+    fontSize: 12,
+    color: '#5D5D62',
+    letterSpacing: 0.7,
+    textTransform: 'uppercase',
+    fontWeight: '800',
+    marginTop: 4,
+  },
+  sectionTitleGroup: {
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  setlistContainer: {
+    marginTop: 12,
+    backgroundColor: '#ededed',
+    borderRadius: 14,
+    padding: 12,
+  },
+  trackItem: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    paddingVertical: 11,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 8,
+  },
+  trackNo: {
+    width: 36,
+    color: '#8b8b94',
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    fontVariant: ['tabular-nums'],
+  },
+  trackInfoWrap: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minWidth: 0,
+  },
+  trackName: {
+    flex: 1,
+    color: '#343439',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  trackNewBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: '#f5e9fa',
+  },
+  trackNewBadgeText: {
+    color: '#A328DD',
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.2,
+  },
+  trackOpenButton: {
+    width: 26,
+    height: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+  trackMarkerText: {
+    color: '#6D6D72',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  unpackButton: {
+    marginTop: 4,
+    paddingVertical: 8,
     alignItems: 'center',
   },
-  infoLabel: {
-    fontSize: 24,
+  unpackButtonText: {
+    color: '#5A5A5F',
+    fontSize: 15,
     fontWeight: '800',
-    color: '#A1A1A1',
-    textTransform: 'uppercase',
-    marginRight: 16,
+    letterSpacing: 0.4,
   },
-  infoValue: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#000',
-  },
-  memoSection: {
+  memoRow: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     gap: 8,
+    paddingRight: 8,
   },
   memoText: {
-    fontSize: 14,
-    color: '#333',
-    lineHeight: 20,
+    flex: 1,
+    color: '#3C3C40',
+    fontSize: 16,
+    lineHeight: 27,
+    fontWeight: '500',
+    letterSpacing: 0.2,
   },
-  setlistSection: {
-    gap: 8,
+  footerTab: {
+    position: 'absolute',
+    right: 12,
+    bottom: 28,
+    width: 150,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(255,255,255,0.88)',
+    borderWidth: 1,
+    borderColor: 'rgba(136,136,142,0.25)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-evenly',
+    paddingHorizontal: 8,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 4,
   },
-  setlistText: {
-    fontSize: 14,
-    color: '#333',
-    lineHeight: 20,
+  footerButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  footerLabel: {
+    color: '#6D6D72',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
   },
 });

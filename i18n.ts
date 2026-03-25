@@ -64,6 +64,7 @@ i18n.use(initReactI18next).init({
           items: {
             darkMode: 'テーマ',
             haptics: '触覚',
+            musicProvider: 'Music Provider',
             icloudSync: 'iCloud同期',
             notifications: '通知',
             appleMusic: 'Data provided by Apple Music',
@@ -171,6 +172,43 @@ i18n.use(initReactI18next).init({
                 ],
               },
             ],
+          },
+          musicProvider: {
+            header: 'Music Provider',
+            sectionLabel: 'リンク先の優先サービス',
+            apple: 'Apple Music',
+            spotify: 'Spotify',
+            caption: '選択したサービスは曲リンクやアーティストページ遷移で使用されます。',
+          },
+          notificationSettings: {
+            header: '通知設定',
+            caption: '下記の通知タイプを設定できます。新規登録時に自動でスケジュールされます。',
+            items: {
+              beforeLive: {
+                title: 'ライブ前日リマインド',
+                desc: 'ライブ前日の19時に通知します',
+              },
+              onDay: {
+                title: 'ライブ当日リマインド',
+                desc: 'ライブ開始15分前に通知します',
+              },
+              nextDayReview: {
+                title: 'ライブ翌日の振り返り',
+                desc: 'ライブ翌日の10時に振り返り通知を送ります',
+              },
+              nextYearReview: {
+                title: '1年前の振り返り',
+                desc: 'ライブから1年後に思い出を振り返る通知を送ります',
+              },
+              monthlyReport: {
+                title: '月末のレポート',
+                desc: '月末の22時に今月のライブレポートを送ります',
+              },
+              campaigns: {
+                title: 'キャンペーン情報',
+                desc: 'キャンペーンやお得情報を通知します',
+              },
+            },
           },
           version: 'バージョン{{version}}',
         },
@@ -556,6 +594,7 @@ i18n.use(initReactI18next).init({
           items: {
             darkMode: 'Theme',
             haptics: 'Haptics',
+            musicProvider: 'Music Provider',
             icloudSync: 'iCloud Sync',
             notifications: 'Notifications',
             appleMusic: 'Data provided by Apple Music',
@@ -663,6 +702,43 @@ i18n.use(initReactI18next).init({
                 ],
               },
             ],
+          },
+          musicProvider: {
+            header: 'Music Provider',
+            sectionLabel: 'Preferred service for links',
+            apple: 'Apple Music',
+            spotify: 'Spotify',
+            caption: 'The selected service is used for song links and artist page navigation.',
+          },
+          notificationSettings: {
+            header: 'Notification Settings',
+            caption: 'Configure notification types below. Notifications are automatically scheduled when you add a new live.',
+            items: {
+              beforeLive: {
+                title: 'Pre-live reminder',
+                desc: 'Notify at 19:00 the day before the live',
+              },
+              onDay: {
+                title: 'Day-of reminder',
+                desc: 'Notify 15 minutes before the live starts',
+              },
+              nextDayReview: {
+                title: 'Next day review',
+                desc: 'Send a review reminder at 10:00 the next day',
+              },
+              nextYearReview: {
+                title: 'One year review',
+                desc: 'Send a memory reminder one year later',
+              },
+              monthlyReport: {
+                title: 'Monthly report',
+                desc: 'Send monthly live report at 22:00 on the last day',
+              },
+              campaigns: {
+                title: 'Campaign information',
+                desc: 'Notify you about campaigns and special offers',
+              },
+            },
           },
           version: 'Version {{version}}',
         },

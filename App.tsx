@@ -11,7 +11,7 @@ import { useFonts, Anton_400Regular } from '@expo-google-fonts/anton';
 import CollectionScreen from './screens/CollectionScreen';
 import CalendarScreen from './screens/CalendarScreen';
 import StatisticsScreen from './screens/StatisticsScreen';
-import SettingsScreen, { FAQScreen, MusicProviderScreen } from './screens/SettingsScreen';
+import SettingsScreen, { FAQScreen, MusicProviderScreen, NotificationSettingsScreen } from './screens/SettingsScreen';
 import ProfileEditScreen from './screens/ProfileEditScreen';
 import ICloudSyncScreen from './screens/ICloudSyncScreen';
 import { PaywallScreen } from './screens';
@@ -120,6 +120,16 @@ function SettingsStackScreen() {
         }}
       />
       <SettingsStack.Screen
+        name="NotificationSettings"
+        component={NotificationSettingsScreen}
+        options={{
+          animation: 'slide_from_right',
+          presentation: 'card',
+          gestureEnabled: false,
+          fullScreenGestureEnabled: false,
+        }}
+      />
+      <SettingsStack.Screen
         name="ProfileEdit"
         component={ProfileEditScreen}
         options={{
@@ -218,6 +228,36 @@ function AppContent() {
     
     if (!data) return;
 
+    // ライブリマインダー通知
+    if (data.type === 'live_reminder' && data.recordId && data.kind) {
+      setGlobalNotification({
+        recordId: data.recordId,
+        kind: data.kind,
+      });
+      
+      // kindに基づいて画面を振り分け
+      switch (data.kind) {
+        case 'beforeLive':
+        case 'onDay':
+        case 'nextDayReview':
+          // ライブ詳細画面またはカウントダウン画面へ
+          moveToPage(1, false); // Countdown/Calendar画面へ
+          break;
+        case 'nextYearReview':
+        case 'monthlyReport':
+          // 統計情報画面へ
+          moveToPage(2, false); // Statistics画面へ
+          break;
+        case 'campaigns':
+          // 設定画面へ
+          moveToPage(3, false); // Settings画面へ
+          break;
+        default:
+          break;
+      }
+      return;
+    }
+
     // タイムカプセル通知：該当ライブの詳細画面へ
     if (data.type === 'timecapsule' && data.recordId) {
       setGlobalNotification({
@@ -235,16 +275,6 @@ function AppContent() {
         kind: data.kind,
       });
       moveToPage(2, false); // Statistics画面へ
-      return;
-    }
-
-    // ライブリマインダー通知（after_show）：ライブ編集画面へ
-    if (data.type === 'live_reminder' && data.recordId && data.kind === 'after_show') {
-      setGlobalNotification({
-        recordId: data.recordId,
-        kind: data.kind,
-      });
-      moveToPage(0, false); // Collection画面へ
       return;
     }
   };

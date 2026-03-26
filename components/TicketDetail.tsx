@@ -26,7 +26,6 @@ import { ChekiRecord, useRecords } from '../contexts/RecordsContext';
 import LiveEditScreen from '../screens/LiveEditScreen';
 import { deleteImage, uploadMultipleImages } from '../lib/imageUpload';
 import { getSetlist, saveSetlist } from '../lib/setlistDb';
-import { buildSpotifyCommunityFallbackUrl, searchSpotifyTrackId } from '../utils/spotifyApi';
 import { getAppleMusicSongUrl, searchAppleMusicSongs } from '../utils/appleMusicApi';
 import { LIVE_TYPE_ICON_MAP, normalizeLiveType } from '../utils/liveType';
 import ShareImageGenerator from './ShareImageGenerator';
@@ -123,6 +122,32 @@ const toUrlLikeValue = (value?: string) => {
 
 const toSetlistSongKey = (songName: string, artistName?: string) => {
   return `${songName.trim().toLowerCase()}::${(artistName || '').trim().toLowerCase()}`;
+};
+
+const openSpotifySearch = async (songName: string, artistName: string) => {
+  const query = `${songName || ''} ${artistName || ''}`.trim();
+  if (!query) return false;
+
+  const encodedQuery = encodeURIComponent(query);
+  const deepLinkUrl = `spotify:search:${encodedQuery}`;
+  const webFallbackUrl = `https://open.spotify.com/search/${encodedQuery}`;
+
+  try {
+    const canOpenApp = await Linking.canOpenURL(deepLinkUrl);
+    if (canOpenApp) {
+      await Linking.openURL(deepLinkUrl);
+      return true;
+    }
+  } catch {
+    // Try web fallback below.
+  }
+
+  try {
+    await Linking.openURL(webFallbackUrl);
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 const LIVE_TYPE_EN_LABEL_MAP: Record<string, string> = {
@@ -578,29 +603,11 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
 
     try {
       if (musicProvider === 'spotify') {
-        try {
-          const trackId = await searchSpotifyTrackId(songName, artistName);
-          if (trackId) {
-            const appUrl = `spotify:track:${trackId}`;
-            const webUrl = buildSpotifyCommunityFallbackUrl(trackId);
-
-            try {
-              const canOpenApp = await Linking.canOpenURL(appUrl);
-              await Linking.openURL(canOpenApp ? appUrl : webUrl);
-            } catch {
-              await Linking.openURL(webUrl);
-            }
-            return;
-          }
-        } catch (searchError) {
-          console.warn('[TicketDetail] Spotify search failed, using web search fallback:', searchError);
-          // Fall through to web search fallback
+        const opened = await openSpotifySearch(songName, artistName);
+        if (!opened) {
+          Alert.alert('エラー', 'Spotifyを開けませんでした');
         }
-
-        // Fallback: Open Spotify web search with song + artist name
-        const searchQuery = `${songName} ${artistName}`.trim();
-        const webSearchUrl = `https://open.spotify.com/search/${encodeURIComponent(searchQuery)}/songs`;
-        await Linking.openURL(webSearchUrl);
+        return;
       } else {
         // Apple Music API doesn't support "artist:" prefix syntax; use simple full-text search
         const query = `${songName} ${artistName}`.trim();

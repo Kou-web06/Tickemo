@@ -26,7 +26,6 @@ import { useRecords, ChekiRecord } from '../contexts/RecordsContext';
 import { useAppStore } from '../store/useAppStore';
 import { uploadImage, normalizeStoredImageUri, resolveLocalImageUri, deleteImage } from '../lib/imageUpload';
 import { saveSetlist } from '../lib/setlistDb';
-import { buildSpotifyCommunityFallbackUrl, searchSpotifyTrackId } from '../utils/spotifyApi';
 import type { SetlistItem } from '../types/setlist';
 import { getArtworkUrl, searchAppleMusicSongs, AppleMusicSong, getAppleMusicSongUrl } from '../utils/appleMusicApi';
 import { useTranslation } from 'react-i18next';
@@ -45,6 +44,32 @@ const APPLE_MUSIC_DEVELOPER_TOKEN = 'eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI
 const MUSIC_PROVIDER_KEY = '@music_provider';
 
 type MusicProvider = 'spotify' | 'apple';
+
+const openSpotifySearch = async (songName: string, artistName: string) => {
+  const query = `${songName || ''} ${artistName || ''}`.trim();
+  if (!query) return false;
+
+  const encodedQuery = encodeURIComponent(query);
+  const deepLinkUrl = `spotify:search:${encodedQuery}`;
+  const webFallbackUrl = `https://open.spotify.com/search/${encodedQuery}`;
+
+  try {
+    const canOpenApp = await Linking.canOpenURL(deepLinkUrl);
+    if (canOpenApp) {
+      await Linking.openURL(deepLinkUrl);
+      return true;
+    }
+  } catch {
+    // Try web fallback below.
+  }
+
+  try {
+    await Linking.openURL(webFallbackUrl);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 const buildCollectionPalette = (isDarkMode: boolean) => ({
   screenBackground: isDarkMode ? '#121212' : '#F8F8F8',
@@ -1765,42 +1790,17 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
       const artistName = todaySongDisplay?.artist || nextLiveRecord?.artist || '';
 
       try {
-        const trackId = await searchSpotifyTrackId(songName, artistName);
-        const fallbackTrackId = trackId || todaySongDisplay?.spotifyTrackId;
-
-        if (!fallbackTrackId) {
-          Alert.alert('Unable to open', 'Spotify track could not be found.');
+        const opened = await openSpotifySearch(songName, artistName);
+        if (!opened) {
+          Alert.alert('エラー', 'Spotifyを開けませんでした');
           return;
-        }
-
-        const appUrl = `spotify:track:${fallbackTrackId}`;
-        const webUrl = buildSpotifyCommunityFallbackUrl(fallbackTrackId);
-
-        try {
-          const canOpenApp = await Linking.canOpenURL(appUrl);
-          if (canOpenApp) {
-            await Linking.openURL(appUrl);
-          } else {
-            await Linking.openURL(webUrl);
-          }
-        } catch {
-          await Linking.openURL(webUrl);
         }
 
         void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {
           // Ignore haptics errors on unsupported devices.
         });
       } catch {
-        const fallbackTrackId = todaySongDisplay?.spotifyTrackId;
-        if (fallbackTrackId) {
-          const webUrl = buildSpotifyCommunityFallbackUrl(fallbackTrackId);
-          await Linking.openURL(webUrl);
-          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {
-            // Ignore haptics errors on unsupported devices.
-          });
-        } else {
-          Alert.alert('Unable to open', 'Spotify track could not be found.');
-        }
+        Alert.alert('エラー', 'Spotifyを開けませんでした');
       } finally {
         setIsOpeningTodaySongCta(false);
       }

@@ -46,6 +46,7 @@ import {
 import { useFonts, LINESeedJP_400Regular, LINESeedJP_700Bold, LINESeedJP_800ExtraBold } from '@expo-google-fonts/line-seed-jp';
 import { useTheme, lightTheme, darkTheme } from '../src/theme';
 import { getNotificationSettings, saveNotificationSettings } from '../utils/liveNotifications';
+import { requestAppReview } from '../utils/appReview';
 
 interface SettingItem {
   id: string;
@@ -63,7 +64,6 @@ interface SettingSection {
 // Note: statusSvgUrisをはcontent内のuseMemoで管理し、レンダリング時の总次訴がその時だけならうえで
 
 const APP_STORE_URL = 'https://apps.apple.com/ja/app/tickemo-%E3%83%A9%E3%82%A4%E3%83%96%E3%81%AE%E6%80%9D%E3%81%84%E5%87%BA%E3%82%92%E8%A8%98%E9%8C%B2/id6758604980';
-const APP_STORE_REVIEW_URL = `${APP_STORE_URL}?action=write-review`;
 const HAPTICS_ENABLED_KEY = '@haptics_enabled';
 const MUSIC_PROVIDER_KEY = '@music_provider';
 
@@ -645,8 +645,10 @@ export default function SettingsScreen({ navigation }: any) {
                       } else if (item.id === 'faq') {
                         navigation.navigate('FAQ');
                       } else if (item.id === 'review') {
-                        Linking.openURL(APP_STORE_REVIEW_URL).catch(() => {
-                          Alert.alert(t('settings.common.errorTitle'), t('settings.alerts.openAppStoreFailed'));
+                        requestAppReview().then((requested) => {
+                          if (!requested) {
+                            Alert.alert(t('settings.common.errorTitle'), t('settings.alerts.openAppStoreFailed'));
+                          }
                         });
                       } else if (item.id === 'share-app') {
                         Share.share({

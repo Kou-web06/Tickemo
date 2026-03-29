@@ -805,7 +805,54 @@ const styles = StyleSheet.create({
     fontWeight: '400',
   },
   nextLiveSection: {
-    marginBottom: 50,
+    marginBottom: 20,
+  },
+  plusBannerButton: {
+    marginHorizontal: 20,
+    marginBottom: 26,
+    backgroundColor: '#ab3030',
+    borderRadius: 24,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  plusBannerLeft: {
+    width: 56,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
+  plusBannerCheckCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 999,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  plusBannerBody: {
+    flex: 1,
+    justifyContent: 'flex-start',
+  },
+  plusBannerTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    lineHeight: 24,
+    fontFamily: 'LINESeedJP_700Bold',
+  },
+  plusBannerSubtitle: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: 'LINESeedJP_400Regular',
+    marginTop: 0.5,
+    opacity: 0.86,
+  },
+  plusBannerRight: {
+    width: 34,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
   },
   nextLiveLabel: {
     fontSize: 15,
@@ -2036,149 +2083,176 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
           columnWrapperStyle={isGridLayout ? styles.artistColumnWrapper : undefined}
           ListHeaderComponent={
             !isSearching && !isGridLayout && nextLiveRecord ? (
-              <View style={styles.nextLiveSection}>
-                <Text style={[styles.nextLiveLabel, { color: palette.primaryText }]}>{isNextLivePast ? 'LAST LIVE' : 'NEXT LIVE'}</Text>
-                <View>
-                  <ImageBackground
-                    source={nextLiveImageUri ? { uri: nextLiveImageUri } : require('../assets/ticketEmpty.png')}
-                    style={styles.nextLiveCard}
-                    imageStyle={{ borderRadius: 16 }}
-                  >
-                    <View style={styles.nextLiveOverlay} />
-                    <TouchableOpacity
-                      style={styles.nextLiveFlipToggleButton}
-                      activeOpacity={0.8}
-                      onPress={handleToggleNextLiveFlip}
+              <>
+                <View style={styles.nextLiveSection}>
+                  <Text style={[styles.nextLiveLabel, { color: palette.primaryText }]}>{isNextLivePast ? 'LAST LIVE' : 'NEXT LIVE'}</Text>
+                  <View>
+                    <ImageBackground
+                      source={nextLiveImageUri ? { uri: nextLiveImageUri } : require('../assets/ticketEmpty.png')}
+                      style={styles.nextLiveCard}
+                      imageStyle={{ borderRadius: 16 }}
                     >
-                      <HugeiconsIcon icon={Tap03Icon} size={18} color="#ffffff" strokeWidth={2.0} />
-                    </TouchableOpacity>
-
-                    <View style={styles.nextLiveFlipLayer}>
-                      <Animated.View
-                        pointerEvents={isNextLiveFlipped ? 'none' : 'auto'}
-                        style={[
-                          styles.nextLiveFace,
-                          {
-                            transform: [{ perspective: 1200 }, { rotateY: nextLiveFrontRotate }],
-                          },
-                        ]}
+                      <View style={styles.nextLiveOverlay} />
+                      <TouchableOpacity
+                        style={styles.nextLiveFlipToggleButton}
+                        activeOpacity={0.8}
+                        onPress={handleToggleNextLiveFlip}
                       >
-                        <View style={styles.nextLiveCardContent}>
-                          <View>
-                            <Text style={styles.nextLiveTitle} numberOfLines={1}>
-                              {nextLiveRecord.liveName || 'LIVE TITLE'}
-                            </Text>
-                            <Text style={styles.nextLiveArtist} numberOfLines={1}>
-                              {nextLiveRecord.artist || '-'}
-                            </Text>
-                            <Text style={styles.nextLiveMeta}>
-                              {`DATE    ${nextLiveRecord.date || '-'}${nextLiveRecord.startTime ? `  ${nextLiveRecord.startTime}` : ''}`}
-                              {'\n'}
-                              {`VENUE    ${nextLiveRecord.venue || '-'}`}
-                            </Text>
-                            <NextLiveCountdown date={nextLiveRecord.date} startTime={nextLiveRecord.startTime} />
-                          </View>
-                        </View>
-                        <TouchableOpacity
-                          style={styles.nextLiveQrButton}
-                          activeOpacity={nextLiveRecord.qrCode ? 0.75 : 1}
-                          onPress={() => {
-                            void handleOpenQrLink();
-                          }}
-                          disabled={!nextLiveRecord.qrCode}
+                        <HugeiconsIcon icon={Tap03Icon} size={18} color="#ffffff" strokeWidth={2.0} />
+                      </TouchableOpacity>
+
+                      <View style={styles.nextLiveFlipLayer}>
+                        <Animated.View
+                          pointerEvents={isNextLiveFlipped ? 'none' : 'auto'}
+                          style={[
+                            styles.nextLiveFace,
+                            {
+                              transform: [{ perspective: 1200 }, { rotateY: nextLiveFrontRotate }],
+                            },
+                          ]}
                         >
-                          {nextLiveRecord.qrCode ? (
-                            <QRCode
-                              value={nextLiveRecord.qrCode}
-                              size={32}
-                              backgroundColor="transparent"
-                              color="#111111"
-                              quietZone={0}
-                            />
-                          ) : (
-                            <MaterialIcons name="qr-code-2" size={32} color="#2c2c2c" />
-                          )}
-                        </TouchableOpacity>
-                      </Animated.View>
-
-                      <Animated.View
-                        pointerEvents={isNextLiveFlipped ? 'auto' : 'none'}
-                        style={[
-                          styles.nextLiveFace,
-                          styles.nextLiveBackFace,
-                          {
-                            transform: [{ perspective: 1200 }, { rotateY: nextLiveBackRotate }],
-                          },
-                        ]}
-                      >
-                        <View style={styles.nextLiveBackOverlay} />
-                        <View style={styles.nextLiveCardContent}>
-                          <View>
-                            <Text style={styles.todaySongHeader}>TODAY'S SONG</Text>
-                            <View style={styles.todaySongRow}>
-                              {todaySongDisplay?.artworkUrl ? (
-                                <Image source={{ uri: todaySongDisplay.artworkUrl }} style={styles.todaySongArtwork} contentFit="cover" />
-                              ) : (
-                                <View style={styles.todaySongFallback}>
-                                  <MaterialIcons name="music-note" size={18} color="#A0A0A0" />
-                                </View>
-                              )}
-                              <View style={styles.todaySongTextWrap}>
-                                <Text style={styles.todaySongTitle} numberOfLines={1}>{todaySongDisplay?.title || 'No song data'}</Text>
-                                <Text style={styles.todaySongArtist} numberOfLines={1}>{todaySongDisplay?.artist || nextLiveRecord.artist || '-'}</Text>
-                              </View>
-                            </View>
-                            <View style={styles.todaySongMetaGrid}>
-                              <View style={styles.todaySongMetaRow}>
-                                <View style={styles.todaySongMetaItem}>
-                                  <Text style={styles.todaySongMetaLabel}>ALBUM</Text>
-                                  <Text style={styles.todaySongMetaValue} numberOfLines={1}>{todaySongDisplay?.album || '-'}</Text>
-                                </View>
-                                <View style={styles.todaySongMetaItem}>
-                                  <Text style={styles.todaySongMetaLabel}>TIME</Text>
-                                  <Text style={styles.todaySongMetaValue} numberOfLines={1}>{todaySongDisplay?.duration || '-'}</Text>
-                                </View>
-                              </View>
-                              <View style={styles.todaySongMetaRow}>
-                                <View style={styles.todaySongMetaItem}>
-                                  <Text style={styles.todaySongMetaLabel}>GENRE</Text>
-                                  <Text style={styles.todaySongMetaValue} numberOfLines={1}>{todaySongDisplay?.genre || '-'}</Text>
-                                </View>
-                                <View style={styles.todaySongMetaItem}>
-                                  <Text style={styles.todaySongMetaLabel}>REL</Text>
-                                  <Text style={styles.todaySongMetaValue} numberOfLines={1}>{todaySongDisplay?.releaseDate || '-'}</Text>
-                                </View>
-                              </View>
+                          <View style={styles.nextLiveCardContent}>
+                            <View>
+                              <Text style={styles.nextLiveTitle} numberOfLines={1}>
+                                {nextLiveRecord.liveName || 'LIVE TITLE'}
+                              </Text>
+                              <Text style={styles.nextLiveArtist} numberOfLines={1}>
+                                {nextLiveRecord.artist || '-'}
+                              </Text>
+                              <Text style={styles.nextLiveMeta}>
+                                {`DATE    ${nextLiveRecord.date || '-'}${nextLiveRecord.startTime ? `  ${nextLiveRecord.startTime}` : ''}`}
+                                {'\n'}
+                                {`VENUE    ${nextLiveRecord.venue || '-'}`}
+                              </Text>
+                              <NextLiveCountdown date={nextLiveRecord.date} startTime={nextLiveRecord.startTime} />
                             </View>
                           </View>
-                        </View>
-                        <TouchableOpacity
-                          style={styles.appleMusicBadge}
-                          activeOpacity={todaySongProviderCta.isEnabled && !isOpeningTodaySongCta ? 0.8 : 1}
-                          onPress={() => {
-                            void handleOpenTodaySongLink();
-                          }}
-                          disabled={!todaySongProviderCta.isEnabled || isOpeningTodaySongCta}
-                        >
-                          {isOpeningTodaySongCta ? (
-                            <ActivityIndicator size="small" color="rgba(255,255,255,0.92)" />
-                          ) : (
-                            <>
-                              <Image
-                                source={todaySongProviderCta.iconSource}
-                                style={styles.todaySongProviderIcon}
-                                contentFit="contain"
-                                transition={0}
+                          <TouchableOpacity
+                            style={styles.nextLiveQrButton}
+                            activeOpacity={nextLiveRecord.qrCode ? 0.75 : 1}
+                            onPress={() => {
+                              void handleOpenQrLink();
+                            }}
+                            disabled={!nextLiveRecord.qrCode}
+                          >
+                            {nextLiveRecord.qrCode ? (
+                              <QRCode
+                                value={nextLiveRecord.qrCode}
+                                size={32}
+                                backgroundColor="transparent"
+                                color="#111111"
+                                quietZone={0}
                               />
-                              <Text style={styles.todaySongProviderText}>{todaySongProviderCta.label}</Text>
-                            </>
-                          )}
-                        </TouchableOpacity>
-                      </Animated.View>
-                    </View>
-                  </ImageBackground>
+                            ) : (
+                              <MaterialIcons name="qr-code-2" size={32} color="#2c2c2c" />
+                            )}
+                          </TouchableOpacity>
+                        </Animated.View>
+
+                        <Animated.View
+                          pointerEvents={isNextLiveFlipped ? 'auto' : 'none'}
+                          style={[
+                            styles.nextLiveFace,
+                            styles.nextLiveBackFace,
+                            {
+                              transform: [{ perspective: 1200 }, { rotateY: nextLiveBackRotate }],
+                            },
+                          ]}
+                        >
+                          <View style={styles.nextLiveBackOverlay} />
+                          <View style={styles.nextLiveCardContent}>
+                            <View>
+                              <Text style={styles.todaySongHeader}>TODAY'S SONG</Text>
+                              <View style={styles.todaySongRow}>
+                                {todaySongDisplay?.artworkUrl ? (
+                                  <Image source={{ uri: todaySongDisplay.artworkUrl }} style={styles.todaySongArtwork} contentFit="cover" />
+                                ) : (
+                                  <View style={styles.todaySongFallback}>
+                                    <MaterialIcons name="music-note" size={18} color="#A0A0A0" />
+                                  </View>
+                                )}
+                                <View style={styles.todaySongTextWrap}>
+                                  <Text style={styles.todaySongTitle} numberOfLines={1}>{todaySongDisplay?.title || 'No song data'}</Text>
+                                  <Text style={styles.todaySongArtist} numberOfLines={1}>{todaySongDisplay?.artist || nextLiveRecord.artist || '-'}</Text>
+                                </View>
+                              </View>
+                              <View style={styles.todaySongMetaGrid}>
+                                <View style={styles.todaySongMetaRow}>
+                                  <View style={styles.todaySongMetaItem}>
+                                    <Text style={styles.todaySongMetaLabel}>ALBUM</Text>
+                                    <Text style={styles.todaySongMetaValue} numberOfLines={1}>{todaySongDisplay?.album || '-'}</Text>
+                                  </View>
+                                  <View style={styles.todaySongMetaItem}>
+                                    <Text style={styles.todaySongMetaLabel}>TIME</Text>
+                                    <Text style={styles.todaySongMetaValue} numberOfLines={1}>{todaySongDisplay?.duration || '-'}</Text>
+                                  </View>
+                                </View>
+                                <View style={styles.todaySongMetaRow}>
+                                  <View style={styles.todaySongMetaItem}>
+                                    <Text style={styles.todaySongMetaLabel}>GENRE</Text>
+                                    <Text style={styles.todaySongMetaValue} numberOfLines={1}>{todaySongDisplay?.genre || '-'}</Text>
+                                  </View>
+                                  <View style={styles.todaySongMetaItem}>
+                                    <Text style={styles.todaySongMetaLabel}>REL</Text>
+                                    <Text style={styles.todaySongMetaValue} numberOfLines={1}>{todaySongDisplay?.releaseDate || '-'}</Text>
+                                  </View>
+                                </View>
+                              </View>
+                            </View>
+                          </View>
+                          <TouchableOpacity
+                            style={styles.appleMusicBadge}
+                            activeOpacity={todaySongProviderCta.isEnabled && !isOpeningTodaySongCta ? 0.8 : 1}
+                            onPress={() => {
+                              void handleOpenTodaySongLink();
+                            }}
+                            disabled={!todaySongProviderCta.isEnabled || isOpeningTodaySongCta}
+                          >
+                            {isOpeningTodaySongCta ? (
+                              <ActivityIndicator size="small" color="rgba(255,255,255,0.92)" />
+                            ) : (
+                              <>
+                                <Image
+                                  source={todaySongProviderCta.iconSource}
+                                  style={styles.todaySongProviderIcon}
+                                  contentFit="contain"
+                                  transition={0}
+                                />
+                                <Text style={styles.todaySongProviderText}>{todaySongProviderCta.label}</Text>
+                              </>
+                            )}
+                          </TouchableOpacity>
+                        </Animated.View>
+                      </View>
+                    </ImageBackground>
+                  </View>
                 </View>
-              </View>
+
+                {!isPremium ? (
+                  <TouchableOpacity
+                    style={styles.plusBannerButton}
+                    activeOpacity={0.9}
+                    onPress={() => {
+                      navigation.navigate('Paywall');
+                    }}
+                  >
+                    <View style={styles.plusBannerLeft}>
+                      <View style={styles.plusBannerCheckCircle}>
+                        <Ionicons name="checkmark" size={26} color="#ab3030" />
+                      </View>
+                    </View>
+
+                    <View style={styles.plusBannerBody}>
+                      <Text style={styles.plusBannerTitle}>Go Plus</Text>
+                      <Text style={styles.plusBannerSubtitle}>No subscription</Text>
+                    </View>
+
+                    <View style={styles.plusBannerRight}>
+                      <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
+                    </View>
+                  </TouchableOpacity>
+                ) : null}
+              </>
             ) : null
           }
           renderItem={({ item }) => {

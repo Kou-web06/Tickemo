@@ -1,27 +1,16 @@
-import { DeviceEventEmitter, Linking } from 'react-native';
+import { DeviceEventEmitter } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as StoreReview from 'expo-store-review';
 
 const REVIEW_REQUESTED_KEY = '@review/hasRequestedReview';
 const TICKET_SAVE_COUNT_KEY = '@review/ticketSaveCount';
-const REVIEW_TRIGGER_COUNT = 3;
-const APP_STORE_REVIEW_URL = 'https://apps.apple.com/app/id6758604980?action=write-review';
+const REVIEW_PROMPT_COUNT_KEY = '@review/promptCount';
+const REVIEW_TRIGGER_COUNT = 2;
+const MAX_REVIEW_PROMPT_COUNT = 5;
 export const APP_REVIEW_MODAL_OPEN_EVENT = 'appReview:openPromptModal';
 export const APP_REVIEW_MODAL_RESPONSE_EVENT = 'appReview:promptModalResponse';
 
 type ReviewPromptAction = 'review' | 'later';
-
-const openAppStoreReviewPage = async (): Promise<boolean> => {
-  try {
-    const canOpen = await Linking.canOpenURL(APP_STORE_REVIEW_URL);
-    if (!canOpen) return false;
-    await Linking.openURL(APP_STORE_REVIEW_URL);
-    return true;
-  } catch (error) {
-    console.warn('[AppReview] Failed to open App Store review page:', error);
-    return false;
-  }
-};
 
 const getNumber = (raw: string | null): number => {
   if (!raw) return 0;
@@ -49,20 +38,11 @@ const runReviewPromptFlow = async (): Promise<boolean> => {
 
 export const requestAppReview = async (): Promise<boolean> => {
   try {
-    const hasRequestedReview = await AsyncStorage.getItem(REVIEW_REQUESTED_KEY);
-    if (hasRequestedReview === '1') {
-      return openAppStoreReviewPage();
-    }
-
     const hasAction = StoreReview.hasAction();
     const isAvailable = await StoreReview.isAvailableAsync();
 
     if (!hasAction || !isAvailable) {
-      const opened = await openAppStoreReviewPage();
-      if (opened) {
-        await AsyncStorage.setItem(REVIEW_REQUESTED_KEY, '1');
-      }
-      return opened;
+      return false;
     }
 
     await StoreReview.requestReview();
@@ -70,11 +50,7 @@ export const requestAppReview = async (): Promise<boolean> => {
     return true;
   } catch (error) {
     console.warn('[AppReview] Failed to request review:', error);
-    const opened = await openAppStoreReviewPage();
-    if (opened) {
-      await AsyncStorage.setItem(REVIEW_REQUESTED_KEY, '1');
-    }
-    return opened;
+    return false;
   }
 };
 
@@ -89,11 +65,20 @@ export const trackTicketSaveForReview = async (): Promise<void> => {
       return;
     }
 
+    const promptedCountRaw = await AsyncStorage.getItem(REVIEW_PROMPT_COUNT_KEY);
+    const promptedCount = getNumber(promptedCountRaw);
+    if (promptedCount >= MAX_REVIEW_PROMPT_COUNT) {
+      return;
+    }
+
     if (nextCount % REVIEW_TRIGGER_COUNT !== 0) {
       return;
     }
 
-    await runReviewPromptFlow();
+    const requested = await runReviewPromptFlow();
+    if (!requested) {
+      await AsyncStorage.setItem(REVIEW_PROMPT_COUNT_KEY, String(promptedCount + 1));
+    }
   } catch (error) {
     console.warn('[AppReview] Failed to track ticket save:', error);
   }

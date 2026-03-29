@@ -601,12 +601,35 @@ interface SummaryCardProps {
   styles: ReturnType<typeof createStyles>;
 }
 
-const SummaryCard: React.FC<SummaryCardProps> = ({ label, value, styles }) => (
-  <View style={styles.summaryCard}>
-    <Text style={styles.summaryValue}>{value}</Text>
-    <Text style={styles.summaryLabel}>{label}</Text>
-  </View>
-);
+const SummaryCard: React.FC<SummaryCardProps> = ({ label, value, styles }) => {
+  const [animatedValue, setAnimatedValue] = useState(0);
+
+  useEffect(() => {
+    const duration = 900;
+    const start = Date.now();
+
+    const tick = () => {
+      const elapsed = Date.now() - start;
+      const progress = Math.min(elapsed / duration, 1);
+      const eased = 1 - (1 - progress) * (1 - progress);
+      setAnimatedValue(Math.round(value * eased));
+
+      if (progress < 1) {
+        requestAnimationFrame(tick);
+      }
+    };
+
+    setAnimatedValue(0);
+    requestAnimationFrame(tick);
+  }, [value]);
+
+  return (
+    <View style={styles.summaryCard}>
+      <Text style={styles.summaryValue}>{animatedValue}</Text>
+      <Text style={styles.summaryLabel}>{label}</Text>
+    </View>
+  );
+};
 
 const calculateActualRank = (items: TopItem[], count: number): number => {
   const uniqueCounts = Array.from(new Set(items.map((i) => i.count))).sort((a, b) => b - a);

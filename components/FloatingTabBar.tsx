@@ -172,14 +172,13 @@ export const FloatingTabBar: React.FC<TabBarProps> = ({ state, descriptors, navi
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    alignSelf: 'center',
+    left: 14,
+    right: 14,
+    alignItems: 'flex-start',
     zIndex: 9999,
   },
   tabBar: {
-    width: '85%',
+    width: '74%',
     height: 64,
     borderRadius: 32,
     overflow: 'hidden',

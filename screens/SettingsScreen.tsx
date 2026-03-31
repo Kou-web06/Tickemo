@@ -23,7 +23,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { HugeiconsIcon } from '@hugeicons/react-native';
-import { Edit01Icon, Sun01Icon, Moon01Icon, Moon02Icon, AppleMusicIcon, SpotifyIcon } from '@hugeicons/core-free-icons';
+import { Edit01Icon, Sun01Icon, Moon01Icon, Moon02Icon, AppleMusicIcon, SpotifyIcon, Cancel01Icon } from '@hugeicons/core-free-icons';
 import Svg, { Path } from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
@@ -536,11 +536,24 @@ export default function SettingsScreen({ navigation }: any) {
     return null;
   }
 
+  const handleCloseMyPage = () => {
+    DeviceEventEmitter.emit('app:closeSettings');
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
       <BlurView tint={isDarkMode ? 'dark' : 'light'} intensity={80} style={[styles.glassHeader, { paddingTop: insets.top + 8 }]}>
         <View style={[styles.titleRow, { marginBottom: 0 }]}> 
           <Text style={[styles.title, { fontSize: titleFontSize }]}>My page</Text>
+          <TouchableOpacity
+            style={styles.headerCloseIsland}
+            activeOpacity={0.82}
+            onPress={handleCloseMyPage}
+            accessibilityRole="button"
+            accessibilityLabel="Close My Page"
+          >
+            <HugeiconsIcon icon={Cancel01Icon} size={20} color={palette.primaryText} strokeWidth={2.1} />
+          </TouchableOpacity>
         </View>
       </BlurView>
 
@@ -887,13 +900,28 @@ const createStyles = (palette: SettingsPalette) =>
     titleRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'flex-start',
+      justifyContent: 'space-between',
       marginBottom: 20,
     },
     title: {
       fontSize: 26,
       color: palette.titleText,
       fontWeight: '800',
+    },
+    headerCloseIsland: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'rgba(248, 248, 248, 0.92)',
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.8)',
+      shadowColor: '#443e48',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.08,
+      shadowRadius: 5,
+      elevation: 5,
     },
     paywallBannerTouchable: {
       marginTop: 15,

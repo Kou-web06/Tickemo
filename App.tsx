@@ -1,4 +1,4 @@
-import { View, StyleSheet, DeviceEventEmitter, Animated, Dimensions, Image, Easing, Alert, Platform } from 'react-native';
+import { View, StyleSheet, DeviceEventEmitter, Animated, Dimensions, Image, Easing, Alert, Platform, TouchableOpacity } from 'react-native';
 import { NavigationContainer, StackActions } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as SplashScreen from 'expo-splash-screen';
@@ -18,7 +18,9 @@ import { PaywallScreen } from './screens';
 import { FloatingTabBar } from './components/FloatingTabBar';
 import AppReviewPromptModal from './components/AppReviewPromptModal';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { HugeiconsIcon } from '@hugeicons/react-native';
+import { CalendarAdd01Icon, Settings03Icon, Ticket01Icon, UserMultiple02Icon, Add01Icon } from '@hugeicons/core-free-icons';
 import { theme } from './theme';
 import { RecordsProvider } from './contexts/RecordsContext';
 import { TabBarProvider, useTabBar } from './contexts/TabBarContext';
@@ -167,23 +169,34 @@ function SettingsStackScreen() {
 }
 
 // ================ Root App Component ================
-function AppContent() {
+function AppContent({ showSplashOverlay }: { showSplashOverlay: boolean }) {
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
   const [currentPage, setCurrentPage] = useState(0); // デフォルトをCollectionタブに設定
+  const [pageBeforeSettings, setPageBeforeSettings] = useState(0);
   const [activeTabIndex, setActiveTabIndex] = useState(0);
+  const [isArtistGridActive, setIsArtistGridActive] = useState(false);
   const [visitedPages, setVisitedPages] = useState<Record<number, boolean>>({ 0: true });
   const [pageWidth, setPageWidth] = useState(APP_MAX_WIDTH);
-  const [tabTransition, setTabTransition] = useState<null | { from: number; to: number; direction: 1 | -1 }>(null);
+  const [pageHeight, setPageHeight] = useState(Dimensions.get('window').height);
+  const [tabTransition, setTabTransition] = useState<null | { from: number; to: number; direction: 1 | -1; axis: 'horizontal' | 'vertical' }>(null);
   const tabSlideProgress = useRef(new Animated.Value(0)).current;
+  const collectionIslandReveal = useRef(new Animated.Value(0)).current;
+  const openAddTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { isTabBarVisible } = useTabBar();
   const settingsNavigationRef = useRef<any>(null);
+  const TAB_ROUTE_COUNT = 3;
 
   const moveToPage = (index: number, animated = true) => {
-    if (index === activeTabIndex && !tabTransition) return;
+    if (index === currentPage && !tabTransition) return;
     if (tabTransition) return;
 
+    const shouldSelectTab = index >= 0 && index < TAB_ROUTE_COUNT;
+
     if (!animated) {
-      setActiveTabIndex(index);
+      if (shouldSelectTab) {
+        setActiveTabIndex(index);
+      }
       setCurrentPage(index);
       setVisitedPages((prev) => (prev[index] ? prev : { ...prev, [index]: true }));
       return;
@@ -191,10 +204,13 @@ function AppContent() {
 
     const fromPage = currentPage;
     const direction: 1 | -1 = index > fromPage ? 1 : -1;
+    const axis: 'horizontal' | 'vertical' = index === 3 || fromPage === 3 ? 'vertical' : 'horizontal';
 
-    setActiveTabIndex(index);
+    if (shouldSelectTab) {
+      setActiveTabIndex(index);
+    }
     setVisitedPages((prev) => (prev[index] ? prev : { ...prev, [index]: true }));
-    setTabTransition({ from: fromPage, to: index, direction });
+    setTabTransition({ from: fromPage, to: index, direction, axis });
     tabSlideProgress.setValue(0);
     Animated.timing(tabSlideProgress, {
       toValue: 1,
@@ -205,7 +221,9 @@ function AppContent() {
       if (finished) {
         setCurrentPage(index);
       } else {
-        setActiveTabIndex(fromPage);
+        if (fromPage >= 0 && fromPage < TAB_ROUTE_COUNT) {
+          setActiveTabIndex(fromPage);
+        }
         setCurrentPage(fromPage);
       }
       setTabTransition(null);
@@ -250,6 +268,7 @@ function AppContent() {
           break;
         case 'campaigns':
           // 設定画面へ
+          setPageBeforeSettings(currentPage);
           moveToPage(3, false); // Settings画面へ
           break;
         default:
@@ -285,11 +304,46 @@ function AppContent() {
     moveToPage(index);
   };
 
+  const handleOpenSettings = () => {
+    if (currentPage === 3) {
+      if (settingsNavigationRef.current?.canGoBack?.()) {
+        settingsNavigationRef.current.dispatch(StackActions.popToTop());
+      }
+      DeviceEventEmitter.emit('settings:scrollToTop');
+      return;
+    }
+
+    setPageBeforeSettings(currentPage);
+    moveToPage(3, true);
+  };
+
+  const handleToggleArtistGrid = () => {
+    setIsArtistGridActive((prev) => !prev);
+    DeviceEventEmitter.emit('app:toggleArtistGrid');
+  };
+
+  const handleOpenAddRecord = () => {
+    if (openAddTimeoutRef.current) {
+      clearTimeout(openAddTimeoutRef.current);
+      openAddTimeoutRef.current = null;
+    }
+
+    if (currentPage === 0) {
+      DeviceEventEmitter.emit('app:openAddRecord');
+      return;
+    }
+
+    moveToPage(0, true);
+    openAddTimeoutRef.current = setTimeout(() => {
+      DeviceEventEmitter.emit('app:openAddRecord');
+      openAddTimeoutRef.current = null;
+    }, 260);
+  };
+
   const routes = [
     { key: 'home', name: 'Home' },
     { key: 'calendar', name: 'Calendar' },
     { key: 'statistics', name: 'Statistics' },
-    { key: 'settings', name: 'Settings' },
   ];
 
   const descriptors = routes.reduce((acc, route) => {
@@ -303,14 +357,68 @@ function AppContent() {
   }, {} as any);
 
   useEffect(() => {
-    const subscription = DeviceEventEmitter.addListener('app:goToHome', () => {
+    const homeSubscription = DeviceEventEmitter.addListener('app:goToHome', () => {
       moveToPage(0, false);
     });
 
+    const settingsSubscription = DeviceEventEmitter.addListener('app:goToSettings', () => {
+      if (currentPage !== 3) {
+        setPageBeforeSettings(currentPage);
+      }
+      moveToPage(3, true);
+    });
+
+    const closeSettingsSubscription = DeviceEventEmitter.addListener('app:closeSettings', () => {
+      if (currentPage !== 3) return;
+      const targetPage = pageBeforeSettings >= 0 && pageBeforeSettings < TAB_ROUTE_COUNT ? pageBeforeSettings : 0;
+      moveToPage(targetPage, true);
+    });
+
     return () => {
-      subscription.remove();
+      homeSubscription.remove();
+      settingsSubscription.remove();
+      closeSettingsSubscription.remove();
+    };
+  }, [currentPage, pageBeforeSettings]);
+
+  useEffect(() => {
+    if (currentPage !== 0) {
+      collectionIslandReveal.setValue(0);
+      return;
+    }
+
+    collectionIslandReveal.setValue(0);
+    Animated.timing(collectionIslandReveal, {
+      toValue: 1,
+      duration: 240,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [collectionIslandReveal, currentPage]);
+
+  useEffect(() => {
+    return () => {
+      if (openAddTimeoutRef.current) {
+        clearTimeout(openAddTimeoutRef.current);
+      }
     };
   }, []);
+
+  const collectionLeftIslandStyle = {
+    width: collectionIslandReveal.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0, 44],
+    }),
+    opacity: collectionIslandReveal,
+    transform: [
+      {
+        translateX: collectionIslandReveal.interpolate({
+          inputRange: [0, 1],
+          outputRange: [14, 0],
+        }),
+      },
+    ],
+  } as const;
 
   const getPageLayerStyle = (index: number) => {
     if (!tabTransition) {
@@ -328,12 +436,19 @@ function AppContent() {
           opacity: 1,
           zIndex: 2,
           transform: [
-            {
-              translateX: tabSlideProgress.interpolate({
-                inputRange: [0, 1],
-                outputRange: [0, -tabTransition.direction * pageWidth],
-              }),
-            },
+            tabTransition.axis === 'vertical'
+              ? {
+                  translateY: tabSlideProgress.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, -tabTransition.direction * pageHeight],
+                  }),
+                }
+              : {
+                  translateX: tabSlideProgress.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, -tabTransition.direction * pageWidth],
+                  }),
+                },
           ],
         },
       ];
@@ -346,12 +461,19 @@ function AppContent() {
           opacity: 1,
           zIndex: 1,
           transform: [
-            {
-              translateX: tabSlideProgress.interpolate({
-                inputRange: [0, 1],
-                outputRange: [tabTransition.direction * pageWidth, 0],
-              }),
-            },
+            tabTransition.axis === 'vertical'
+              ? {
+                  translateY: tabSlideProgress.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [tabTransition.direction * pageHeight, 0],
+                  }),
+                }
+              : {
+                  translateX: tabSlideProgress.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [tabTransition.direction * pageWidth, 0],
+                  }),
+                },
           ],
         },
       ];
@@ -380,8 +502,12 @@ function AppContent() {
           style={styles.pageStack}
           onLayout={(e) => {
             const width = e.nativeEvent.layout.width;
+            const height = e.nativeEvent.layout.height;
             if (width > 0 && width !== pageWidth) {
               setPageWidth(width);
+            }
+            if (height > 0 && height !== pageHeight) {
+              setPageHeight(height);
             }
           }}
         >
@@ -446,13 +572,6 @@ function AppContent() {
                     if (index === activeTabIndex && name === 'Calendar') {
                       DeviceEventEmitter.emit('calendar:scrollToToday');
                     }
-
-                    if (index === activeTabIndex && name === 'Settings') {
-                      if (settingsNavigationRef.current?.canGoBack?.()) {
-                        settingsNavigationRef.current.dispatch(StackActions.popToTop());
-                      }
-                      DeviceEventEmitter.emit('settings:scrollToTop');
-                    }
                     handleTabPress(index);
                   }
                 },
@@ -460,8 +579,65 @@ function AppContent() {
                 isFocused: () => true,
               }}
             />
+
+            {!showSplashOverlay && (
+              <TouchableOpacity
+                style={[
+                  styles.globalAddButton,
+                  { bottom: insets.bottom > 0 ? insets.bottom - 7 : 3 },
+                ]}
+                activeOpacity={0.9}
+                onPress={handleOpenAddRecord}
+                accessibilityRole="button"
+                accessibilityLabel="Add Ticket"
+              >
+                <HugeiconsIcon icon={Add01Icon} size={26} color="#FFFFFF" strokeWidth={2.2} />
+              </TouchableOpacity>
+            )}
           </View>
         )}
+
+        {isTabBarVisible && currentPage !== 3 ? (
+          currentPage === 0 ? (
+            <>
+              <View style={[styles.floatingMyPageIsland, { top: insets.top + 12 }]}>
+                <Animated.View style={[styles.floatingIslandLeftWrap, collectionLeftIslandStyle]}>
+                  <TouchableOpacity
+                    style={styles.floatingIslandAction}
+                    activeOpacity={0.82}
+                    onPress={handleToggleArtistGrid}
+                    accessibilityRole="button"
+                    accessibilityLabel={isArtistGridActive ? 'Ticket List' : 'Artist Grid'}
+                  >
+                    <HugeiconsIcon icon={isArtistGridActive ? Ticket01Icon : UserMultiple02Icon} size={22} color="#2F2A33" strokeWidth={2} />
+                  </TouchableOpacity>
+                </Animated.View>
+
+                <Animated.View style={[styles.floatingIslandDivider, { opacity: collectionLeftIslandStyle.opacity }]} />
+
+                <TouchableOpacity
+                  style={styles.floatingIslandAction}
+                  activeOpacity={0.82}
+                  onPress={handleOpenSettings}
+                  accessibilityRole="button"
+                  accessibilityLabel="My Page"
+                >
+                  <HugeiconsIcon icon={Settings03Icon} size={22} color="#2F2A33" strokeWidth={2} />
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : (
+            <TouchableOpacity
+              style={[styles.floatingMyPageButton, { top: insets.top + 12 }]}
+              activeOpacity={0.82}
+              onPress={handleOpenSettings}
+              accessibilityRole="button"
+              accessibilityLabel="My Page"
+            >
+              <HugeiconsIcon icon={Settings03Icon} size={22} color="#2F2A33" strokeWidth={2} />
+            </TouchableOpacity>
+          )
+        ) : null}
       </View>
     </GestureHandlerRootView>
   );
@@ -635,7 +811,7 @@ export default function App() {
         <RecordsProvider>
           <TabBarProvider>
             <View style={styles.appRoot}>
-              {fontsLoaded ? <AppContent /> : <View style={styles.appPlaceholder} />}
+              {fontsLoaded ? <AppContent showSplashOverlay={showSplashOverlay} /> : <View style={styles.appPlaceholder} />}
               <AppReviewPromptModal />
               {showSplashOverlay && (
                 <Animated.View
@@ -734,5 +910,77 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
+    justifyContent: 'center',
+  },
+  globalAddButton: {
+    position: 'absolute',
+    right: 20,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: '#8F17C8',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.06)',
+    zIndex: 10000,
+  },
+  floatingMyPageButton: {
+    position: 'absolute',
+    right: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(248, 248, 248, 0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.8)',
+    shadowColor: '#1A1022',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 7,
+    elevation: 3,
+    zIndex: 120,
+  },
+  floatingMyPageIsland: {
+    position: 'absolute',
+    right: 16,
+    width: 94,
+    height: 44,
+    borderRadius: 22,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(248, 248, 248, 0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.8)',
+    shadowColor: '#1A1022',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    elevation: 5,
+    zIndex: 120,
+    overflow: 'hidden',
+  },
+  floatingIslandLeftWrap: {
+    height: 44,
+    overflow: 'hidden',
+  },
+  floatingIslandAction: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  floatingIslandDivider: {
+    width: 1,
+    height: 20,
+    backgroundColor: 'rgba(47, 42, 51, 0.22)',
   },
 });

@@ -15,7 +15,6 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { HugeiconsIcon } from '@hugeicons/react-native';
 import { AiMicIcon, WavingHand02Icon, Wallet01Icon, AppleMusicIcon, SpotifyIcon, LinkSquare01Icon } from '@hugeicons/core-free-icons';
@@ -25,8 +24,6 @@ import { resolveLocalImageUri } from '../lib/imageUpload';
 import { getArtworkUrl } from '../utils/appleMusicApi';
 import { TicketCard } from '../components/TicketCard';
 import { getAppWidth } from '../utils/layout';
-import { useTheme } from '../src/theme';
-import { getCachedThemePreference, hydrateThemePreference } from '../lib/themePreference';
 
 const buildArtistDetailPalette = (isDarkMode: boolean) => ({
   screenBackground: isDarkMode ? '#0F1013' : '#F3F3F6',
@@ -49,14 +46,17 @@ type ArtistDetailPalette = ReturnType<typeof buildArtistDetailPalette>;
 type MusicProvider = 'spotify' | 'apple';
 const MUSIC_PROVIDER_KEY = '@music_provider';
 
-const StatPill: React.FC<{ label: string; value: string; icon: any; isDarkMode: boolean; palette: ArtistDetailPalette; largeValue?: boolean }> = ({ label, value, icon, isDarkMode, palette, largeValue = false }) => (
-  <BlurView tint={isDarkMode ? 'dark' : 'light'} intensity={45} style={[styles.statPill, { backgroundColor: palette.statPillBackground, borderColor: palette.statPillBorder }]}>
-    <View style={styles.statLabelRow}>
-      <HugeiconsIcon icon={icon} size={16} color={palette.statLabel} strokeWidth={2.0} />
-      <Text style={[styles.statLabel, { color: palette.statLabel }]}>{label}</Text>
-    </View>
-    <Text style={[styles.statValue, { color: palette.statValue }, largeValue && styles.statValueLarge]}>{value}</Text>
-  </BlurView>
+const StatColumn: React.FC<{
+  label: string;
+  mainValue: string;
+  subValue: string;
+  showDivider?: boolean;
+}> = ({ label, mainValue, subValue, showDivider = false }) => (
+  <View style={[styles.statColumn, showDivider && styles.statColumnWithDivider]}>
+    <Text style={styles.statColumnLabel}>{label.toUpperCase()}</Text>
+    <Text style={styles.statColumnMainValue}>{mainValue}</Text>
+    <Text style={styles.statColumnSubValue}>{subValue}</Text>
+  </View>
 );
 
 type ArtistDetailListItem =
@@ -69,19 +69,12 @@ const ArtistDetailScreen: React.FC<{ route: any; navigation: any }> = ({
 }) => {
   const { artistName } = route.params as { artistName: string };
   const { records } = useRecords();
-  const { isDark: isSystemDark } = useTheme();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   const [selectedRecord, setSelectedRecord] = useState<ChekiRecord | null>(null);
-  const [manualDarkMode, setManualDarkMode] = useState<boolean | null | undefined>(() => getCachedThemePreference());
   const [musicProvider, setMusicProvider] = useState<MusicProvider>('spotify');
-  const isDarkMode = manualDarkMode ?? isSystemDark;
+  const isDarkMode = true;
   const palette = useMemo(() => buildArtistDetailPalette(isDarkMode), [isDarkMode]);
-
-  const loadThemePreference = useCallback(async () => {
-    const value = await hydrateThemePreference();
-    setManualDarkMode(value);
-  }, []);
 
   const loadMusicProvider = useCallback(async () => {
     try {
@@ -95,30 +88,16 @@ const ArtistDetailScreen: React.FC<{ route: any; navigation: any }> = ({
   }, []);
 
   useEffect(() => {
-    void loadThemePreference();
     void loadMusicProvider();
-  }, [loadThemePreference, loadMusicProvider]);
+  }, [loadMusicProvider]);
 
   useFocusEffect(
     useCallback(() => {
-      void loadThemePreference();
       void loadMusicProvider();
-    }, [loadThemePreference, loadMusicProvider])
+    }, [loadMusicProvider])
   );
 
-  useEffect(() => {
-    const subscription = DeviceEventEmitter.addListener('theme:changed', (nextValue?: boolean) => {
-      if (typeof nextValue === 'boolean') {
-        setManualDarkMode(nextValue);
-      } else {
-        void loadThemePreference();
-      }
-    });
 
-    return () => {
-      subscription.remove();
-    };
-  }, [loadThemePreference]);
 
   const artistRecords = useMemo(() => {
     return records
@@ -171,6 +150,27 @@ const ArtistDetailScreen: React.FC<{ route: any; navigation: any }> = ({
       totalSpent,
     };
   }, [pastArtistRecords]);
+
+  const firstLiveDateParts = useMemo(() => {
+    if (!stats.firstLive || stats.firstLive === '-') {
+      return { main: '-- --', sub: '----' };
+    }
+
+    const parsed = new Date(stats.firstLive.replace(/\./g, '-'));
+    if (Number.isNaN(parsed.getTime())) {
+      return { main: stats.firstLive.replace(/\./g, '/').toUpperCase(), sub: 'DATE' };
+    }
+
+    const main = parsed.toLocaleDateString('en-US', {
+      month: 'short',
+      day: '2-digit',
+    }).toUpperCase();
+
+    return {
+      main,
+      sub: String(parsed.getFullYear()),
+    };
+  }, [stats.firstLive]);
 
   const listData = useMemo<ArtistDetailListItem[]>(() => {
     const items: ArtistDetailListItem[] = [];
@@ -241,28 +241,12 @@ const ArtistDetailScreen: React.FC<{ route: any; navigation: any }> = ({
     return null;
   }, [artistRecords, getArtistPortraitFromRecord]);
 
-  const avatarImageUri = useMemo(() => {
-    if (heroImageUri) return heroImageUri;
-
-    for (const record of artistRecords) {
-      const portraitUri = getArtistPortraitFromRecord(record);
-      if (portraitUri) return portraitUri;
-    }
-
-    return null;
-  }, [artistRecords, heroImageUri, getArtistPortraitFromRecord]);
-
   const ticketWidth = Math.min(getAppWidth() - 40, windowWidth - 40);
   const heroHeight = 500;
 
   const heroImageSource = useMemo(
     () => (heroImageUri ? { uri: heroImageUri } : undefined),
     [heroImageUri]
-  );
-
-  const avatarImageSource = useMemo(
-    () => (avatarImageUri ? { uri: avatarImageUri } : undefined),
-    [avatarImageUri]
   );
 
   const handleSelectRecord = useCallback((record: ChekiRecord) => {
@@ -298,24 +282,7 @@ const ArtistDetailScreen: React.FC<{ route: any; navigation: any }> = ({
       <View style={[styles.heroSpacer, { height: heroHeight }]} />
 
       <View style={styles.profileWrap}>
-        <View style={styles.avatarOuterRing}>
-          <View style={styles.avatarInnerGap}>
-            {avatarImageSource ? (
-              <Image
-                source={avatarImageSource}
-                style={styles.avatarImage}
-                contentFit="cover"
-                cachePolicy="memory-disk"
-              />
-            ) : (
-              <View style={styles.avatarFallback}>
-                <Ionicons name="person" size={28} color="#FFFFFF" />
-              </View>
-            )}
-          </View>
-        </View>
-
-        <Text style={[styles.artistName, { color: palette.artistName }]}>{artistName}</Text>
+        <Text style={[styles.artistName, { color: palette.artistName }]} numberOfLines={2}>{artistName}</Text>
 
         <TouchableOpacity
           style={styles.providerCreditBadge}
@@ -332,21 +299,27 @@ const ArtistDetailScreen: React.FC<{ route: any; navigation: any }> = ({
         </TouchableOpacity>
 
         <View style={styles.statsRow}>
-          <StatPill icon={AiMicIcon} label="LIVE" value={String(stats.totalLives)} isDarkMode={isDarkMode} palette={palette} largeValue={true} />
-          <StatPill icon={WavingHand02Icon} label="FIRST" value={stats.firstLive.replace(/\./g, '/')} isDarkMode={isDarkMode} palette={palette} />
-          <StatPill
-            icon={Wallet01Icon}
+          <StatColumn
+            label="LIVE"
+            mainValue={String(stats.totalLives)}
+            subValue="SHOWS"
+            showDivider={true}
+          />
+          <StatColumn
+            label="FIRST"
+            mainValue={firstLiveDateParts.main}
+            subValue={firstLiveDateParts.sub}
+            showDivider={true}
+          />
+          <StatColumn
             label="SPENT"
-            value={stats.totalSpent > 0 ? `¥${stats.totalSpent.toLocaleString()}` : '¥0'}
-            isDarkMode={isDarkMode}
-            palette={palette}
-            largeValue={true}
+            mainValue={stats.totalSpent > 0 ? `¥${stats.totalSpent.toLocaleString()}` : '¥0'}
+            subValue="JPY"
           />
         </View>
       </View>
     </View>
   ), [
-    avatarImageSource,
     artistName,
     heroImageSource,
     insets.top,
@@ -354,6 +327,8 @@ const ArtistDetailScreen: React.FC<{ route: any; navigation: any }> = ({
     stats.firstLive,
     stats.totalLives,
     stats.totalSpent,
+    firstLiveDateParts.main,
+    firstLiveDateParts.sub,
     isDarkMode,
     palette,
     heroHeight,
@@ -414,7 +389,7 @@ const ArtistDetailScreen: React.FC<{ route: any; navigation: any }> = ({
         />
       </View>
 
-      <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}> 
+      <View style={[styles.topBar, { paddingTop: insets.top }]}> 
         <TouchableOpacity
           onPress={() => navigation.goBack()}
           style={[styles.backButton, { backgroundColor: palette.backButtonBackground }]}
@@ -510,48 +485,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 20,
   },
-  avatarOuterRing: {
-    width: 126,
-    height: 126,
-    borderRadius: 63,
-    padding: 5,
-    borderWidth: 2,
-    borderColor: '#FDFDFE',
-    backgroundColor: 'transparent',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  avatarInnerGap: {
-    flex: 1,
-    borderRadius: 55,
-    backgroundColor: 'transparent',
-    overflow: 'hidden',
-  },
-  avatarImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 55,
-  },
-  avatarFallback: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 55,
-    backgroundColor: '#5A5A5A',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
   artistName: {
-    marginTop: 10,
-    marginBottom: 5,
-    fontSize: 18,
-    lineHeight: 34,
-    fontWeight: '800',
+    marginTop: 114,
+    marginBottom: 12,
+    fontSize: 48,
+    lineHeight: 48,
+    fontWeight: '600',
     color: '#0C0C0D',
-    letterSpacing: -0.6,
-    textAlign: 'center',
+    letterSpacing: -0.8,
+    textAlign: 'left',
   },
   providerCreditBadge: {
     minHeight: 24,
@@ -579,48 +521,43 @@ const styles = StyleSheet.create({
   statsRow: {
     marginTop: 18,
     flexDirection: 'row',
-    gap: 10,
     width: '100%',
-    justifyContent: 'space-between',
+    paddingVertical: 16,
   },
-  statPill: {
+  statColumn: {
     flex: 1,
-    minHeight: 92,
-    borderRadius: 18,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(18, 18, 24, 0.58)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.18,
-    shadowRadius: 14,
-    elevation: 5,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 8,
+    alignItems: 'flex-start',
+    paddingLeft: 20,
+    paddingRight: 10,
+    justifyContent: 'space-between',
+    minHeight: 88,
   },
-  statLabelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginBottom: 4,
+  statColumnWithDivider: {
+    borderRightWidth: 1,
+    borderRightColor: 'rgba(255,255,255,0.24)',
   },
-  statLabel: {
-    fontSize: 15,
-    color: 'rgba(255,255,255,0.86)',
-    fontWeight: '500',
-    letterSpacing: 0.4,
-  },
-  statValue: {
-    fontSize: 14,
-    lineHeight: 40,
-    color: '#FFFFFF',
+  statColumnLabel: {
+    fontSize: 11,
+    color: '#8C8C8F',
     fontWeight: '700',
-    textAlign: 'center',
+    letterSpacing: 0.8,
+    fontFamily: 'LINESeedJP_700Bold',
   },
-  statValueLarge: {
-    fontSize: 16,
+  statColumnMainValue: {
+    marginTop: 10,
+    fontSize: 21,
+    color: '#eaeaea',
+    fontWeight: '900',
+    letterSpacing: -0.2,
+    fontFamily: 'LINESeedJP_700Bold',
+  },
+  statColumnSubValue: {
+    marginTop: 8,
+    fontSize: 13,
+    color: '#8C8C8F',
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    fontFamily: 'LINESeedJP_700Bold',
   },
   yearDividerRow: {
     marginTop: 30,

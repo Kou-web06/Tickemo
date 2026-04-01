@@ -126,7 +126,9 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({ record, visib
   const [cardType, setCardType] = useState<CardType>('ticket');
   const [setlistSongs, setSetlistSongs] = useState<SetlistItem[]>([]);
   const [cdTextColor, setCdTextColor] = useState<'white' | 'black'>('white');
-  const viewRef = useRef<View>(null);
+  const ticketViewRef = useRef<View>(null);
+  const cdViewRef = useRef<View>(null);
+  const receiptViewRef = useRef<View>(null);
   const overlayAnim = useRef(new Animated.Value(0)).current;
   const sheetAnim = useRef(new Animated.Value(600)).current;
 
@@ -196,7 +198,13 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({ record, visib
       return null;
     }
 
-    if (!viewRef.current) {
+    const activeViewRef = cardType === 'ticket'
+      ? ticketViewRef
+      : cardType === 'cd'
+        ? cdViewRef
+        : receiptViewRef;
+
+    if (!activeViewRef.current) {
       Alert.alert(t('shareImageGenerator.alerts.error'), t('shareImageGenerator.alerts.previewNotReady'));
       return null;
     }
@@ -204,7 +212,7 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({ record, visib
     try {
       const captureWidth = cardType === 'receipt' ? receiptOutputWidth : outputWidth;
       const captureHeight = cardType === 'receipt' ? receiptOutputHeight : outputHeight;
-      const uri = await captureRef(viewRef, {
+      const uri = await captureRef(activeViewRef, {
         format: 'png',
         quality: 1,
         width: captureWidth,
@@ -457,7 +465,7 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({ record, visib
       <View style={styles.previewFrame}>
         <View style={{ width: displayW, height: displayH, overflow: 'hidden' }}>
           <View
-            ref={viewRef}
+            ref={cdViewRef}
             collapsable={false}
             style={{
               width: outputWidth,
@@ -779,7 +787,7 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({ record, visib
       <View style={styles.previewFrame}>
         <View style={{ width: displayW, height: displayH, overflow: 'hidden' }}>
           <View
-            ref={viewRef}
+            ref={receiptViewRef}
             collapsable={false}
             style={{
               width: receiptOutputWidth,
@@ -888,33 +896,6 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({ record, visib
     );
   };
 
-  const renderPreview = () => {
-    if (cardType === 'cd') {
-      return renderCDCard();
-    }
-
-    if (cardType === 'receipt') {
-      return renderReceiptCard();
-    }
-
-    return (
-      <View style={styles.previewFrame}>
-        <EditableTicketPreview
-          record={record}
-          coverUri={coverUri}
-          captureBlurBackground={captureBlurBackground}
-          outputWidth={outputWidth}
-          outputHeight={outputHeight}
-          displayScale={displayScale}
-          selectedSticker={'none'}
-          backgroundColor={'#FFFFFF'}
-          selectedFilterId={'normal'}
-          captureViewRef={viewRef}
-        />
-      </View>
-    );
-  };
-
   if (!record) {
     return null;
   }
@@ -943,7 +924,39 @@ const ShareImageGenerator: React.FC<ShareImageGeneratorProps> = ({ record, visib
           >
             <Animated.View style={[styles.previewArea, { height: previewHeightAnim }]}>
               <View style={styles.previewContainer}>
-                {renderPreview()}
+                <View
+                  pointerEvents={cardType === 'ticket' ? 'auto' : 'none'}
+                  style={[styles.previewLayer, cardType === 'ticket' ? styles.previewLayerActive : styles.previewLayerHidden]}
+                >
+                  <View style={styles.previewFrame}>
+                    <EditableTicketPreview
+                      record={record}
+                      coverUri={coverUri}
+                      captureBlurBackground={captureBlurBackground}
+                      outputWidth={outputWidth}
+                      outputHeight={outputHeight}
+                      displayScale={displayScale}
+                      selectedSticker={'none'}
+                      backgroundColor={'#FFFFFF'}
+                      selectedFilterId={'normal'}
+                      captureViewRef={ticketViewRef}
+                    />
+                  </View>
+                </View>
+
+                <View
+                  pointerEvents={cardType === 'cd' ? 'auto' : 'none'}
+                  style={[styles.previewLayer, cardType === 'cd' ? styles.previewLayerActive : styles.previewLayerHidden]}
+                >
+                  {renderCDCard()}
+                </View>
+
+                <View
+                  pointerEvents={cardType === 'receipt' ? 'auto' : 'none'}
+                  style={[styles.previewLayer, cardType === 'receipt' ? styles.previewLayerActive : styles.previewLayerHidden]}
+                >
+                  {renderReceiptCard()}
+                </View>
 
                 {isLockedPreview ? (
                   <TouchableOpacity style={styles.lockOverlayTouchable} activeOpacity={0.9} onPress={handleOpenPaywall}>
@@ -1166,6 +1179,17 @@ const styles = StyleSheet.create({
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  previewLayer: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  previewLayerActive: {
+    opacity: 1,
+  },
+  previewLayerHidden: {
+    opacity: 0,
   },
   lockOverlayTouchable: {
     position: 'absolute',

@@ -168,6 +168,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
   const [loadingTrackId, setLoadingTrackId] = useState<string | null>(null);
   const [seenNewSongKeys, setSeenNewSongKeys] = useState<Set<string>>(new Set());
   const [hasLoadedSeenNewSongKeys, setHasLoadedSeenNewSongKeys] = useState(false);
+  const [headerHeight, setHeaderHeight] = useState(0);
   const sheetTranslateY = useState(new Animated.Value(Dimensions.get('window').height))[0];
   const pendingSeenSongKeysRef = useRef<Set<string>>(new Set());
 
@@ -668,36 +669,51 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
       ]}
     >
       <View style={styles.root}>
+        <View
+          style={styles.fixedHeader}
+          onLayout={(event) => {
+            const nextHeight = event.nativeEvent.layout.height;
+            if (nextHeight > 0 && nextHeight !== headerHeight) {
+              setHeaderHeight(nextHeight);
+            }
+          }}
+        >
+          <View style={styles.headerWrap}>
+            {imageUri ? (
+              <Image source={{ uri: imageUri }} style={styles.coverImage} contentFit="cover" />
+            ) : (
+              <View style={[styles.coverImage, styles.emptyCover]}>
+                <Text style={styles.emptyCoverText}>NO IMAGE</Text>
+              </View>
+            )}
+
+            <TouchableOpacity
+              style={styles.qrBox}
+              activeOpacity={qrValue ? 0.75 : 1}
+              disabled={!qrValue}
+              onPress={() => {
+                void handleOpenQrLink();
+              }}
+            >
+              {qrValue ? (
+                <QRCode value={qrValue} size={56} color="#1A1A1A" backgroundColor="#FFFFFF" />
+              ) : (
+                <Image source={require('../assets/no-qr.png')} style={styles.qrFallback} contentFit="contain" />
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+
         <TouchableOpacity style={styles.closeButton} activeOpacity={0.82} onPress={handleClosePress}>
           <Ionicons name="close" size={34} color="#B7B7B7" />
         </TouchableOpacity>
 
-        <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          <View style={styles.headerWrap}>
-          {imageUri ? (
-            <Image source={{ uri: imageUri }} style={styles.coverImage} contentFit="cover" />
-          ) : (
-            <View style={[styles.coverImage, styles.emptyCover]}>
-              <Text style={styles.emptyCoverText}>NO IMAGE</Text>
-            </View>
-          )}
-
-          <TouchableOpacity
-            style={styles.qrBox}
-            activeOpacity={qrValue ? 0.75 : 1}
-            disabled={!qrValue}
-            onPress={() => {
-              void handleOpenQrLink();
-            }}
-          >
-            {qrValue ? (
-              <QRCode value={qrValue} size={56} color="#1A1A1A" backgroundColor="#FFFFFF" />
-            ) : (
-              <Image source={require('../assets/no-qr.png')} style={styles.qrFallback} contentFit="contain" />
-            )}
-          </TouchableOpacity>
-        </View>
-
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={[styles.scrollContent, { paddingTop: Math.max(headerHeight - 28, 0) }]}
+          showsVerticalScrollIndicator={false}
+        >
+        <View style={styles.bodySurface}>
         <View style={styles.body}>
           <Text style={styles.liveName}>{record.liveName || '-'}</Text>
 
@@ -853,6 +869,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
             </View>
           )}
         </View>
+          </View>
         </ScrollView>
 
         <View style={styles.footerTab}>
@@ -927,6 +944,13 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f9f9f9',
   },
+  fixedHeader: {
+    position: 'absolute',
+    top: -30,
+    left: 0,
+    right: 0,
+    zIndex: 0,
+  },
   scroll: {
     flex: 1,
   },
@@ -985,6 +1009,13 @@ const styles = StyleSheet.create({
   body: {
     paddingHorizontal: 22,
     paddingTop: 26,
+  },
+  bodySurface: {
+    backgroundColor: '#f9f9f9',
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    overflow: 'hidden',
+    minHeight: 260,
   },
   liveName: {
     fontSize: 26,

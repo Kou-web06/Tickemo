@@ -2097,9 +2097,9 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
 
           const recordItem = item as ChekiRecord;
           const sectionLabel = recordItem.id === firstSectionLabelRecordIds.firstUpcomingId
-            ? '#UPCOMING'
+            ? 'Up Next'
             : recordItem.id === firstSectionLabelRecordIds.firstArchiveId
-              ? '#ARCHIVE'
+              ? 'Past Events'
               : null;
 
           if (isListAnimating) {
@@ -2309,16 +2309,28 @@ const AddScreen: React.FC<{ navigation: any; addNewRecord: (record: ChekiRecord)
         const rawUri = info.imageUrls[0];
         if (rawUri) {
           const normalizedUri = normalizeStoredImageUri(rawUri) || rawUri;
+          
           if (!isPersistedImageUri(normalizedUri)) {
             const newBaseName = `cover-${Date.now()}`;
             const uploaded = await uploadImage(normalizedUri, userId, newRecordId, newBaseName);
             if (uploaded) {
-              uploadedImageUrls.push(uploaded);
-              uploadedImageAssetIds.push(null);
+              if (record.imageUrls && record.imageUrls.length > 0) {
+                 const oldUri = record.imageUrls[0];
+                 try {
+                   await deleteImage(oldUri);
+                 } catch (e) {
+                   // Old image deletion failed, continue
+                 }
+              }
+
+              uploadedImageUrls = [uploaded];
+              uploadedImageAssetIds = [null];
             }
           } else {
-            uploadedImageUrls.push(normalizedUri);
-            uploadedImageAssetIds.push(null);
+            uploadedImageUrls = [normalizedUri];
+            const originalIndex = (record.imageUrls || []).indexOf(rawUri);
+            const originalAssetId = originalIndex !== -1 ? (record.imageAssetIds?.[originalIndex] ?? null) : null;
+            uploadedImageAssetIds = [originalAssetId];
           }
         }
       }

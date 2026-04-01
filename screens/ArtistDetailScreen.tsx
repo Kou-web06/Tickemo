@@ -158,13 +158,13 @@ const ArtistDetailScreen: React.FC<{ route: any; navigation: any }> = ({
 
     const parsed = new Date(stats.firstLive.replace(/\./g, '-'));
     if (Number.isNaN(parsed.getTime())) {
-      return { main: stats.firstLive.replace(/\./g, '/').toUpperCase(), sub: 'DATE' };
+      return { main: stats.firstLive.replace(/\./g, '/'), sub: 'DATE' };
     }
 
     const main = parsed.toLocaleDateString('en-US', {
       month: 'short',
       day: '2-digit',
-    }).toUpperCase();
+    });
 
     return {
       main,

@@ -11,6 +11,7 @@ import { useFonts, Anton_400Regular } from '@expo-google-fonts/anton';
 import CollectionScreen from './screens/CollectionScreen';
 import CalendarScreen from './screens/CalendarScreen';
 import StatisticsScreen from './screens/StatisticsScreen';
+import ArtistDetailScreen from './screens/ArtistDetailScreen';
 import SettingsScreen, { FAQScreen, MusicProviderScreen, NotificationSettingsScreen } from './screens/SettingsScreen';
 import ProfileEditScreen from './screens/ProfileEditScreen';
 import ICloudSyncScreen from './screens/ICloudSyncScreen';
@@ -48,6 +49,7 @@ const isTablet = () => {
 };
 
 const SettingsStack = createNativeStackNavigator();
+const StatisticsStack = createNativeStackNavigator();
 const MAX_PRELOAD_RECORD_IMAGES = 24;
 const APP_SURFACE_COLOR = '#F8F8F8';
 
@@ -165,6 +167,29 @@ function SettingsStackScreen() {
         }}
       />
     </SettingsStack.Navigator>
+  );
+}
+
+function StatisticsStackScreen() {
+  return (
+    <StatisticsStack.Navigator
+      screenOptions={{
+        headerShown: false,
+        contentStyle: {
+          backgroundColor: theme.colors.background.primary,
+        },
+      }}
+    >
+      <StatisticsStack.Screen name="StatisticsMain" component={StatisticsScreen} />
+      <StatisticsStack.Screen
+        name="ArtistDetail"
+        component={ArtistDetailScreen}
+        options={{
+          animation: 'slide_from_right',
+          presentation: 'modal',
+        }}
+      />
+    </StatisticsStack.Navigator>
   );
 }
 
@@ -539,7 +564,7 @@ function AppContent({ showSplashOverlay }: { showSplashOverlay: boolean }) {
           >
             {shouldRenderPage(2) ? (
               <NavigationContainer independent={true}>
-                <StatisticsScreen />
+                <StatisticsStackScreen />
               </NavigationContainer>
             ) : null}
           </Animated.View>

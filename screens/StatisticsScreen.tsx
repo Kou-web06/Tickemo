@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, useWindowDimensions, TouchableOpacity, DeviceEventEmitter } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
 import { HugeiconsIcon } from '@hugeicons/react-native';
 import {
   MedalFirstPlaceIcon,
@@ -12,11 +11,11 @@ import {
   ViewOffIcon,
 } from '@hugeicons/core-free-icons';
 import { Image } from 'expo-image';
+import Svg, { Defs, ClipPath, Path, Image as SvgImage } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BlurView } from 'expo-blur';
 import { BarChart } from 'react-native-gifted-charts';
 import { useTranslation } from 'react-i18next';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useRecords } from '../contexts/RecordsContext';
 import { useAppStore } from '../store/useAppStore';
 import { useFonts, LINESeedJP_400Regular, LINESeedJP_700Bold } from '@expo-google-fonts/line-seed-jp';
@@ -41,6 +40,12 @@ const buildPalette = (isDarkMode: boolean) => ({
   yearButtonDisabledIcon: isDarkMode ? '#4A4A55' : '#DDDDDD',
   thumbBackground: isDarkMode ? '#2B2B33' : '#EFEFEF',
   spendingToggle: isDarkMode ? '#B7B7C2' : '#A1A1A1',
+  chipInactiveBackground: isDarkMode ? '#26262C' : '#FFFFFF',
+  chipInactiveText: isDarkMode ? '#ECECF1' : '#303030',
+  chipShadow: isDarkMode ? '#000000' : '#4D4D4D',
+  statsDivider: isDarkMode ? 'rgba(255,255,255,0.20)' : '#D0D0D0',
+  statsLabel: isDarkMode ? '#A9A9B2' : '#8C8C8C',
+  statsValue: isDarkMode ? '#F5F5F7' : '#333333',
 });
 
 type StatisticsPalette = ReturnType<typeof buildPalette>;
@@ -56,10 +61,19 @@ type MonthlyData = {
   count: number;
 };
 
+type YearFilter = number | 'all';
+
 type TopItem = {
   name: string;
   count: number;
   imageUrl?: string;
+};
+
+type ArtistCardItem = {
+  name: string;
+  imageUrl: string;
+  lastLiveAt: Date;
+  formattedLastLiveDate: string;
 };
 
 const parseRecordDateTime = (date: string, startTime?: string) => {
@@ -85,14 +99,23 @@ const resolveArtistThumbUrl = (value?: string) => {
   if (!trimmed) return '';
 
   if (/^https?:\/\//.test(trimmed)) {
-    return getArtworkUrl(trimmed, 160);
+    return getArtworkUrl(trimmed, 800);
   }
 
   return resolveLocalImageUri(trimmed) || '';
 };
 
+const formatEnglishDate = (date: Date) => {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(date);
+};
+
 const StatisticsScreen: React.FC = () => {
   const { t } = useTranslation();
+  const navigation = useNavigation<any>();
   const { isDark: isSystemDark } = useTheme();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
@@ -105,7 +128,7 @@ const StatisticsScreen: React.FC = () => {
     LINESeedJP_400Regular,
     LINESeedJP_700Bold,
   });
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [selectedYear, setSelectedYear] = useState<YearFilter>('all');
   const [priceHidden, setPriceHidden] = useState(false);
 
   const loadThemePreference = React.useCallback(async () => {
@@ -137,7 +160,7 @@ const StatisticsScreen: React.FC = () => {
     };
   }, [loadThemePreference]);
 
-  const isDarkMode = manualDarkMode ?? false;
+  const isDarkMode = manualDarkMode ?? isSystemDark;
   const palette = useMemo(() => buildPalette(isDarkMode), [isDarkMode]);
   const styles = useMemo(() => createStyles(palette), [palette]);
 
@@ -150,78 +173,65 @@ const StatisticsScreen: React.FC = () => {
   }, [records]);
 
   const availableYears = useMemo(() => {
-    const years = attendedRecords
+    const years = Array.from(
+      new Set(
+        attendedRecords
       .map((record) => parseInt(record.date.split('.')[0] || '0', 10))
-      .filter((year) => Number.isFinite(year) && year > 0)
-      .sort((a, b) => a - b);
+          .filter((year) => Number.isFinite(year) && year > 0)
+      )
+    ).sort((a, b) => b - a);
 
-    if (years.length === 0) {
-      const currentYear = new Date().getFullYear();
-      return {
-        minYear: currentYear,
-        maxYear: currentYear,
-      };
-    }
-
-    return {
-      minYear: years[0],
-      maxYear: years[years.length - 1],
-    };
+    return years;
   }, [attendedRecords]);
 
   useEffect(() => {
-    setSelectedYear((currentYear) => {
-      if (currentYear < availableYears.minYear) return availableYears.minYear;
-      if (currentYear > availableYears.maxYear) return availableYears.maxYear;
-      return currentYear;
-    });
+    if (selectedYear !== 'all' && !availableYears.includes(selectedYear)) {
+      setSelectedYear('all');
+    }
   }, [availableYears]);
 
+  const filteredRecords = useMemo(() => {
+    if (selectedYear === 'all') {
+      return attendedRecords;
+    }
+
+    return attendedRecords.filter((record) => {
+      const year = parseInt(record.date.split('.')[0] || '0', 10);
+      return year === selectedYear;
+    });
+  }, [attendedRecords, selectedYear]);
+
   const totalSpending = useMemo((): number => {
-    return attendedRecords
-      .filter((r) => {
-        const year = parseInt(r.date.split('.')[0] || '0');
-        return year === selectedYear;
-      })
+    return filteredRecords
       .reduce((sum, r) => {
         const price = typeof r.ticketPrice === 'number' && Number.isFinite(r.ticketPrice) ? r.ticketPrice : 0;
         return sum + price;
       }, 0);
-  }, [attendedRecords, selectedYear]);
+  }, [filteredRecords]);
 
   const summaryData = useMemo((): SummaryData => {
-    const filtered = attendedRecords.filter((r) => {
-      const year = parseInt(r.date.split('.')[0] || '0');
-      return year === selectedYear;
-    });
-
     const uniqueArtists = new Set<string>();
     const uniqueVenues = new Set<string>();
 
-    filtered.forEach((r) => {
+    filteredRecords.forEach((r) => {
       if (r.artist) uniqueArtists.add(r.artist);
       if (r.venue) uniqueVenues.add(r.venue);
     });
 
     return {
-      totalLives: filtered.length,
+      totalLives: filteredRecords.length,
       totalArtists: uniqueArtists.size,
       totalVenues: uniqueVenues.size,
     };
-  }, [attendedRecords, selectedYear]);
+  }, [filteredRecords]);
 
   const monthlyData = useMemo((): MonthlyData[] => {
-    const filtered = attendedRecords.filter((r) => {
-      const year = parseInt(r.date.split('.')[0] || '0');
-      return year === selectedYear;
-    });
-
     const monthCounts: Record<number, number> = {};
     for (let i = 1; i <= 12; i++) {
       monthCounts[i] = 0;
     }
 
-    filtered.forEach((r) => {
+    filteredRecords.forEach((r) => {
       const month = parseInt(r.date.split('.')[1] || '0');
       if (month >= 1 && month <= 12) {
         monthCounts[month]++;
@@ -232,16 +242,11 @@ const StatisticsScreen: React.FC = () => {
       month: `${i + 1}月`,
       count: monthCounts[i + 1],
     }));
-  }, [attendedRecords, selectedYear]);
+  }, [filteredRecords]);
 
   const topArtists = useMemo((): TopItem[] => {
-    const filtered = attendedRecords.filter((r) => {
-      const year = parseInt(r.date.split('.')[0] || '0');
-      return year === selectedYear;
-    });
-
     const artistMap: Record<string, { count: number; imageUrl: string }> = {};
-    filtered.forEach((r) => {
+    filteredRecords.forEach((r) => {
       const artistName = r.artist?.trim();
       if (artistName) {
         const savedImageUrl = resolveArtistThumbUrl(r.artistImageUrl || r.artistImageUrls?.[0] || '');
@@ -265,16 +270,11 @@ const StatisticsScreen: React.FC = () => {
       .map(([name, value]) => ({ name, count: value.count, imageUrl: value.imageUrl }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 3);
-  }, [attendedRecords, selectedYear]);
+  }, [filteredRecords]);
 
   const topVenues = useMemo((): TopItem[] => {
-    const filtered = attendedRecords.filter((r) => {
-      const year = parseInt(r.date.split('.')[0] || '0');
-      return year === selectedYear;
-    });
-
     const counts: Record<string, number> = {};
-    filtered.forEach((r) => {
+    filteredRecords.forEach((r) => {
       if (r.venue) {
         counts[r.venue] = (counts[r.venue] || 0) + 1;
       }
@@ -284,14 +284,9 @@ const StatisticsScreen: React.FC = () => {
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 3);
-  }, [attendedRecords, selectedYear]);
+  }, [filteredRecords]);
 
   const topSongs = useMemo((): TopItem[] => {
-    const filteredRecords = attendedRecords.filter((record) => {
-      const year = parseInt(record.date.split('.')[0] || '0', 10);
-      return year === selectedYear;
-    });
-
     const songMap: Record<string, { name: string; count: number; imageUrl: string }> = {};
 
     filteredRecords.forEach((record) => {
@@ -329,7 +324,47 @@ const StatisticsScreen: React.FC = () => {
         count: song.count,
         imageUrl: song.imageUrl,
       }));
-  }, [attendedRecords, selectedYear, setlists]);
+  }, [filteredRecords, setlists]);
+
+  const allArtistCards = useMemo((): ArtistCardItem[] => {
+    const artistMap: Record<string, { imageUrl: string; lastLiveAt: Date }> = {};
+
+    filteredRecords.forEach((record) => {
+      const artistName = record.artist?.trim();
+      if (!artistName) {
+        return;
+      }
+
+      const parsedDate = parseRecordDateTime(record.date, record.startTime);
+      if (!parsedDate) {
+        return;
+      }
+
+      const savedImageUrl = resolveArtistThumbUrl(record.artistImageUrl || record.artistImageUrls?.[0] || '');
+      const existing = artistMap[artistName];
+
+      if (!existing || parsedDate.getTime() > existing.lastLiveAt.getTime()) {
+        artistMap[artistName] = {
+          imageUrl: savedImageUrl || existing?.imageUrl || '',
+          lastLiveAt: parsedDate,
+        };
+        return;
+      }
+
+      if (!existing.imageUrl && savedImageUrl) {
+        existing.imageUrl = savedImageUrl;
+      }
+    });
+
+    return Object.entries(artistMap)
+      .map(([name, value]) => ({
+        name,
+        imageUrl: value.imageUrl,
+        lastLiveAt: value.lastLiveAt,
+        formattedLastLiveDate: formatEnglishDate(value.lastLiveAt),
+      }))
+      .sort((a, b) => b.lastLiveAt.getTime() - a.lastLiveAt.getTime());
+  }, [filteredRecords]);
 
   useEffect(() => {
     let isActive = true;
@@ -346,7 +381,7 @@ const StatisticsScreen: React.FC = () => {
       for (const name of artistNames) {
         const results = await searchAppleMusicArtists(name, APPLE_MUSIC_DEVELOPER_TOKEN, 1);
         const artworkUrl = results[0]?.attributes.artwork?.url;
-        const imageUrl = artworkUrl ? getArtworkUrl(artworkUrl, 160) : '';
+        const imageUrl = artworkUrl ? getArtworkUrl(artworkUrl, 800) : '';
 
         if (!isActive) {
           return;
@@ -413,6 +448,48 @@ const StatisticsScreen: React.FC = () => {
     };
   }, [songImages, topSongs]);
 
+  useEffect(() => {
+    let isActive = true;
+
+    const artistNames = allArtistCards
+      .filter((artist) => !artist.imageUrl)
+      .map((artist) => artist.name)
+      .filter((name) => name && !artistImages[name]);
+
+    if (artistNames.length === 0) {
+      return undefined;
+    }
+
+    const fetchArtistImages = async () => {
+      for (const name of artistNames) {
+        const results = await searchAppleMusicArtists(name, APPLE_MUSIC_DEVELOPER_TOKEN, 1);
+        const artworkUrl = results[0]?.attributes.artwork?.url;
+        const imageUrl = artworkUrl ? getArtworkUrl(artworkUrl, 800) : '';
+
+        if (!isActive) {
+          return;
+        }
+
+        setArtistImages((current) => {
+          if (current[name]) {
+            return current;
+          }
+
+          return {
+            ...current,
+            [name]: imageUrl,
+          };
+        });
+      }
+    };
+
+    void fetchArtistImages();
+
+    return () => {
+      isActive = false;
+    };
+  }, [allArtistCards, artistImages]);
+
   const chartData = monthlyData.map((m) => ({
     value: m.count,
     label: m.month,
@@ -420,13 +497,7 @@ const StatisticsScreen: React.FC = () => {
     labelTextStyle: { color: palette.secondaryText, fontSize: 8 },
   }));
 
-  const handlePrevYear = () => {
-    setSelectedYear(Math.max(availableYears.minYear, selectedYear - 1));
-  };
-
-  const handleNextYear = () => {
-    setSelectedYear(Math.min(availableYears.maxYear, selectedYear + 1));
-  };
+  const yearFilterOptions: YearFilter[] = ['all', ...availableYears];
 
   if (!fontsLoaded) {
     return null;
@@ -436,89 +507,53 @@ const StatisticsScreen: React.FC = () => {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <BlurView tint={isDarkMode ? 'dark' : 'light'} intensity={80} style={styles.glassHeaderShell}>
+      <View style={styles.headerArea}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Report</Text>
         </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.chipsScroll}
+          contentContainerStyle={styles.chipsContent}
+        >
+          {yearFilterOptions.map((option) => {
+            const isActive = selectedYear === option;
+            const label = option === 'all' ? 'All-Time' : String(option);
 
-        <View style={styles.yearSelector}>
-          <TouchableOpacity
-            style={[styles.yearButton, selectedYear <= availableYears.minYear && styles.yearButtonDisabled]}
-            onPress={handlePrevYear}
-            disabled={selectedYear <= availableYears.minYear}
-          >
-            <MaterialIcons
-              name="chevron-left"
-              size={20}
-              color={selectedYear <= availableYears.minYear ? palette.yearButtonDisabledIcon : palette.primaryText}
-            />
-          </TouchableOpacity>
-          <Text style={styles.yearDisplay}>{selectedYear}</Text>
-          <TouchableOpacity
-            style={[styles.yearButton, selectedYear >= availableYears.maxYear && styles.yearButtonDisabled]}
-            onPress={handleNextYear}
-            disabled={selectedYear >= availableYears.maxYear}
-          >
-            <MaterialIcons
-              name="chevron-right"
-              size={20}
-              color={selectedYear >= availableYears.maxYear ? palette.yearButtonDisabledIcon : palette.primaryText}
-            />
-          </TouchableOpacity>
-        </View>
-      </BlurView>
+            return (
+              <TouchableOpacity
+                key={String(option)}
+                style={[styles.yearChip, isActive && styles.yearChipActive]}
+                onPress={() => setSelectedYear(option)}
+                activeOpacity={0.86}
+              >
+                <Text style={[styles.yearChipLabel, isActive && styles.yearChipLabelActive]}>{label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
 
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 100 }]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.summaryGrid}>
-          <SummaryCard label="live" value={summaryData.totalLives} styles={styles} />
-          <SummaryCard label="artists" value={summaryData.totalArtists} styles={styles} />
-          <SummaryCard label="venues" value={summaryData.totalVenues} styles={styles} />
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>TOTAL SPENDING</Text>
-          <View style={styles.spendingCard}>
-            <HugeiconsIcon icon={Wallet03Icon} size={28} color={PRIMARY_COLOR} strokeWidth={1.8} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.spendingLabel}>{t('statistics.yearlyTotal')}</Text>
-              <Text style={styles.spendingAmount}>
-                {priceHidden ? '¥ ••••••' : `¥ ${totalSpending.toLocaleString()}`}
-              </Text>
-            </View>
-            <TouchableOpacity onPress={() => setPriceHidden((v) => !v)} style={styles.spendingToggle}>
-              <HugeiconsIcon
-                icon={priceHidden ? ViewOffIcon : ViewIcon}
-                size={22}
-                color={palette.spendingToggle}
-                strokeWidth={1.8}
-              />
-            </TouchableOpacity>
+        <View style={styles.statsStrip}>
+          <View style={styles.statsColumn}>
+            <Text style={styles.statsLabel}>Live</Text>
+            <Text style={styles.statsValue}>{summaryData.totalLives}</Text>
+            <View style={styles.statsDividerLine} />
           </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>MONTHLY LIVES</Text>
-          <View style={styles.chartCard}>
-            <BarChart
-              data={chartData}
-              width={windowWidth - 100}
-              barWidth={24}
-              spacing={12}
-              initialSpacing={8}
-              endSpacing={8}
-              height={120}
-              yAxisLabelWidth={0}
-              yAxisThickness={0}
-              xAxisThickness={0}
-              noOfSections={Math.max(1, Math.ceil(maxMonthValue / 3))}
-              maxValue={Math.max(1, Math.ceil(maxMonthValue / 3) * 3)}
-              frontColor={PRIMARY_COLOR}
-              barBorderRadius={4}
-            />
+          <View style={styles.statsColumn}>
+            <Text style={styles.statsLabel}>Artists</Text>
+            <Text style={styles.statsValue}>{summaryData.totalArtists}</Text>
+            <View style={styles.statsDividerLine} />
+          </View>
+          <View style={styles.statsColumn}>
+            <Text style={styles.statsLabel}>Venues</Text>
+            <Text style={styles.statsValue}>{summaryData.totalVenues}</Text>
           </View>
         </View>
 
@@ -545,6 +580,53 @@ const StatisticsScreen: React.FC = () => {
                 );
               })
             )}
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <View style={styles.rankingHeader}>
+            <Text style={styles.sectionTitle}>ALL ARTISTS</Text>
+          </View>
+          {allArtistCards.length === 0 ? (
+            <Text style={styles.emptyText}>No data</Text>
+          ) : (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.allArtistsScrollContent}
+            >
+              {allArtistCards.map((artist) => (
+                <ArtistArchiveCard
+                  key={artist.name}
+                  name={artist.name}
+                  dateLabel={artist.formattedLastLiveDate}
+                  imageUrl={artist.imageUrl || artistImages[artist.name]}
+                  onPress={() => navigation.navigate('ArtistDetail', { artistName: artist.name })}
+                />
+              ))}
+            </ScrollView>
+          )}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>MONTHLY LIVES</Text>
+          <View style={styles.chartCard}>
+            <BarChart
+              data={chartData}
+              width={windowWidth - 100}
+              barWidth={24}
+              spacing={12}
+              initialSpacing={8}
+              endSpacing={8}
+              height={120}
+              yAxisLabelWidth={0}
+              yAxisThickness={0}
+              xAxisThickness={0}
+              noOfSections={Math.max(1, Math.ceil(maxMonthValue / 3))}
+              maxValue={Math.max(1, Math.ceil(maxMonthValue / 3) * 3)}
+              frontColor={PRIMARY_COLOR}
+              barBorderRadius={4}
+            />
           </View>
         </View>
 
@@ -590,43 +672,28 @@ const StatisticsScreen: React.FC = () => {
             )}
           </View>
         </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>TOTAL SPENDING</Text>
+          <View style={styles.spendingCard}>
+            <HugeiconsIcon icon={Wallet03Icon} size={28} color={PRIMARY_COLOR} strokeWidth={1.8} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.spendingLabel}>{t('statistics.yearlyTotal')}</Text>
+              <Text style={styles.spendingAmount}>
+                {priceHidden ? '¥ ••••••' : `¥ ${totalSpending.toLocaleString()}`}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={() => setPriceHidden((v) => !v)} style={styles.spendingToggle}>
+              <HugeiconsIcon
+                icon={priceHidden ? ViewOffIcon : ViewIcon}
+                size={22}
+                color={palette.spendingToggle}
+                strokeWidth={1.8}
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
       </ScrollView>
-    </View>
-  );
-};
-
-interface SummaryCardProps {
-  label: string;
-  value: number;
-  styles: ReturnType<typeof createStyles>;
-}
-
-const SummaryCard: React.FC<SummaryCardProps> = ({ label, value, styles }) => {
-  const [animatedValue, setAnimatedValue] = useState(0);
-
-  useEffect(() => {
-    const duration = 900;
-    const start = Date.now();
-
-    const tick = () => {
-      const elapsed = Date.now() - start;
-      const progress = Math.min(elapsed / duration, 1);
-      const eased = 1 - (1 - progress) * (1 - progress);
-      setAnimatedValue(Math.round(value * eased));
-
-      if (progress < 1) {
-        requestAnimationFrame(tick);
-      }
-    };
-
-    setAnimatedValue(0);
-    requestAnimationFrame(tick);
-  }, [value]);
-
-  return (
-    <View style={styles.summaryCard}>
-      <Text style={styles.summaryValue}>{animatedValue}</Text>
-      <Text style={styles.summaryLabel}>{label}</Text>
     </View>
   );
 };
@@ -646,6 +713,13 @@ interface RankingItemProps {
   styles: ReturnType<typeof createStyles>;
 }
 
+interface ArtistArchiveCardProps {
+  name: string;
+  dateLabel: string;
+  imageUrl?: string;
+  onPress?: () => void;
+}
+
 const RankingItem: React.FC<RankingItemProps> = ({ rank, name, count, imageUrl, imageShape = 'square', styles }) => {
   const getRankIcon = (r: number) => {
     if (r === 1) return MedalFirstPlaceIcon;
@@ -655,9 +729,9 @@ const RankingItem: React.FC<RankingItemProps> = ({ rank, name, count, imageUrl, 
   };
 
   const getRankIconColor = (r: number) => {
-    if (r === 1) return '#A328DD';
-    if (r === 2) return '#C06BEA';
-    if (r === 3) return '#D39AEF';
+    if (r === 1) return '#E8D490';
+    if (r === 2) return '#C5D1D8';
+    if (r === 3) return '#C58A6A';
     return '#B7B7B7';
   };
 
@@ -685,90 +759,164 @@ const RankingItem: React.FC<RankingItemProps> = ({ rank, name, count, imageUrl, 
   );
 };
 
+const ArtistArchiveCard: React.FC<ArtistArchiveCardProps> = ({ name, dateLabel, imageUrl, onPress }) => {
+  const clipPathId = `artistClipPath-${name.replace(/\s+/g, '-').toLowerCase()}`;
+
+  return (
+    <TouchableOpacity style={stylesLocal.artistCardWrap} activeOpacity={0.88} onPress={onPress}>
+      <Svg width={118} height={121} viewBox="0 0 118 121">
+        <Defs>
+          <ClipPath id={clipPathId}>
+            <Path d="M118 117.37C115.916 117.37 114.205 118.965 114.018 121H108.982C108.795 118.965 107.084 117.37 105 117.37C102.916 117.37 101.205 118.965 101.018 121H95.9824C95.7955 118.965 94.0842 117.37 92 117.37C89.9158 117.37 88.2045 118.965 88.0176 121H82.9824C82.7955 118.965 81.0842 117.37 79 117.37C76.9158 117.37 75.2045 118.965 75.0176 121H69.9824C69.7955 118.965 68.0842 117.37 66 117.37C63.9158 117.37 62.2045 118.965 62.0176 121H56.9824C56.7955 118.965 55.0842 117.37 53 117.37C50.9158 117.37 49.2045 118.965 49.0176 121H43.9824C43.7955 118.965 42.0842 117.37 40 117.37C37.9158 117.37 36.2045 118.965 36.0176 121H30.9824C30.7955 118.965 29.0842 117.37 27 117.37C24.9158 117.37 23.2045 118.965 23.0176 121H17.9824C17.7955 118.965 16.0842 117.37 14 117.37C11.9158 117.37 10.2045 118.965 10.0176 121H4.98242C4.79549 118.965 3.08422 117.37 1 117.37C0.654731 117.37 0.319595 117.414 0 117.496L0 9.98633C5.01428 9.71264 9 5.3463 9 0L108.014 0C108.005 0.165593 108 0.33227 108 0.5C108 5.74671 112.253 10 117.5 10C117.668 10 117.834 9.99492 118 9.98633L118 117.37Z" />
+          </ClipPath>
+        </Defs>
+
+        <SvgImage
+          href={imageUrl || 'https://dummyimage.com/256x256/1f1f24/707070'}
+          x={0}
+          y={0}
+          width={118}
+          height={121}
+          preserveAspectRatio="xMidYMid slice"
+          clipPath={`url(#${clipPathId})`}
+        />
+
+        <Path
+          d="M118 117.37C115.916 117.37 114.205 118.965 114.018 121H108.982C108.795 118.965 107.084 117.37 105 117.37C102.916 117.37 101.205 118.965 101.018 121H95.9824C95.7955 118.965 94.0842 117.37 92 117.37C89.9158 117.37 88.2045 118.965 88.0176 121H82.9824C82.7955 118.965 81.0842 117.37 79 117.37C76.9158 117.37 75.2045 118.965 75.0176 121H69.9824C69.7955 118.965 68.0842 117.37 66 117.37C63.9158 117.37 62.2045 118.965 62.0176 121H56.9824C56.7955 118.965 55.0842 117.37 53 117.37C50.9158 117.37 49.2045 118.965 49.0176 121H43.9824C43.7955 118.965 42.0842 117.37 40 117.37C37.9158 117.37 36.2045 118.965 36.0176 121H30.9824C30.7955 118.965 29.0842 117.37 27 117.37C24.9158 117.37 23.2045 118.965 23.0176 121H17.9824C17.7955 118.965 16.0842 117.37 14 117.37C11.9158 117.37 10.2045 118.965 10.0176 121H4.98242C4.79549 118.965 3.08422 117.37 1 117.37C0.654731 117.37 0.319595 117.414 0 117.496L0 9.98633C5.01428 9.71264 9 5.3463 9 0L108.014 0C108.005 0.165593 108 0.33227 108 0.5C108 5.74671 112.253 10 117.5 10C117.668 10 117.834 9.99492 118 9.98633L118 117.37Z"
+          fill="rgba(0,0,0,0.2)"
+        />
+      </Svg>
+
+      <View style={stylesLocal.artistCardOverlay}>
+        <Text numberOfLines={2} style={stylesLocal.artistCardName}>
+          {name}
+        </Text>
+        <Text numberOfLines={1} style={stylesLocal.artistCardDate}>
+          {dateLabel}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+};
+
+const stylesLocal = StyleSheet.create({
+  artistCardWrap: {
+    width: 118,
+    height: 121,
+    marginRight: 10,
+  },
+  artistCardOverlay: {
+    position: 'absolute',
+    left: 10,
+    right: 10,
+    bottom: 12,
+    gap: 2,
+  },
+  artistCardName: {
+    fontSize: 15,
+    lineHeight: 17,
+    fontWeight: '900',
+    color: '#FFFFFF',
+  },
+  artistCardDate: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    opacity: 0.95,
+  },
+});
+
 const createStyles = (palette: StatisticsPalette) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: palette.screenBackground,
   },
-  glassHeaderShell: {
-    backgroundColor: palette.headerBackground,
-    borderBottomWidth: 1,
-    borderBottomColor: palette.headerBorder,
-    overflow: 'hidden',
+  headerArea: {
+    paddingBottom: 8,
   },
   header: {
     paddingHorizontal: 30,
-    paddingTop: 16,
-    paddingBottom: 12,
+    paddingTop: 18,
+    paddingBottom: 20,
   },
   headerTitle: {
     fontSize: 26,
-    color: palette.primaryText,
     fontFamily: 'LINESeedJP_800ExtraBold',
+    color: palette.primaryText,
+    letterSpacing: 0.2,
   },
-  yearSelector: {
+  chipsScroll: {
+    paddingLeft: 30,
+  },
+  chipsContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 30,
-    paddingVertical: 16,
-    gap: 20,
+    paddingRight: 30,
+    gap: 10,
   },
-  yearButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: palette.yearButtonBackground,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: palette.yearButtonBorder,
+  yearChip: {
+    borderRadius: 999,
+    backgroundColor: palette.chipInactiveBackground,
+    paddingVertical: 9,
+    paddingHorizontal: 18,
+    shadowColor: palette.chipShadow,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 1,
   },
-  yearButtonDisabled: {
-    opacity: 0.5,
+  yearChipActive: {
+    backgroundColor: '#8B22E2',
   },
-  yearDisplay: {
-    fontSize: 28,
+  yearChipLabel: {
+    fontSize: 12,
     fontWeight: '800',
-    color: palette.primaryText,
-    minWidth: 80,
-    textAlign: 'center',
+    color: palette.chipInactiveText,
+  },
+  yearChipLabelActive: {
+    color: '#FFFFFF',
+  },
+  statsStrip: {
+    flexDirection: 'row',
+    marginTop: 16,
+    marginBottom: 10,
+  },
+  statsColumn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    gap: 8,
+    position: 'relative',
+  },
+  statsDividerLine: {
+    position: 'absolute',
+    right: 0,
+    top: '50%',
+    marginTop: -20,
+    height: 58,
+    width: 1,
+    backgroundColor: palette.statsDivider,
+  },
+  statsLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: palette.statsLabel,
+  },
+  statsValue: {
+    fontSize: 50,
+    fontWeight: '800',
+    fontFamily: 'LINESeedJP_800ExtraBold',
+    color: palette.statsValue,
+    lineHeight: 58,
   },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
     paddingHorizontal: 30,
-    paddingTop: 12,
+    paddingTop: 8,
     gap: 24,
-  },
-  summaryGrid: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  summaryCard: {
-    flex: 1,
-    backgroundColor: palette.cardBackground,
-    borderRadius: 20,
-    padding: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: palette.cardShadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  summaryValue: {
-    fontSize: 32,
-    fontWeight: '900',
-    color: palette.primaryText,
-    marginBottom: 6,
-  },
-  summaryLabel: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: palette.secondaryText,
   },
   section: {
     gap: 12,
@@ -811,6 +959,10 @@ const createStyles = (palette: StatisticsPalette) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+  },
+  allArtistsScrollContent: {
+    paddingHorizontal: 4,
+    paddingBottom: 2,
   },
   artistThumb: {
     width: 30,

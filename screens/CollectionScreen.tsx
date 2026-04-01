@@ -8,7 +8,7 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather, Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { HugeiconsIcon } from '@hugeicons/react-native';
-import { Tap03Icon, Search01Icon, LayoutGridIcon, LeftToRightListDashIcon, CalendarAdd01Icon, Ticket01Icon, UserMultiple02Icon } from '@hugeicons/core-free-icons';
+import { Tap03Icon, LayoutGridIcon, LeftToRightListDashIcon, Ticket01Icon, UserMultiple02Icon } from '@hugeicons/core-free-icons';
 import QRCode from 'react-native-qrcode-svg';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
@@ -168,19 +168,29 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'transparent',
     paddingHorizontal: 24,
-    paddingBottom: 5,
+    paddingBottom: 12,
   },
   headerContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 4,
-    marginBottom: 10,
+    marginTop: 8,
+    marginBottom: 12,
   },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    gap: 10,
+    paddingRight: 108,
+  },
+  headerIslandBlur: {
+    width: '100%',
+    height: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.5)',
   },
   searchingHeaderContainer: {
     flexDirection: 'row',
@@ -253,8 +263,8 @@ const styles = StyleSheet.create({
     }),
   },
   headerIconButton: {
-    width: 28,
-    height: 28,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1092,27 +1102,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'LINESeedJP_700Bold',
   },
-  floatingAddButton: {
-    position: 'absolute',
-    right: 20,
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: '#8F17C8',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.10,
-    shadowRadius: 8,
-    elevation: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.06)',
-    zIndex: 200,
-  },
-  floatingAddButtonDisabled: {
-    backgroundColor: '#e6b6fc',
-  },
 });
 
 const NextLiveCountdown: React.FC<{ date?: string; startTime?: string }> = React.memo(({ date, startTime }) => {
@@ -1175,8 +1164,6 @@ interface ArtistItem {
   latestDateTs: number;
 }
 
-type QuickFilterKey = 'year-current' | 'upcoming' | 'archive' | 'one-man';
-
 const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewRecord: (record: ChekiRecord) => Promise<void>; deleteRecord: (id: string) => Promise<void>; isPremium: boolean }> = ({ navigation, records, addNewRecord, deleteRecord, isPremium }) => {
   const { t, i18n } = useTranslation();
   const { isDark: isSystemDark } = useTheme();
@@ -1192,9 +1179,6 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
   const [filterType, setFilterType] = useState<'all' | 'upcoming' | 'past'>('all');
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [isGridLayout, setIsGridLayout] = useState(false);
-  const [isSearching, setIsSearching] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeQuickFilter, setActiveQuickFilter] = useState<QuickFilterKey | null>(null);
   const [headerHeight, setHeaderHeight] = useState(0);
   const [isListAnimating, setIsListAnimating] = useState(false);
   const [isNextLiveFlipped, setIsNextLiveFlipped] = useState(false);
@@ -1321,24 +1305,11 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
   const headerButtonSize = Math.min(46, Math.max(40, windowWidth * 0.11));
   const headerButtonRadius = headerButtonSize / 2;
   const listBottomPadding = insets.bottom + windowHeight * 0.15;
-  const floatingAddBottom = insets.bottom + 80;
-  const isAddLimitReached = !isPremium && records.length >= FREE_TICKET_LIMIT;
   const filterTop = insets.top + windowHeight * 0.10;
   const filterRight = windowWidth * 0.2;
   const emptyImageSize = Math.min(150, windowWidth * 0.38);
-  const fallbackHeaderHeight = insets.top + (isSearching ? 152 : 68);
-  const headerContentPaddingTop = Math.max(headerHeight + (isSearching ? 18 : 0), fallbackHeaderHeight);
-  const currentYear = new Date().getFullYear();
-
-  const quickFilterChips = useMemo(
-    () => [
-      { key: 'year-current' as const, label: `${currentYear}` },
-      { key: 'upcoming' as const, label: '#UPCOMING' },
-      { key: 'archive' as const, label: '#ARCHIVE' },
-      { key: 'one-man' as const, label: 'ONE-MAN' },
-    ],
-    [currentYear]
-  );
+  const fallbackHeaderHeight = insets.top + 68;
+  const headerContentPaddingTop = Math.max(headerHeight, fallbackHeaderHeight);
 
   const handleCardPress = (record: ChekiRecord) => {
     setSelectedRecord(record);
@@ -1356,31 +1327,14 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
     navigation.navigate('Add');
   };
 
-  const handleSearchPress = useCallback(() => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setIsSearching(true);
-  }, []);
-
-  const handleToggleLayoutPress = useCallback(() => {
-    setIsGridLayout((prev) => !prev);
-  }, []);
-
-  const handleCancelSearch = useCallback(() => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setIsSearching(false);
-    setSearchQuery('');
-    Keyboard.dismiss();
-  }, []);
-
-  const handleClearSearch = useCallback(() => {
-    setSearchQuery('');
-  }, []);
-
-  const handleQuickFilterPress = useCallback((nextFilter: QuickFilterKey) => {
-    setActiveQuickFilter((prev) => (prev === nextFilter ? null : nextFilter));
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {
-      // Ignore haptics errors on unsupported devices.
+  useEffect(() => {
+    const toggleLayoutSubscription = DeviceEventEmitter.addListener('app:toggleArtistGrid', () => {
+      setIsGridLayout((prev) => !prev);
     });
+
+    return () => {
+      toggleLayoutSubscription.remove();
+    };
   }, []);
 
   const handleDuplicateRecord = async (record: ChekiRecord) => {
@@ -1471,65 +1425,7 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
   };
   
   const sortedRecords = useMemo(() => [...records].sort((a, b) => toTime(b) - toTime(a)), [records]);
-  const normalizedSearchQuery = useMemo(() => searchQuery.trim().toLowerCase(), [searchQuery]);
-
-  const quickFilteredRecords = useMemo(() => {
-    const baseRecords = filterRecords(sortedRecords);
-    if (!activeQuickFilter) {
-      return baseRecords;
-    }
-
-    const now = new Date();
-    now.setHours(0, 0, 0, 0);
-
-    return baseRecords.filter((record) => {
-      const recordDate = new Date(record.date.replace(/\./g, '-'));
-      recordDate.setHours(0, 0, 0, 0);
-      const normalizedLiveType = normalizeLiveType(record.liveType);
-
-      if (activeQuickFilter === 'year-current') {
-        return recordDate.getFullYear() === currentYear;
-      }
-
-      if (activeQuickFilter === 'upcoming') {
-        return recordDate >= now;
-      }
-
-      if (activeQuickFilter === 'archive') {
-        return recordDate < now;
-      }
-
-      if (activeQuickFilter === 'one-man') {
-        return normalizedLiveType === 'one-man';
-      }
-
-      return true;
-    });
-  }, [activeQuickFilter, currentYear, filterType, sortedRecords]);
-
-  const filteredRecords = useMemo(() => {
-    const baseRecords = quickFilteredRecords;
-    if (!normalizedSearchQuery) {
-      return baseRecords;
-    }
-
-    return baseRecords.filter((record) => {
-      const setlistMatches = (setlists[record.id] || []).some(
-        (item) => item.type === 'song' && item.songName.toLowerCase().includes(normalizedSearchQuery)
-      );
-      const haystacks = [
-        record.liveName,
-        record.artist,
-        ...(record.artists || []),
-        record.venue,
-        record.date,
-        record.memo,
-        record.detail,
-      ];
-
-      return setlistMatches || haystacks.some((value) => value?.toLowerCase().includes(normalizedSearchQuery));
-    });
-  }, [quickFilteredRecords, normalizedSearchQuery, setlists]);
+  const filteredRecords = useMemo(() => filterRecords(sortedRecords), [filterType, sortedRecords]);
   const nextLiveRecord = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -1959,13 +1855,6 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
     </View>
   );
 
-  const renderSearchEmptyState = () => (
-    <View style={styles.searchEmptyStateContainer}>
-      <MaterialIcons name="sentiment-dissatisfied" size={44} color={palette.searchEmptyIcon} />
-      <Text style={[styles.searchEmptyStateText, { color: palette.secondaryText }]}>この条件のライブ記録は見つかりません</Text>
-    </View>
-  );
-
   return (
     <SafeAreaView style={[styles.listContainer, { backgroundColor: palette.screenBackground }]} edges={['left', 'right', 'bottom']}> 
       <BlurView
@@ -1984,94 +1873,16 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
           setHeaderHeight((prev) => (prev === nextHeight ? prev : nextHeight));
         }}
       >
-        {isSearching ? (
-          <View style={styles.searchHeaderContent}>
-            <View style={styles.searchingHeaderContainer}>
-              <View style={[styles.inlineSearchField, { backgroundColor: palette.searchFieldBackground }]}>
-                <TextInput
-                  value={searchQuery}
-                  onChangeText={setSearchQuery}
-                  placeholder="アーティスト、会場、曲名で検索..."
-                  placeholderTextColor={palette.tertiaryText}
-                  style={[styles.inlineSearchInput, { color: palette.primaryText }]}
-                  autoFocus={true}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  returnKeyType="search"
-                />
-                {searchQuery.length > 0 ? (
-                  <TouchableOpacity style={styles.searchClearButton} onPress={handleClearSearch} activeOpacity={0.7}>
-                    <Text style={[styles.searchClearButtonText, { color: palette.tertiaryText }]}>×</Text>
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-              <TouchableOpacity onPress={handleCancelSearch} activeOpacity={0.7}>
-                <Text style={[styles.cancelSearchText, { color: '#A226D9' }]}>キャンセル</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.quickFilterWrap}>
-              <View style={styles.quickFilterContent}>
-              {quickFilterChips.map((chip) => {
-                const isActive = activeQuickFilter === chip.key;
-                return (
-                  <TouchableOpacity
-                    key={chip.key}
-                    activeOpacity={0.75}
-                    onPress={() => handleQuickFilterPress(chip.key)}
-                    style={[
-                      styles.quickFilterChip,
-                      {
-                        borderColor: isActive ? palette.quickFilterActiveBorder : palette.quickFilterBorderInactive,
-                        backgroundColor: isActive ? palette.quickFilterActiveBackground : 'transparent',
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.quickFilterChipText,
-                        {
-                          color: isDarkMode
-                            ? '#FFFFFF'
-                            : isActive
-                              ? palette.quickFilterActiveText
-                              : palette.secondaryText,
-                          fontWeight: isActive ? '800' : '600',
-                        },
-                      ]}
-                    >
-                      {chip.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-              </View>
-            </View>
-          </View>
-        ) : (
-          <View style={styles.headerContainer}>
-            <Text style={[styles.title, { color: palette.primaryText }]}>Collection</Text>
-            <View style={styles.headerActions}>
-              <TouchableOpacity style={styles.headerIconButton} activeOpacity={0.7} onPress={handleSearchPress}>
-                <HugeiconsIcon icon={Search01Icon} size={24} color={palette.primaryText} strokeWidth={2} />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.headerIconButton} activeOpacity={0.7} onPress={handleToggleLayoutPress}>
-                <HugeiconsIcon
-                  icon={isGridLayout ? Ticket01Icon : UserMultiple02Icon}
-                  size={24}
-                  color={palette.primaryText}
-                  strokeWidth={2}
-                />
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
+        <View style={styles.headerContainer}>
+          <Text style={[styles.title, { color: palette.primaryText }]}>Collection</Text>
+          <View style={styles.headerActions} />
+        </View>
       </BlurView>
       
       <View style={{ flex: 1 }}>
         {filteredRecords.length === 0 ? (
           <View style={{ flex: 1, paddingTop: headerContentPaddingTop }}>
-            {normalizedSearchQuery || activeQuickFilter ? renderSearchEmptyState() : renderEmptyState()}
+            {renderEmptyState()}
           </View>
         ) : (
         <FlatList
@@ -2082,7 +1893,7 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
           keyExtractor={(item) => (item as { id: string }).id}
           columnWrapperStyle={isGridLayout ? styles.artistColumnWrapper : undefined}
           ListHeaderComponent={
-            !isSearching && !isGridLayout && nextLiveRecord ? (
+            !isGridLayout && nextLiveRecord ? (
               <>
                 <View style={styles.nextLiveSection}>
                   <Text style={[styles.nextLiveLabel, { color: palette.primaryText }]}>{isNextLivePast ? 'LAST LIVE' : 'NEXT LIVE'}</Text>
@@ -2286,9 +2097,9 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
 
           const recordItem = item as ChekiRecord;
           const sectionLabel = recordItem.id === firstSectionLabelRecordIds.firstUpcomingId
-            ? '#UPCOMING'
+            ? 'Up Next'
             : recordItem.id === firstSectionLabelRecordIds.firstArchiveId
-              ? '#ARCHIVE'
+              ? 'Past Events'
               : null;
 
           if (isListAnimating) {
@@ -2347,16 +2158,6 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
         />
         )}
       </View>
-
-      {!isSearching ? (
-        <TouchableOpacity
-          style={[styles.floatingAddButton, isAddLimitReached && styles.floatingAddButtonDisabled, { bottom: floatingAddBottom }]}
-          activeOpacity={0.9}
-          onPress={handleAddPress}
-        >
-          <HugeiconsIcon icon={CalendarAdd01Icon} size={26} color="#FFFFFF" strokeWidth={2.2} />
-        </TouchableOpacity>
-      ) : null}
 
       {selectedRecord && (
         <Modal
@@ -2508,16 +2309,28 @@ const AddScreen: React.FC<{ navigation: any; addNewRecord: (record: ChekiRecord)
         const rawUri = info.imageUrls[0];
         if (rawUri) {
           const normalizedUri = normalizeStoredImageUri(rawUri) || rawUri;
+          
           if (!isPersistedImageUri(normalizedUri)) {
             const newBaseName = `cover-${Date.now()}`;
             const uploaded = await uploadImage(normalizedUri, userId, newRecordId, newBaseName);
             if (uploaded) {
-              uploadedImageUrls.push(uploaded);
-              uploadedImageAssetIds.push(null);
+              if (record.imageUrls && record.imageUrls.length > 0) {
+                 const oldUri = record.imageUrls[0];
+                 try {
+                   await deleteImage(oldUri);
+                 } catch (e) {
+                   // Old image deletion failed, continue
+                 }
+              }
+
+              uploadedImageUrls = [uploaded];
+              uploadedImageAssetIds = [null];
             }
           } else {
-            uploadedImageUrls.push(normalizedUri);
-            uploadedImageAssetIds.push(null);
+            uploadedImageUrls = [normalizedUri];
+            const originalIndex = (record.imageUrls || []).indexOf(rawUri);
+            const originalAssetId = originalIndex !== -1 ? (record.imageAssetIds?.[originalIndex] ?? null) : null;
+            uploadedImageAssetIds = [originalAssetId];
           }
         }
       }
@@ -2863,6 +2676,21 @@ function CollectionStackWrapper({ records, addNewRecord, updateRecord, deleteRec
   }, []);
 
   useEffect(() => {
+    const openAddSubscription = DeviceEventEmitter.addListener('app:openAddRecord', () => {
+      if (!isPremium && records.length >= FREE_TICKET_LIMIT) {
+        navigation.navigate('Paywall');
+        return;
+      }
+
+      navigation.navigate('Add');
+    });
+
+    return () => {
+      openAddSubscription.remove();
+    };
+  }, [isPremium, navigation, records.length]);
+
+  useEffect(() => {
     if (pendingNotification && pendingNotification.recordId) {
       const record = records.find((r) => r.id === pendingNotification.recordId);
       if (record) {
@@ -2998,6 +2826,7 @@ function CollectionStackWrapper({ records, addNewRecord, updateRecord, deleteRec
         options={{
           headerShown: false,
           animation: 'slide_from_right',
+          presentation: 'modal',
           gestureEnabled: false,
           fullScreenGestureEnabled: false,
         }}

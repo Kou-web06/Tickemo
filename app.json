@@ -3,7 +3,7 @@
     "name": "Tickemo",
     "slug": "Tickemo",
     "scheme": "tickemo",
-    "version": "2.4.6",
+    "version": "2.4.8",
     "buildNumber": "19",
     "orientation": "portrait",
     "icon": "./assets/app-icon/icon1.png",

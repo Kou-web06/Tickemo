@@ -196,14 +196,6 @@ i18n.use(initReactI18next).init({
                 title: 'ライブ翌日の振り返り',
                 desc: 'ライブ翌日の10時に振り返り通知を送ります',
               },
-              nextYearReview: {
-                title: '1年前の振り返り',
-                desc: 'ライブから1年後に思い出を振り返る通知を送ります',
-              },
-              monthlyReport: {
-                title: '月末のレポート',
-                desc: '月末の22時に今月のライブレポートを送ります',
-              },
               campaigns: {
                 title: 'キャンペーン情報',
                 desc: 'キャンペーンやお得情報を通知します',
@@ -725,14 +717,6 @@ i18n.use(initReactI18next).init({
               nextDayReview: {
                 title: 'Next day review',
                 desc: 'Send a review reminder at 10:00 the next day',
-              },
-              nextYearReview: {
-                title: 'One year review',
-                desc: 'Send a memory reminder one year later',
-              },
-              monthlyReport: {
-                title: 'Monthly report',
-                desc: 'Send monthly live report at 22:00 on the last day',
               },
               campaigns: {
                 title: 'Campaign information',

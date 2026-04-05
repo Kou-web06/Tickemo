@@ -286,11 +286,6 @@ function AppContent({ showSplashOverlay }: { showSplashOverlay: boolean }) {
           // ライブ詳細画面またはカウントダウン画面へ
           moveToPage(1, false); // Countdown/Calendar画面へ
           break;
-        case 'nextYearReview':
-        case 'monthlyReport':
-          // 統計情報画面へ
-          moveToPage(2, false); // Statistics画面へ
-          break;
         case 'campaigns':
           // 設定画面へ
           setPageBeforeSettings(currentPage);

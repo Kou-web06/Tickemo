@@ -9,8 +9,6 @@ export interface NotificationSettingsState {
   beforeLive: boolean;
   onDay: boolean;
   nextDayReview: boolean;
-  nextYearReview: boolean;
-  monthlyReport: boolean;
   campaigns: boolean;
 }
 
@@ -18,8 +16,6 @@ const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettingsState = {
   beforeLive: true,
   onDay: true,
   nextDayReview: false,
-  nextYearReview: false,
-  monthlyReport: false,
   campaigns: false,
 };
 
@@ -49,10 +45,9 @@ const LEGACY_YEARLY_REPORT_TYPE = 'yearly_report';
 const NOTIFICATION_TITLE_PREP = 'チケットとタオル、持った？';
 const NOTIFICATION_TITLE_FINAL = 'そろそろスマホしまっておいて🤫';
 const NOTIFICATION_TITLE_NEXT_DAY = 'あのライブどうだった？';
-const NOTIFICATION_TITLE_NEXT_YEAR = '1年前の今日...';
-const NOTIFICATION_TITLE_MONTHLY = '今月のライブレポート';
 const LAST_SCHEDULE_KEY = '@last_live_notification_schedule';
 const SCHEDULE_LOCK_KEY = '@notification_schedule_lock';
+const SCHEDULE_SCHEMA_VERSION = 'v2';
 const MAX_SCHEDULED = 64;
 const REMINDER_VALIDATION_TOLERANCE_MS = 90 * 1000;
 
@@ -131,26 +126,7 @@ const getScheduleTargets = (record: ChekiRecord) => {
     date: dateAt(base, 10, 0, 1),
   };
 
-  const nextYear = {
-    kind: 'nextYearReview',
-    title: NOTIFICATION_TITLE_NEXT_YEAR,
-    body: `${liveName}から1年経ちました。あの日のこと覚えていますか？`,
-    date: dateAt(base, 10, 0, 365),
-  };
-
-  const monthlyReport = {
-    kind: 'monthlyReport',
-    title: NOTIFICATION_TITLE_MONTHLY,
-    body: '今月のライブ記録をチェック',
-    get date() {
-      // ライブの登録月の月末22:00に通知
-      const lastDayOfMonth = new Date(base.getFullYear(), base.getMonth() + 1, 0);
-      lastDayOfMonth.setHours(22, 0, 0, 0);
-      return lastDayOfMonth;
-    },
-  };
-
-  return [dayBefore, onDay, nextDay, nextYear, monthlyReport];
+  return [dayBefore, onDay, nextDay];
 };
 
 const getTargetDateByKind = (record: ChekiRecord, kind?: string) => {
@@ -246,7 +222,7 @@ export const scheduleLiveReminders = async (records: ChekiRecord[]) => {
 
     const notificationSettings = await getNotificationSettings();
 
-    const scheduleKey = `${formatDayKey()}|${buildRecordSignature(records)}`;
+    const scheduleKey = `${SCHEDULE_SCHEMA_VERSION}|${formatDayKey()}|${buildRecordSignature(records)}`;
     const lastKey = await AsyncStorage.getItem(LAST_SCHEDULE_KEY);
     if (lastKey === scheduleKey) {
       return;
@@ -284,10 +260,6 @@ export const scheduleLiveReminders = async (records: ChekiRecord[]) => {
             return notificationSettings.onDay;
           case 'nextDayReview':
             return notificationSettings.nextDayReview;
-          case 'nextYearReview':
-            return notificationSettings.nextYearReview;
-          case 'monthlyReport':
-            return notificationSettings.monthlyReport;
           case 'campaigns':
             return notificationSettings.campaigns;
           default:

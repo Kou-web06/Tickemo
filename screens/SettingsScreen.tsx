@@ -1458,8 +1458,6 @@ export function NotificationSettingsScreen({ navigation }: any) {
   const [notifyBeforeLive, setNotifyBeforeLive] = useState(true);
   const [notifyOnDay, setNotifyOnDay] = useState(true);
   const [notifyNextDayReview, setNotifyNextDayReview] = useState(false);
-  const [notifyNextYearReview, setNotifyNextYearReview] = useState(false);
-  const [notifyMonthlyReport, setNotifyMonthlyReport] = useState(false);
   const [notifyCampaigns, setNotifyCampaigns] = useState(false);
 
   const loadThemePreference = useCallback(async () => {
@@ -1472,8 +1470,6 @@ export function NotificationSettingsScreen({ navigation }: any) {
     setNotifyBeforeLive(settings.beforeLive);
     setNotifyOnDay(settings.onDay);
     setNotifyNextDayReview(settings.nextDayReview);
-    setNotifyNextYearReview(settings.nextYearReview);
-    setNotifyMonthlyReport(settings.monthlyReport);
     setNotifyCampaigns(settings.campaigns);
   }, []);
 
@@ -1536,8 +1532,6 @@ export function NotificationSettingsScreen({ navigation }: any) {
                   beforeLive: newValue,
                   onDay: notifyOnDay,
                   nextDayReview: notifyNextDayReview,
-                  nextYearReview: notifyNextYearReview,
-                  monthlyReport: notifyMonthlyReport,
                   campaigns: notifyCampaigns,
                 });
               }}
@@ -1561,8 +1555,6 @@ export function NotificationSettingsScreen({ navigation }: any) {
                   beforeLive: notifyBeforeLive,
                   onDay: newValue,
                   nextDayReview: notifyNextDayReview,
-                  nextYearReview: notifyNextYearReview,
-                  monthlyReport: notifyMonthlyReport,
                   campaigns: notifyCampaigns,
                 });
               }}
@@ -1586,58 +1578,6 @@ export function NotificationSettingsScreen({ navigation }: any) {
                   beforeLive: notifyBeforeLive,
                   onDay: notifyOnDay,
                   nextDayReview: newValue,
-                  nextYearReview: notifyNextYearReview,
-                  monthlyReport: notifyMonthlyReport,
-                  campaigns: notifyCampaigns,
-                });
-              }}
-            />
-          </View>
-
-          <View style={notificationStyles.row}>
-            <View style={notificationStyles.rowTextWrap}>
-              <Text style={notificationStyles.rowTitle}>{t('settings.notificationSettings.items.nextYearReview.title')}</Text>
-              <Text style={notificationStyles.rowDesc}>{t('settings.notificationSettings.items.nextYearReview.desc')}</Text>
-            </View>
-            <CustomThemeToggle
-              isDarkMode={notifyNextYearReview}
-              showIcons={false}
-              trackOnColor="#8B5CF6"
-              trackOffColor="#333333"
-              onToggle={() => {
-                const newValue = !notifyNextYearReview;
-                setNotifyNextYearReview(newValue);
-                void saveNotificationSettings({
-                  beforeLive: notifyBeforeLive,
-                  onDay: notifyOnDay,
-                  nextDayReview: notifyNextDayReview,
-                  nextYearReview: newValue,
-                  monthlyReport: notifyMonthlyReport,
-                  campaigns: notifyCampaigns,
-                });
-              }}
-            />
-          </View>
-
-          <View style={notificationStyles.row}>
-            <View style={notificationStyles.rowTextWrap}>
-              <Text style={notificationStyles.rowTitle}>{t('settings.notificationSettings.items.monthlyReport.title')}</Text>
-              <Text style={notificationStyles.rowDesc}>{t('settings.notificationSettings.items.monthlyReport.desc')}</Text>
-            </View>
-            <CustomThemeToggle
-              isDarkMode={notifyMonthlyReport}
-              showIcons={false}
-              trackOnColor="#8B5CF6"
-              trackOffColor="#333333"
-              onToggle={() => {
-                const newValue = !notifyMonthlyReport;
-                setNotifyMonthlyReport(newValue);
-                void saveNotificationSettings({
-                  beforeLive: notifyBeforeLive,
-                  onDay: notifyOnDay,
-                  nextDayReview: notifyNextDayReview,
-                  nextYearReview: notifyNextYearReview,
-                  monthlyReport: newValue,
                   campaigns: notifyCampaigns,
                 });
               }}
@@ -1661,8 +1601,6 @@ export function NotificationSettingsScreen({ navigation }: any) {
                   beforeLive: notifyBeforeLive,
                   onDay: notifyOnDay,
                   nextDayReview: notifyNextDayReview,
-                  nextYearReview: notifyNextYearReview,
-                  monthlyReport: notifyMonthlyReport,
                   campaigns: newValue,
                 });
               }}

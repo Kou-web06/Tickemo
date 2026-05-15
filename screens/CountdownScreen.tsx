@@ -21,7 +21,6 @@ import ProfileEditScreen from './ProfileEditScreen';
 import PaywallScreen from './PaywallScreen';
 import { useRecords, ChekiRecord } from '../contexts/RecordsContext';
 import ShareImageGenerator from '../components/ShareImageGenerator';
-import TodaySong from '../components/TodaySong';
 import { TicketDetail } from '../components/TicketDetail';
 import { useAppStore } from '../store/useAppStore';
 import { buildLiveAlbumName, uploadMultipleImages, uploadImage, deleteImage, normalizeStoredImageUri, resolveLocalImageUri, getTickemoRootDir } from '../lib/imageUpload';
@@ -35,9 +34,6 @@ import { DummyJacket } from '../components/DummyJacket';
 
 const Stack = createNativeStackNavigator();
 const FREE_TICKET_LIMIT = 3;
-
-// Apple Music Developer Token (JWT)
-const APPLE_MUSIC_DEVELOPER_TOKEN = 'eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjMyTVlRNk5WOTYifQ.eyJpc3MiOiJRMkxMMkI3OTJWIiwiaWF0IjoxNzY5ODQ5MDA5LCJleHAiOjE3ODU0MDEwMDksImF1ZCI6Imh0dHBzOi8vYXBwbGVpZC5hcHBsZS5jb20iLCJzdWIiOiJtZWRpYS5jb20uYW5vbnltb3VzLlRpY2tlbW8ifQ.ect6vO1q3aC9XJVYCUBVLlTHaVEcZebm0-dVZ3ak6uglI33e1ra3qcwkawXaScFFcLB8sgX5TEcFEj9QGF1Z8A';
 
 const sanitizeTicketPrice = (value: unknown): number | undefined => {
   if (typeof value === 'number') {
@@ -684,8 +680,7 @@ function CountdownMain({ navigation }: any) {
     const headerTop = insets.top + windowHeight * 0.008;
     const accordionTop = insets.top + windowHeight * 0.080;
     const countdownTop = insets.top + windowHeight * 0.10;
-    const todaySongTop = insets.top + windowHeight * 0.21;
-    const ticketHostTop = todaySongTop + Math.min(Math.max(windowHeight * 0.18, 125), 190) + 12;
+    const ticketHostTop = insets.top + windowHeight * 0.40;
 
     return (
       <View style={styles.container}>
@@ -852,16 +847,6 @@ function CountdownMain({ navigation }: any) {
             </View>
           )}
         </View>
-
-        {/* 今日の1曲 */}
-        {nextRecord?.artist && (
-          <View style={{ position: 'absolute', top: todaySongTop, left: 0, right: 0 }}>
-            <TodaySong 
-              artistName={nextRecord.artist} 
-              developerToken={APPLE_MUSIC_DEVELOPER_TOKEN}
-            />
-          </View>
-        )}
 
         {/* 下部チケット表示（旧SVG） */}
         <View

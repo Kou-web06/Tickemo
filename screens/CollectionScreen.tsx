@@ -2301,8 +2301,8 @@ const AddScreen: React.FC<{ navigation: any; addNewRecord: (record: ChekiRecord)
       
       const userId = 'local-user';
 
-      const uploadedImageUrls: string[] = [];
-      const uploadedImageAssetIds: Array<string | null> = [];
+      let uploadedImageUrls: string[] = [];
+      let uploadedImageAssetIds: Array<string | null> = [];
       const newRecordId = Crypto.randomUUID();
 
       if (info.imageUrls && info.imageUrls.length > 0) {
@@ -2314,29 +2314,18 @@ const AddScreen: React.FC<{ navigation: any; addNewRecord: (record: ChekiRecord)
             const newBaseName = `cover-${Date.now()}`;
             const uploaded = await uploadImage(normalizedUri, userId, newRecordId, newBaseName);
             if (uploaded) {
-              if (record.imageUrls && record.imageUrls.length > 0) {
-                 const oldUri = record.imageUrls[0];
-                 try {
-                   await deleteImage(oldUri);
-                 } catch (e) {
-                   // Old image deletion failed, continue
-                 }
-              }
-
               uploadedImageUrls = [uploaded];
               uploadedImageAssetIds = [null];
             }
           } else {
             uploadedImageUrls = [normalizedUri];
-            const originalIndex = (record.imageUrls || []).indexOf(rawUri);
-            const originalAssetId = originalIndex !== -1 ? (record.imageAssetIds?.[originalIndex] ?? null) : null;
-            uploadedImageAssetIds = [originalAssetId];
+            uploadedImageAssetIds = [null];
           }
         }
       }
 
 
-      const finalImageAssetIds = uploadedImageUrls.length > 0 ? [null] : [];
+      const finalImageAssetIds = uploadedImageAssetIds;
 
       const filteredArtists = (Array.isArray(info.artists) ? info.artists : [info.artist || ''])
         .map((artist: string) => artist.trim())
@@ -2378,6 +2367,7 @@ const AddScreen: React.FC<{ navigation: any; addNewRecord: (record: ChekiRecord)
       }
 
     } catch (error) {
+      console.error('[CollectionScreen/AddScreen] Failed to save record:', error);
       Alert.alert(t('collection.alerts.error'), t('collection.alerts.saveFailed'));
       caughtError = error;
     }

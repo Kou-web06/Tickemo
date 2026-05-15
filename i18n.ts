@@ -516,20 +516,6 @@ i18n.use(initReactI18next).init({
             shareFailed: '共有に失敗しました',
           },
         },
-        todaySong: {
-          title: '今日の1曲',
-          lyrics: {
-            loading: '歌詞を読み込み中...',
-            unavailable: 'この曲の歌詞は表示できません',
-          },
-          alerts: {
-            error: 'エラー',
-            playbackError: '再生エラー',
-            songUnavailable: '楽曲情報が取得できませんでした',
-            playbackFailed: '再生に失敗しました',
-            appleMusicOpenFailed: 'Apple Musicを開けませんでした',
-          },
-        },
         dateInputField: {
           selectDate: '日付を選択',
           daysShort: ['日', '月', '火', '水', '木', '金', '土'],
@@ -1036,20 +1022,6 @@ i18n.use(initReactI18next).init({
             savedToCameraRoll: 'Saved image to camera roll',
             saveFailed: 'Failed to save',
             shareFailed: 'Failed to share',
-          },
-        },
-        todaySong: {
-          title: 'Today\'s Song',
-          lyrics: {
-            loading: 'Loading lyrics...',
-            unavailable: 'Lyrics are not available for this track.',
-          },
-          alerts: {
-            error: 'Error',
-            playbackError: 'Playback Error',
-            songUnavailable: 'Could not get song information',
-            playbackFailed: 'Failed to play',
-            appleMusicOpenFailed: 'Could not open Apple Music',
           },
         },
         dateInputField: {

@@ -136,8 +136,10 @@ const getTargetDateByKind = (record: ChekiRecord, kind?: string) => {
 };
 
 export const shouldDeliverNotificationNow = async (rawData: Record<string, unknown> | undefined) => {
+  console.log('[Notifications] shouldDeliverNotificationNow rawData:', rawData);
   const type = rawData?.type;
   if (type !== REMINDER_TYPE) {
+    console.log('[Notifications] Not a live reminder, allow delivery');
     return true;
   }
 
@@ -146,30 +148,39 @@ export const shouldDeliverNotificationNow = async (rawData: Record<string, unkno
   const scheduledAt = typeof rawData?.scheduledAt === 'string' ? rawData.scheduledAt : '';
   const reminderSnapshot = typeof rawData?.reminderSnapshot === 'string' ? rawData.reminderSnapshot : '';
   if (!recordId || !kind || !scheduledAt || !reminderSnapshot) {
+    console.log('[Notifications] Missing required fields, suppressing', { recordId, kind, scheduledAt, reminderSnapshot });
     return false;
   }
 
   const scheduledDate = new Date(scheduledAt);
   if (Number.isNaN(scheduledDate.getTime())) {
+    console.log('[Notifications] scheduledAt is invalid:', scheduledAt);
     return false;
   }
 
   const lives = useAppStore.getState().lives;
   const currentRecord = lives.find((item) => item.id === recordId);
   if (!currentRecord) {
+    console.log('[Notifications] No matching record in store for id:', recordId);
     return false;
   }
 
-  if (buildReminderSnapshot(currentRecord) !== reminderSnapshot) {
+  const expectedSnapshot = buildReminderSnapshot(currentRecord);
+  if (expectedSnapshot !== reminderSnapshot) {
+    console.log('[Notifications] Reminder snapshot mismatch', { expectedSnapshot, reminderSnapshot });
     return false;
   }
 
   const expectedDate = getTargetDateByKind(currentRecord, kind);
   if (!expectedDate) {
+    console.log('[Notifications] Unable to compute expected date for kind:', kind);
     return false;
   }
 
-  return Math.abs(expectedDate.getTime() - scheduledDate.getTime()) <= REMINDER_VALIDATION_TOLERANCE_MS;
+  const diff = Math.abs(expectedDate.getTime() - scheduledDate.getTime());
+  const ok = diff <= REMINDER_VALIDATION_TOLERANCE_MS;
+  console.log('[Notifications] scheduledAt vs expected diff(ms):', diff, 'tolerance:', REMINDER_VALIDATION_TOLERANCE_MS, 'deliver:', ok);
+  return ok;
 };
 
 const formatDayKey = (date = new Date()) => {
@@ -192,7 +203,14 @@ const cancelLiveReminders = async () => {
     const type = item.content.data?.type;
     return type === REMINDER_TYPE || type === LEGACY_TIMECAPSULE_TYPE || type === LEGACY_YEARLY_REPORT_TYPE;
   });
+  if (!targets || targets.length === 0) {
+    console.log('[Notifications] No scheduled reminders to cancel');
+    return;
+  }
+
+  console.log('[Notifications] Cancelling scheduled reminders:', targets.map((t) => ({ id: t.identifier, data: t.content.data })));
   await Promise.all(targets.map((item) => Notifications.cancelScheduledNotificationAsync(item.identifier)));
+  console.log('[Notifications] Cancel complete');
 };
 
 export const scheduleLiveReminders = async (records: ChekiRecord[]) => {
@@ -215,22 +233,27 @@ export const scheduleLiveReminders = async (records: ChekiRecord[]) => {
 
   try {
     const permission = await Notifications.getPermissionsAsync();
+    console.log('[Notifications] Permissions status:', permission?.status ?? permission);
     if (permission.status !== 'granted') {
       console.log('[Notifications] Permission not granted, skipping schedule');
       return;
     }
 
     const notificationSettings = await getNotificationSettings();
+    console.log('[Notifications] Notification settings:', notificationSettings);
 
-    const scheduleKey = `${SCHEDULE_SCHEMA_VERSION}|${formatDayKey()}|${buildRecordSignature(records)}`;
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || String(new Date().getTimezoneOffset());
+    const scheduleKey = `${SCHEDULE_SCHEMA_VERSION}|${formatDayKey()}|${tz}|${buildRecordSignature(records)}`;
     const lastKey = await AsyncStorage.getItem(LAST_SCHEDULE_KEY);
     if (lastKey === scheduleKey) {
+      console.log('[Notifications] Schedule key unchanged, skipping re-schedule');
       return;
     }
 
     await cancelLiveReminders();
 
     const now = Date.now();
+    console.log('[Notifications] Now timestamp:', new Date(now).toISOString());
 
     // ライブリマインダー
     const liveTargets = records.flatMap((record) =>
@@ -239,6 +262,7 @@ export const scheduleLiveReminders = async (records: ChekiRecord[]) => {
         target,
       }))
     );
+    console.log('[Notifications] Computed liveTargets count:', liveTargets.length);
 
     const futureLiveTargets = liveTargets
       .map(({ record, target }) => ({
@@ -272,8 +296,11 @@ export const scheduleLiveReminders = async (records: ChekiRecord[]) => {
       .sort((a, b) => a.scheduledDate.getTime() - b.scheduledDate.getTime())
       .slice(0, MAX_SCHEDULED);
 
-    // スケジュール実行
+    // スケジュール実行 — Date を直接渡して絶対時刻で指定する
     for (const item of allTargets) {
+      console.log(
+        `[Notifications] Scheduling ${item.kind} for ${item.recordId} at ${item.scheduledDate.toISOString()} (local: ${item.scheduledDate.toString()})`
+      );
       await Notifications.scheduleNotificationAsync({
         content: {
           title: item.title,
@@ -286,18 +313,11 @@ export const scheduleLiveReminders = async (records: ChekiRecord[]) => {
             reminderSnapshot: 'reminderSnapshot' in item ? item.reminderSnapshot : undefined,
           },
         },
-        trigger: {
-          type: 'calendar',
-          year: item.scheduledDate.getFullYear(),
-          month: item.scheduledDate.getMonth() + 1,
-          date: item.scheduledDate.getDate(),
-          hour: item.scheduledDate.getHours(),
-          minute: item.scheduledDate.getMinutes(),
-          second: item.scheduledDate.getSeconds(),
-        } as any,
-      });
+        trigger: item.scheduledDate,
+      } as any);
     }
 
+    console.log('[Notifications] futureLiveTargets count:', futureLiveTargets.length, 'allTargets after trim:', allTargets.length);
     await AsyncStorage.setItem(LAST_SCHEDULE_KEY, scheduleKey);
     console.log(`[Notifications] Scheduled ${allTargets.length} notifications`);
   } finally {

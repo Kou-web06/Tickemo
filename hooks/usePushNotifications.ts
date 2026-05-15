@@ -8,7 +8,9 @@ import { shouldDeliverNotificationNow } from '../utils/liveNotifications';
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
     const data = notification.request.content.data as Record<string, unknown> | undefined;
+    console.log('[PushNotifications] Incoming notification content.data:', data);
     const shouldShow = await shouldDeliverNotificationNow(data);
+    console.log('[PushNotifications] handleNotification shouldShow:', shouldShow);
 
     return {
       shouldShowAlert: shouldShow,
@@ -84,6 +86,7 @@ export const usePushNotifications = (onNotificationTap?: (data: NotificationData
 
     const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data as NotificationData;
+      console.log('[PushNotifications] Notification response received:', data);
       onNotificationTap(data);
     });
 

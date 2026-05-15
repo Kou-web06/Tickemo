@@ -345,10 +345,6 @@ export default function SettingsScreen({ navigation }: any) {
       ],
     },
     {
-      title: t('settings.sections.notifications'),
-      data: [{ id: 'notifications', label: t('settings.items.notifications') }],
-    },
-    {
       title: t('settings.sections.aboutApp'),
       data: [
         { id: 'terms', label: t('settings.items.terms') },

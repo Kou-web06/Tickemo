@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, TouchableOpacity, StyleSheet, Animated, Easing, DeviceEventEmitter } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Animated, Easing, DeviceEventEmitter, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
@@ -103,7 +103,7 @@ export const FloatingTabBar: React.FC<TabBarProps> = ({ state, descriptors, navi
 
   return (
     <View style={[styles.container, { bottom: insets.bottom > 0 ? insets.bottom - 10 : 0 }]}>
-      <BlurView tint="light" intensity={80} style={styles.tabBar}>
+      <BlurView tint="light" intensity={Platform.OS === 'android' ? 20 : 80} style={styles.tabBar}>
         <View style={styles.tabBarContent}>
           {routes.map((route: any, index: number) => {
           const { options } = descriptors?.[route.key] ?? { options: {} };

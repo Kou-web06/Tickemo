@@ -238,9 +238,24 @@ const TicketCardInner: React.FC<TicketCardProps> = ({ record, width, isAnimating
               </View>
               <View style={{ flexDirection: 'row' }}>
                 <Text style={styles.detailLabel}>SEAT</Text>
-                <Text style={styles.detailValue}>
-                  {record.seat || '-'}
-                </Text>
+                {(record.seat || '-').length >= 8 ? (
+                  <View style={styles.seatTickerContainer}>
+                    <TextTicker
+                      style={styles.detailValue}
+                      duration={(record.seat || '-').length * 250}
+                      loop
+                      bounce={false}
+                      repeatSpacer={40}
+                      marqueeDelay={1000}
+                    >
+                      {record.seat || '-'}
+                    </TextTicker>
+                  </View>
+                ) : (
+                  <Text style={styles.detailValue}>
+                    {record.seat || '-'}
+                  </Text>
+                )}
               </View>
             </View>
           </View>
@@ -373,6 +388,11 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   venueTickerContainer: {
+    width: 106,
+    height: 18,
+    justifyContent: 'center',
+  },
+  seatTickerContainer: {
     width: 106,
     height: 18,
     justifyContent: 'center',

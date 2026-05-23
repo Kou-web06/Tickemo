@@ -3,8 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  NativeSyntheticEvent,
-  NativeScrollEvent,
   DeviceEventEmitter,
   TextInput,
   TouchableOpacity,
@@ -28,6 +26,7 @@ import { Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-ic
 import { HugeiconsIcon } from '@hugeicons/react-native';
 import { Add01Icon, MagicWand04Icon, AlertCircleIcon, Delete01Icon } from '@hugeicons/core-free-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { Picker } from '@react-native-picker/picker';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Crypto from 'expo-crypto';
@@ -238,13 +237,15 @@ const formatTicketPriceInput = (value: string) => {
 
 const ADD_PHOTO_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"><g clip-path="url(#clip0_4418_9255)"><path d="M9 10C10.1046 10 11 9.10457 11 8C11 6.89543 10.1046 6 9 6C7.89543 6 7 6.89543 7 8C7 9.10457 7.89543 10 9 10Z" stroke="#8c8c8c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /><path d="M13 2H9C4 2 2 4 2 9V15C2 20 4 22 9 22H15C20 22 22 20 22 15V10" stroke="#8c8c8c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /><path d="M15.75 5H21.25" stroke="#8c8c8c" stroke-width="2" stroke-linecap="round" /><path d="M18.5 7.75V2.25" stroke="#8c8c8c" stroke-width="2" stroke-linecap="round" /><path d="M2.67004 18.9496L7.60004 15.6396C8.39004 15.1096 9.53004 15.1696 10.24 15.7796L10.57 16.0696C11.35 16.7396 12.61 16.7396 13.39 16.0696L17.55 12.4996C18.33 11.8296 19.59 11.8296 20.37 12.4996L22 13.8996" stroke="#8c8c8c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></g><defs><clipPath id="clip0_4418_9255"><rect width="24" height="24" fill="white"/></clipPath></defs></svg>`;
 
+const PICKER_HOURS = Array.from({ length: 24 }, (_, i) => i);
+
 function TimePickerModal({
   visible,
   title,
   selectedTime,
   onSelect,
   onClose,
-  shouldTriggerHaptics,
+  shouldTriggerHaptics: _shouldTriggerHaptics,
 }: {
   visible: boolean;
   title: string;
@@ -253,85 +254,60 @@ function TimePickerModal({
   onClose: () => void;
   shouldTriggerHaptics: boolean;
 }) {
-  const scrollRef = useRef<ScrollView>(null);
-  const lastHapticsIndexRef = useRef(-1);
-  const timeOptionHeight = 48;
-  const timeOptions: string[] = [];
-  for (let hour = 0; hour < 24; hour++) {
-    timeOptions.push(`${String(hour).padStart(2, '0')}:00`);
-    timeOptions.push(`${String(hour).padStart(2, '0')}:30`);
-  }
+  const { t } = useTranslation();
+  const [localHour, setLocalHour] = useState(18);
+  const [localMinute, setLocalMinute] = useState(0);
 
   useEffect(() => {
     if (!visible) return;
-    const index = Math.max(0, timeOptions.indexOf(selectedTime));
-    lastHapticsIndexRef.current = index;
-    const targetOffset = index * timeOptionHeight;
-    const timer = setTimeout(() => {
-      scrollRef.current?.scrollTo({ y: targetOffset, animated: false });
-    }, 50);
-    return () => clearTimeout(timer);
-  }, [visible]);
+    const parts = selectedTime.split(':');
+    const h = parseInt(parts[0] ?? '18', 10);
+    const m = parseInt(parts[1] ?? '0', 10);
+    setLocalHour(Number.isFinite(h) ? h : 18);
+    setLocalMinute(m === 30 ? 30 : 0);
+  }, [visible, selectedTime]);
 
-  const handleTimeScrollEnd = useCallback(
-    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const offsetY = event.nativeEvent.contentOffset.y;
-      const maxIndex = timeOptions.length - 1;
-      const nextIndex = Math.max(0, Math.min(maxIndex, Math.round(offsetY / timeOptionHeight)));
-      const snappedOffset = nextIndex * timeOptionHeight;
-      scrollRef.current?.scrollTo({ y: snappedOffset, animated: true });
-
-      const nextTime = timeOptions[nextIndex];
-      if (nextTime && nextTime !== selectedTime) {
-        onSelect(nextTime);
-      }
-    },
-    [onSelect, selectedTime, timeOptions]
-  );
-
-  const handleTimeScrollEndDrag = useCallback(() => {
-    // Do nothing on scroll end drag - let momentum continue smoothly
-  }, []);
-
-  const { t } = useTranslation();
+  const handleDone = () => {
+    const formatted = `${String(localHour).padStart(2, '0')}:${String(localMinute).padStart(2, '0')}`;
+    onSelect(formatted);
+    onClose();
+  };
 
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.timePickerOverlay}>
         <View style={styles.timeModalContent}>
           <View style={styles.timeModalHeader}>
-            <TouchableOpacity onPress={onClose}>
+            <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
               <Text style={styles.timeModalCancel}>{t('liveEdit.timePicker.cancel')}</Text>
             </TouchableOpacity>
             <Text style={styles.timeModalTitle}>{title}</Text>
-            <TouchableOpacity onPress={onClose}>
+            <TouchableOpacity onPress={handleDone} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
               <Text style={styles.timeModalDone}>{t('liveEdit.timePicker.done')}</Text>
             </TouchableOpacity>
           </View>
-          <ScrollView
-            ref={scrollRef}
-            style={styles.timeOptionsScroll}
-            onMomentumScrollEnd={handleTimeScrollEnd}
-            onScrollEndDrag={handleTimeScrollEndDrag}
-            scrollEventThrottle={8}
-            decelerationRate="fast"
-            showsVerticalScrollIndicator={false}
-            bounces={false}
-            overScrollMode="never"
-          >
-            {timeOptions.map((time) => (
-              <TouchableOpacity
-                key={time}
-                style={[styles.timeOption, selectedTime === time && styles.timeOptionSelected]}
-                onPress={() => {
-                  onSelect(time);
-                  onClose();
-                }}
-              >
-                <Text style={[styles.timeOptionText, selectedTime === time && styles.timeOptionTextSelected]}>{time}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
+          <View style={styles.timePickerBody}>
+            <Picker
+              selectedValue={localHour}
+              onValueChange={(v) => setLocalHour(Number(v))}
+              style={styles.timePickerColumn}
+              itemStyle={styles.timePickerItem}
+            >
+              {PICKER_HOURS.map((h) => (
+                <Picker.Item key={h} label={String(h).padStart(2, '0')} value={h} />
+              ))}
+            </Picker>
+            <Text style={styles.timePickerColon}>:</Text>
+            <Picker
+              selectedValue={localMinute}
+              onValueChange={(v) => setLocalMinute(Number(v))}
+              style={styles.timePickerColumn}
+              itemStyle={styles.timePickerItem}
+            >
+              <Picker.Item label="00" value={0} />
+              <Picker.Item label="30" value={30} />
+            </Picker>
+          </View>
         </View>
       </View>
     </Modal>
@@ -1848,8 +1824,27 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
     elevation: 10,
   },
-  timeOptionsScroll: {
-    maxHeight: 220,
+  timePickerBody: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingBottom: 12,
+  },
+  timePickerColumn: {
+    flex: 1,
+    height: 180,
+  },
+  timePickerItem: {
+    fontSize: 24,
+    fontWeight: '600',
+    color: '#111111',
+  },
+  timePickerColon: {
+    fontSize: 30,
+    fontWeight: '700',
+    color: '#111111',
+    marginHorizontal: 4,
+    marginBottom: 2,
   },
   timeModalHeader: {
     flexDirection: 'row',
@@ -1873,24 +1868,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#D6007A',
-  },
-  timeOption: {
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F5F5F5',
-  },
-  timeOptionSelected: {
-    backgroundColor: '#FFF0F7',
-  },
-  timeOptionText: {
-    fontSize: 16,
-    color: '#666666',
-    textAlign: 'center',
-  },
-  timeOptionTextSelected: {
-    color: '#D6007A',
-    fontWeight: '600',
   },
   checkedOverlay: {
     ...StyleSheet.absoluteFillObject,

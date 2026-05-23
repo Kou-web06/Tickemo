@@ -1859,7 +1859,7 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
     <SafeAreaView style={[styles.listContainer, { backgroundColor: palette.screenBackground }]} edges={['left', 'right', 'bottom']}> 
       <BlurView
         tint={isDarkMode ? 'dark' : 'light'}
-        intensity={80}
+        intensity={Platform.OS === 'android' ? 20 : 80}
         style={[
           styles.glassHeader,
           {

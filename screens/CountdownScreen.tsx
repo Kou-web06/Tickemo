@@ -984,7 +984,7 @@ function CountdownMain({ navigation }: any) {
 
                       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <Text style={[styles.infoLabel, { width: 100 * baseScale, textAlign: 'right', fontSize: 18 * baseScale }]}>START</Text>
-                        <Text style={[styles.infoValue, { flex: 1, textAlign: 'left', fontSize: 18 * baseScale }]}>{record.startTime || '18:00'}</Text>
+                        <Text style={[styles.infoValue, { flex: 1, textAlign: 'left', fontSize: 18 * baseScale }]}>{record.endTime || record.startTime || '18:00'}</Text>
                       </View>
 
                       <View style={{ flexDirection: 'row', alignItems: 'center' }}>

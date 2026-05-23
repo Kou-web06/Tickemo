@@ -106,6 +106,9 @@ const isSetlistMarkerItem = (item: SetlistItem) => {
 };
 
 const getDisplayPrice = (record: ChekiRecord) => {
+  if (record.ticketPrice != null) {
+    return `¥${record.ticketPrice.toLocaleString()}`;
+  }
   const source = `${record.detail || ''} ${record.memo || ''}`;
   const matched = source.match(/([¥$€]\s?\d{1,3}(?:[,\.]\d{3})*)/);
   return matched?.[1] || FALLBACK_PRICE;

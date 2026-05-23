@@ -2,7 +2,7 @@ import { View, StyleSheet, DeviceEventEmitter, Animated, Dimensions, Image, Easi
 import { NavigationContainer, StackActions } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Asset } from 'expo-asset';
 import { Image as ExpoImage } from 'expo-image';
 import { useTranslation } from 'react-i18next';
@@ -412,7 +412,7 @@ function AppContent({ showSplashOverlay }: { showSplashOverlay: boolean }) {
       toValue: 1,
       duration: 240,
       easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
+      useNativeDriver: true,
     }).start();
   }, [collectionIslandReveal, currentPage]);
 
@@ -424,21 +424,39 @@ function AppContent({ showSplashOverlay }: { showSplashOverlay: boolean }) {
     };
   }, []);
 
-  const collectionLeftIslandStyle = {
-    width: collectionIslandReveal.interpolate({
-      inputRange: [0, 1],
-      outputRange: [0, 44],
-    }),
+  const collectionLeftIslandStyle = useMemo(() => ({
     opacity: collectionIslandReveal,
     transform: [
       {
         translateX: collectionIslandReveal.interpolate({
           inputRange: [0, 1],
-          outputRange: [14, 0],
+          outputRange: [-30, 0],
         }),
       },
     ],
-  } as const;
+  }), [collectionIslandReveal]);
+
+  // Stable page content references — prevent re-renders of heavy screens when AppContent state changes
+  const page0 = useMemo(() => (
+    <NavigationContainer independent={true}>
+      <CollectionScreen />
+    </NavigationContainer>
+  ), []);
+  const page1 = useMemo(() => (
+    <NavigationContainer independent={true}>
+      <CalendarScreen />
+    </NavigationContainer>
+  ), []);
+  const page2 = useMemo(() => (
+    <NavigationContainer independent={true}>
+      <StatisticsStackScreen />
+    </NavigationContainer>
+  ), []);
+  const page3 = useMemo(() => (
+    <NavigationContainer independent={true} ref={settingsNavigationRef}>
+      <SettingsStackScreen />
+    </NavigationContainer>
+  ), []);
 
   const getPageLayerStyle = (index: number) => {
     if (!tabTransition) {
@@ -535,44 +553,28 @@ function AppContent({ showSplashOverlay }: { showSplashOverlay: boolean }) {
             style={getPageLayerStyle(0)}
             pointerEvents={getPagePointerEvents(0)}
           >
-            {shouldRenderPage(0) ? (
-              <NavigationContainer independent={true}>
-                <CollectionScreen />
-              </NavigationContainer>
-            ) : null}
+            {shouldRenderPage(0) ? page0 : null}
           </Animated.View>
 
           <Animated.View
             style={getPageLayerStyle(1)}
             pointerEvents={getPagePointerEvents(1)}
           >
-            {shouldRenderPage(1) ? (
-              <NavigationContainer independent={true}>
-                <CalendarScreen />
-              </NavigationContainer>
-            ) : null}
+            {shouldRenderPage(1) ? page1 : null}
           </Animated.View>
 
           <Animated.View
             style={getPageLayerStyle(2)}
             pointerEvents={getPagePointerEvents(2)}
           >
-            {shouldRenderPage(2) ? (
-              <NavigationContainer independent={true}>
-                <StatisticsStackScreen />
-              </NavigationContainer>
-            ) : null}
+            {shouldRenderPage(2) ? page2 : null}
           </Animated.View>
 
           <Animated.View
             style={getPageLayerStyle(3)}
             pointerEvents={getPagePointerEvents(3)}
           >
-            {shouldRenderPage(3) ? (
-              <NavigationContainer independent={true} ref={settingsNavigationRef}>
-                <SettingsStackScreen />
-              </NavigationContainer>
-            ) : null}
+            {shouldRenderPage(3) ? page3 : null}
           </Animated.View>
         </View>
 
@@ -621,19 +623,21 @@ function AppContent({ showSplashOverlay }: { showSplashOverlay: boolean }) {
           currentPage === 0 ? (
             <>
               <View style={[styles.floatingMyPageIsland, { top: insets.top + 12 }]}>
-                <Animated.View style={[styles.floatingIslandLeftWrap, collectionLeftIslandStyle]}>
-                  <TouchableOpacity
-                    style={styles.floatingIslandAction}
-                    activeOpacity={0.82}
-                    onPress={handleToggleArtistGrid}
-                    accessibilityRole="button"
-                    accessibilityLabel={isArtistGridActive ? 'Ticket List' : 'Artist Grid'}
-                  >
-                    <HugeiconsIcon icon={isArtistGridActive ? Ticket01Icon : UserMultiple02Icon} size={22} color="#2F2A33" strokeWidth={2} />
-                  </TouchableOpacity>
-                </Animated.View>
+                <View style={styles.floatingIslandLeftWrap}>
+                  <Animated.View style={collectionLeftIslandStyle}>
+                    <TouchableOpacity
+                      style={styles.floatingIslandAction}
+                      activeOpacity={0.82}
+                      onPress={handleToggleArtistGrid}
+                      accessibilityRole="button"
+                      accessibilityLabel={isArtistGridActive ? 'Ticket List' : 'Artist Grid'}
+                    >
+                      <HugeiconsIcon icon={isArtistGridActive ? Ticket01Icon : UserMultiple02Icon} size={22} color="#2F2A33" strokeWidth={2} />
+                    </TouchableOpacity>
+                  </Animated.View>
+                </View>
 
-                <Animated.View style={[styles.floatingIslandDivider, { opacity: collectionLeftIslandStyle.opacity }]} />
+                <Animated.View style={[styles.floatingIslandDivider, { opacity: collectionIslandReveal }]} />
 
                 <TouchableOpacity
                   style={styles.floatingIslandAction}
@@ -989,6 +993,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   floatingIslandLeftWrap: {
+    width: 44,
     height: 44,
     overflow: 'hidden',
   },

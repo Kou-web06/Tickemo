@@ -386,7 +386,7 @@ i18n.use(initReactI18next).init({
           },
           timePicker: {
             startTitle: '開始時間を選択',
-            endTitle: '終了時間を選択',
+            endTitle: '開演時間を選択',
             cancel: 'キャンセル',
             done: '完了',
           },

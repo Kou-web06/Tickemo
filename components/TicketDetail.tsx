@@ -24,7 +24,7 @@ import { AppleMusicIcon, Delete01Icon, Edit01Icon, NewReleasesIcon, QuoteUpIcon,
 import QRCode from 'react-native-qrcode-svg';
 import { ChekiRecord, useRecords } from '../contexts/RecordsContext';
 import LiveEditScreen from '../screens/LiveEditScreen';
-import { deleteImage, uploadMultipleImages } from '../lib/imageUpload';
+import { deleteImage, uploadImage, normalizeStoredImageUri } from '../lib/imageUpload';
 import { getSetlist, saveSetlist } from '../lib/setlistDb';
 import { getAppleMusicSongUrl, searchAppleMusicSongs } from '../utils/appleMusicApi';
 import { LIVE_TYPE_ICON_MAP, normalizeLiveType } from '../utils/liveType';
@@ -166,6 +166,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
   const [setlistSongs, setSetlistSongs] = useState<SetlistItem[]>([]);
   const [isSetlistExpanded, setIsSetlistExpanded] = useState(false);
   const [showEditScreen, setShowEditScreen] = useState(false);
+  const editSavedRef = useRef(false);
   const [showShareGenerator, setShowShareGenerator] = useState(false);
   const [musicProvider, setMusicProvider] = useState<MusicProvider>('spotify');
   const [loadingTrackId, setLoadingTrackId] = useState<string | null>(null);
@@ -533,18 +534,31 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
       let uploadedImageUrls: string[] = [];
 
       if (info.imageUrls && info.imageUrls.length > 0) {
-        uploadedImageUrls.push(...info.imageUrls.filter((uri) => !uri.startsWith('file://')));
-        const newImageFileUris = info.imageUrls.filter((uri) => uri.startsWith('file://'));
-        if (newImageFileUris.length > 0) {
-          const uploadResult = await uploadMultipleImages(newImageFileUris, userId, record.id);
-          uploadedImageUrls.push(...uploadResult.imageUrls);
+        for (const rawUri of info.imageUrls) {
+          if (!rawUri) continue;
+          // Normalize to detect already-persisted paths (Tickemo/ relative or remote URL)
+          const normalizedUri = normalizeStoredImageUri(rawUri) || rawUri;
+          if (normalizedUri.startsWith('Tickemo/') || normalizedUri.startsWith('http://') || normalizedUri.startsWith('https://')) {
+            // Already persisted – keep as-is, no re-upload needed
+            uploadedImageUrls.push(normalizedUri);
+          } else {
+            // New image from picker – use timestamp filename to guarantee unique path
+            // (avoids expo-image cache collision when overwriting same filename)
+            const baseName = `cover-${Date.now()}`;
+            const uploaded = await uploadImage(rawUri, userId, record.id, baseName);
+            if (uploaded) uploadedImageUrls.push(uploaded);
+          }
         }
       }
 
-      if (uploadedImageUrls.length > 0 && record.imageUrls?.length) {
-        for (const oldImageUrl of record.imageUrls) {
+      // Delete old images only if they are not reused in the new set
+      if (record.imageUrls?.length) {
+        const newPathSet = new Set(uploadedImageUrls.map((u) => normalizeStoredImageUri(u) || u));
+        for (const oldUrl of record.imageUrls) {
+          const normalizedOld = normalizeStoredImageUri(oldUrl) || oldUrl;
+          if (newPathSet.has(normalizedOld)) continue;
           try {
-            await deleteImage(oldImageUrl);
+            await deleteImage(oldUrl);
           } catch (error) {
             // 画像削除失敗時も更新処理は継続
           }
@@ -565,7 +579,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
         ticketPrice: info.ticketPrice ?? record.ticketPrice,
         startTime: info.startTime,
         endTime: info.endTime,
-        imageUrls: uploadedImageUrls.length > 0 ? uploadedImageUrls : (info.imageUrls || record.imageUrls || []),
+        imageUrls: uploadedImageUrls,
         memo: info.memo ?? record.memo,
         detail: info.detail ?? record.detail,
         qrCode: info.qrCode ?? record.qrCode,
@@ -576,6 +590,8 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
       if (info.setlistSongs) {
         await saveSetlist(record.id, info.setlistSongs);
       }
+
+      editSavedRef.current = true;
     } catch (error) {
       console.error('[TicketDetail] ライブ情報保存エラー:', error);
       Alert.alert('エラー', 'ライブ情報の保存に失敗しました。もう一度お試しください。');
@@ -917,7 +933,13 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
             setlistSongs,
           }}
           onSave={handleSaveLiveInfo}
-          onCancel={() => setShowEditScreen(false)}
+          onCancel={() => {
+            setShowEditScreen(false);
+            if (editSavedRef.current) {
+              editSavedRef.current = false;
+              onBack?.();
+            }
+          }}
         />
       </Modal>
 

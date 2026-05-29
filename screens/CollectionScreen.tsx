@@ -2393,7 +2393,7 @@ const EditScreen: React.FC<{ route: any; navigation: any; records: ChekiRecord[]
   
   const resolvedImageUrls = useMemo(() => {
     return (record?.imageUrls || []).map((url: string) => resolveLocalImageUri(url));
-  }, [record?.id]);
+  }, [record?.id, record?.imageUrls]);
   
   const dedupeImageEntries = useCallback(
     (urls: string[], assetIds: Array<string | null>): { urls: string[]; assetIds: Array<string | null> } => {
@@ -2481,6 +2481,9 @@ const EditScreen: React.FC<{ route: any; navigation: any; records: ChekiRecord[]
         seat: info.seat || '',
         ticketPrice: sanitizeTicketPrice(info.ticketPrice) ?? sanitizeTicketPrice(record.ticketPrice),
         startTime: info.startTime || '',
+        endTime: info.endTime || '',
+        imageUrls: uploadedImageUrls,
+        imageAssetIds: uploadedImageAssetIds,
         memo: info.memo || '',
         detail: info.detail || '',
         qrCode: info.qrCode || '',

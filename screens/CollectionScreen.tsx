@@ -1180,21 +1180,14 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [isGridLayout, setIsGridLayout] = useState(false);
   const [headerHeight, setHeaderHeight] = useState(0);
-  const [isListAnimating, setIsListAnimating] = useState(false);
   const [isNextLiveFlipped, setIsNextLiveFlipped] = useState(false);
   const [isOpeningTodaySongCta, setIsOpeningTodaySongCta] = useState(false);
   const [todaySongForNextLive, setTodaySongForNextLive] = useState<AppleMusicSong | null>(null);
   const [musicProvider, setMusicProvider] = useState<MusicProvider>('spotify');
   const [manualDarkMode, setManualDarkMode] = useState<boolean | null | undefined>(() => getCachedThemePreference());
-  const itemAnimations = useRef(new Map<string, Animated.Value>()).current;
   const nextLiveFlipAnim = useRef(new Animated.Value(0)).current;
   const nextLiveFlippedRef = useRef(false);
-  const didInitialListAnimation = useRef(false);
-  const prevFilterType = useRef(filterType);
   const prefetchedCollectionImageUris = useRef(new Set<string>()).current;
-  const renderCountRef = useRef(0);
-  
-  renderCountRef.current++;
 
   const loadThemePreference = useCallback(async () => {
     const value = await hydrateThemePreference();
@@ -1218,16 +1211,12 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
       } else {
         void loadThemePreference();
       }
-      setIsListAnimating(false);
-      itemAnimations.forEach((value) => {
-        value.setValue(1);
-      });
     });
 
     return () => {
       subscription.remove();
     };
-  }, [itemAnimations, loadThemePreference]);
+  }, [loadThemePreference]);
 
   useEffect(() => {
     const loadMusicProvider = async () => {
@@ -1315,9 +1304,9 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
     setSelectedRecord(record);
   };
 
-  const handleCloseModal = () => {
+  const handleCloseModal = useCallback(() => {
     setSelectedRecord(null);
-  };
+  }, []);
 
   const handleAddPress = () => {
     if (!isPremium && records.length >= FREE_TICKET_LIMIT) {
@@ -1780,58 +1769,6 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
     return { iconSource, label, url, isEnabled };
   }, [musicProvider, nextLiveRecord?.artist, todaySongDisplay]);
 
-  const getItemAnimation = (id: string) => {
-    const existing = itemAnimations.get(id);
-    if (existing) return existing;
-    const value = new Animated.Value(1);
-    itemAnimations.set(id, value);
-    return value;
-  };
-
-  useEffect(() => {
-    const ids = new Set(displayData.map((item) => item.id));
-    itemAnimations.forEach((_, key) => {
-      if (!ids.has(key)) {
-        itemAnimations.delete(key);
-      }
-    });
-
-    if (displayData.length === 0) {
-      setIsListAnimating(false);
-      return;
-    }
-
-    const filterChanged = prevFilterType.current !== filterType;
-    prevFilterType.current = filterType;
-
-    const shouldAnimate = !didInitialListAnimation.current;
-    if (!shouldAnimate) {
-      setIsListAnimating(false);
-      displayData.forEach((item) => {
-        getItemAnimation(item.id).setValue(1);
-      });
-      return;
-    }
-
-    didInitialListAnimation.current = true;
-    setIsListAnimating(true);
-
-    displayData.forEach((item) => {
-      getItemAnimation(item.id).setValue(0);
-    });
-
-    const animations = displayData.map((item) =>
-      Animated.timing(getItemAnimation(item.id), {
-        toValue: 1,
-        duration: 260,
-        useNativeDriver: true,
-      })
-    );
-
-    Animated.stagger(70, animations).start(() => {
-      setIsListAnimating(false);
-    });
-  }, [displayData, itemAnimations, filterType]);
 
   if (!fontsLoaded) {
     return <View style={[styles.listContainer, { backgroundColor: palette.screenBackground }]} />;
@@ -2081,18 +2018,6 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
             );
           }
 
-          const itemAnim = getItemAnimation(item.id);
-          const animatedStyle = {
-            opacity: itemAnim,
-            transform: [
-              {
-                translateY: itemAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [18, 0],
-                }),
-              },
-            ],
-          } as const;
           if (item.id === 'empty-state') return null;
 
           const recordItem = item as ChekiRecord;
@@ -2101,32 +2026,6 @@ const ListScreen: React.FC<{ navigation: any; records: ChekiRecord[]; addNewReco
             : recordItem.id === firstSectionLabelRecordIds.firstArchiveId
               ? 'Past Events'
               : null;
-
-          if (isListAnimating) {
-            return (
-              <Animated.View
-                style={animatedStyle}
-              >
-                <TouchableOpacity
-                  style={{ width: currentCardWidth, marginBottom: 12, alignSelf: isGridLayout ? 'auto' : 'center' }}
-                  onPress={() => handleCardPress(recordItem)}
-                  onLongPress={() => handleLongPress(recordItem)}
-                  activeOpacity={0.9}
-                >
-                  {sectionLabel ? (
-                    <Text style={[styles.sectionLeadLabelText, { color: isDarkMode ? '#FFFFFF' : '#343434' }]}>{sectionLabel}</Text>
-                  ) : null}
-                  <TicketCard
-                    record={recordItem}
-                    width={currentCardWidth}
-                    isAnimating={false}
-                    animationDirection="out"
-                    onAnimationEnd={() => {}}
-                  />
-                </TouchableOpacity>
-              </Animated.View>
-            );
-          }
 
           return (
             <TouchableOpacity

@@ -24,7 +24,8 @@ import { Image } from 'expo-image';
 import { SvgXml } from 'react-native-svg';
 import { Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 import { HugeiconsIcon } from '@hugeicons/react-native';
-import { Add01Icon, MagicWand04Icon, AlertCircleIcon, Delete01Icon } from '@hugeicons/core-free-icons';
+import { Add01Icon, AlertCircleIcon, Delete01Icon, MagicWand04Icon } from '@hugeicons/core-free-icons';
+import { InteractionManager } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Picker } from '@react-native-picker/picker';
 import * as MediaLibrary from 'expo-media-library';
@@ -451,7 +452,9 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
     hasHandledSuccessClose.current = true;
     if (successCloseTimeout.current) clearTimeout(successCloseTimeout.current);
     setShowSuccess(false);
-    onCancelRef.current();
+    InteractionManager.runAfterInteractions(() => {
+      onCancelRef.current();
+    });
   }, []);
 
   useEffect(() => {
@@ -1125,9 +1128,8 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
         detail: detail || '',
         setlistSongs: nextSetlistSongs,
       });
-
-      setSuccessOverlayKey((prev) => prev + 1);
-      setShowSuccess(true);
+      isSubmittingRef.current = false;
+      onCancelRef.current();
     } catch {
       isSubmittingRef.current = false;
     }

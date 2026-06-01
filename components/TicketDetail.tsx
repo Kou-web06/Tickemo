@@ -6,7 +6,6 @@ import {
   Dimensions,
   LayoutAnimation,
   Linking,
-  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -167,6 +166,8 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
   const [isSetlistExpanded, setIsSetlistExpanded] = useState(false);
   const [showEditScreen, setShowEditScreen] = useState(false);
   const editSavedRef = useRef(false);
+  const closeOuterAfterEditDismissRef = useRef(false);
+  const [editInitialData, setEditInitialData] = useState<LiveInfo | null>(null);
   const [showShareGenerator, setShowShareGenerator] = useState(false);
   const [musicProvider, setMusicProvider] = useState<MusicProvider>('spotify');
   const [loadingTrackId, setLoadingTrackId] = useState<string | null>(null);
@@ -367,6 +368,19 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
   }, [record.id]);
 
   useEffect(() => {
+    if (showEditScreen) {
+      return;
+    }
+
+    if (!closeOuterAfterEditDismissRef.current) {
+      return;
+    }
+
+    closeOuterAfterEditDismissRef.current = false;
+    onBack?.();
+  }, [showEditScreen, onBack]);
+
+  useEffect(() => {
     let mounted = true;
 
     const loadSeenNewSongKeys = async () => {
@@ -509,6 +523,26 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
     } catch (error) {
       // Hapticsが失敗しても編集遷移は継続
     }
+    closeOuterAfterEditDismissRef.current = false;
+    setEditInitialData({
+      name: record.liveName,
+      artists: record.artists && record.artists.length > 0 ? record.artists : [record.artist || ''],
+      artist: record.artist || '',
+      artistImageUrls: record.artistImageUrls,
+      liveType: record.liveType,
+      artistImageUrl: record.artistImageUrl,
+      date: new Date(record.date.replace(/\./g, '-')),
+      venue: record.venue || '',
+      seat: record.seat,
+      ticketPrice: record.ticketPrice,
+      startTime: record.startTime || '18:00',
+      endTime: record.endTime || '20:00',
+      imageUrls: record.imageUrls,
+      qrCode: record.qrCode,
+      memo: record.memo,
+      detail: record.detail,
+      setlistSongs,
+    });
     setShowEditScreen(true);
   };
 
@@ -906,42 +940,22 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) =>
         </View>
       </View>
 
-      <Modal
-        visible={showEditScreen}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setShowEditScreen(false)}
-      >
-        <LiveEditScreen
-          initialData={{
-            name: record.liveName,
-            artists: record.artists && record.artists.length > 0 ? record.artists : [record.artist || ''],
-            artist: record.artist || '',
-            artistImageUrls: record.artistImageUrls,
-            liveType: record.liveType,
-            artistImageUrl: record.artistImageUrl,
-            date: new Date(record.date.replace(/\./g, '-')),
-            venue: record.venue || '',
-            seat: record.seat,
-            ticketPrice: record.ticketPrice,
-            startTime: record.startTime || '18:00',
-            endTime: record.endTime || '20:00',
-            imageUrls: record.imageUrls,
-            qrCode: record.qrCode,
-            memo: record.memo,
-            detail: record.detail,
-            setlistSongs,
-          }}
-          onSave={handleSaveLiveInfo}
-          onCancel={() => {
-            setShowEditScreen(false);
-            if (editSavedRef.current) {
+      {showEditScreen && (
+        <View style={styles.editScreenOverlay}>
+          <LiveEditScreen
+            initialData={editInitialData}
+            onSave={handleSaveLiveInfo}
+            onCancel={() => {
+              const wasSaved = editSavedRef.current;
               editSavedRef.current = false;
-              onBack?.();
-            }
-          }}
-        />
-      </Modal>
+              if (wasSaved) {
+                closeOuterAfterEditDismissRef.current = true;
+              }
+              setShowEditScreen(false);
+            }}
+          />
+        </View>
+      )}
 
       <ShareImageGenerator
         record={record}
@@ -1013,6 +1027,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 10,
+  },
+  editScreenOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#FFFFFF',
+    zIndex: 50,
+    elevation: 50,
   },
   qrBox: {
     position: 'absolute',

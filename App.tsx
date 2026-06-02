@@ -12,7 +12,8 @@ import CollectionScreen from './screens/CollectionScreen';
 import CalendarScreen from './screens/CalendarScreen';
 import StatisticsScreen from './screens/StatisticsScreen';
 import ArtistDetailScreen from './screens/ArtistDetailScreen';
-import SettingsScreen, { FAQScreen, MusicProviderScreen, NotificationSettingsScreen } from './screens/SettingsScreen';
+import SettingsScreen, { FAQScreen, MusicProviderScreen, NotificationSettingsScreen, LanguageScreen } from './screens/SettingsScreen';
+import { loadAndApplyLanguagePreference } from './i18n';
 import ProfileEditScreen from './screens/ProfileEditScreen';
 import ICloudSyncScreen from './screens/ICloudSyncScreen';
 import { PaywallScreen } from './screens';
@@ -126,6 +127,16 @@ function SettingsStackScreen() {
       <SettingsStack.Screen
         name="NotificationSettings"
         component={NotificationSettingsScreen}
+        options={{
+          animation: 'slide_from_right',
+          presentation: 'card',
+          gestureEnabled: false,
+          fullScreenGestureEnabled: false,
+        }}
+      />
+      <SettingsStack.Screen
+        name="Language"
+        component={LanguageScreen}
         options={{
           animation: 'slide_from_right',
           presentation: 'card',
@@ -692,6 +703,10 @@ export default function App() {
     };
 
     ensureFirstLaunch();
+  }, []);
+
+  useEffect(() => {
+    void loadAndApplyLanguagePreference();
   }, []);
 
   useEffect(() => {

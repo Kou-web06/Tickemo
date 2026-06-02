@@ -1,12 +1,20 @@
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import { getLocales } from 'expo-localization';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { setAppleMusicLocale } from './utils/appleMusicApi';
+
+export const LANGUAGE_STORAGE_KEY = '@language_preference';
+export type AppLanguage = 'system' | 'ja' | 'en';
+
+const getAppleMusicLocale = (lang: 'ja' | 'en'): string =>
+  lang === 'ja' ? 'ja-JP' : 'en-US';
 
 const resolveInitialLanguage = (): 'ja' | 'en' => {
   const locale = getLocales()[0];
   const languageCode = locale?.languageCode?.toLowerCase();
   const languageTag = locale?.languageTag?.toLowerCase();
-  const normalized = languageCode || languageTag?.split('-')[0] || 'ja';
+  const normalized = languageCode || languageTag?.split('-')[0] || 'en';
   if (normalized === 'ja') return 'ja';
   return 'en';
 };
@@ -65,6 +73,7 @@ i18n.use(initReactI18next).init({
             darkMode: 'テーマ',
             haptics: '触覚',
             musicProvider: 'Music Provider',
+            language: '言語',
             icloudSync: 'iCloud同期',
             notifications: '通知',
             appleMusic: 'Data provided by Apple Music',
@@ -179,6 +188,14 @@ i18n.use(initReactI18next).init({
             apple: 'Apple Music',
             spotify: 'Spotify',
             caption: '選択したサービスは曲リンクやアーティストページ遷移で使用されます。',
+          },
+          language: {
+            header: '言語',
+            sectionLabel: '表示言語を選択',
+            system: '端末の設定に従う',
+            japanese: '日本語',
+            english: 'English',
+            caption: '言語を変更するとアーティスト名・楽曲名の検索結果の表記が変わります。',
           },
           notificationSettings: {
             header: '通知設定',
@@ -374,6 +391,11 @@ i18n.use(initReactI18next).init({
             coverArt: 'カバーアート（表紙）',
             qrCode: 'QRコード（公式サイト、チケット、SNS等のURL）',
             memories: '思い出（メモ）',
+            doorsOpen: '開場',
+            showStart: '開演',
+            price: '料金',
+            memo: '感想',
+            setlistTitle: 'セットリスト',
           },
           placeholders: {
             liveName: '例: どんぐりTOUR 2026',
@@ -477,6 +499,15 @@ i18n.use(initReactI18next).init({
               cameraLaunchFailed: 'カメラの起動に失敗しました。再度お試しください。',
             },
           },
+          addArtist: '+ 別のアーティストを追加',
+          priceUnit: '円',
+          priceFormat: '{{value}}円',
+          ocrReview: {
+            headerTitle: '読み取った結果の確認',
+            summary: '{{count}}曲を読み取りました',
+            tapToEdit: 'タップで編集',
+            songPlaceholder: '曲名を入力',
+          },
         },
         ticketDetail: {
           defaultLiveName: 'このライブ',
@@ -573,6 +604,7 @@ i18n.use(initReactI18next).init({
             darkMode: 'Theme',
             haptics: 'Haptics',
             musicProvider: 'Music Provider',
+            language: 'Language',
             icloudSync: 'iCloud Sync',
             notifications: 'Notifications',
             appleMusic: 'Data provided by Apple Music',
@@ -687,6 +719,14 @@ i18n.use(initReactI18next).init({
             apple: 'Apple Music',
             spotify: 'Spotify',
             caption: 'The selected service is used for song links and artist page navigation.',
+          },
+          language: {
+            header: 'Language',
+            sectionLabel: 'Select display language',
+            system: 'System Default',
+            japanese: '日本語',
+            english: 'English',
+            caption: 'Changing the language affects how artist and song names appear in search results.',
           },
           notificationSettings: {
             header: 'Notification Settings',
@@ -882,6 +922,11 @@ i18n.use(initReactI18next).init({
             coverArt: 'Cover Art',
             qrCode: 'QR Code (official site, ticket, SNS URL)',
             memories: 'Memories (Memo)',
+            doorsOpen: 'Doors',
+            showStart: 'Start',
+            price: 'Price',
+            memo: 'Notes',
+            setlistTitle: 'Setlist',
           },
           placeholders: {
             liveName: 'e.g. Donguri TOUR 2026',
@@ -985,6 +1030,15 @@ i18n.use(initReactI18next).init({
               cameraLaunchFailed: 'Failed to launch camera. Please try again.',
             },
           },
+          addArtist: '+ Add another artist',
+          priceUnit: 'JPY',
+          priceFormat: '¥{{value}}',
+          ocrReview: {
+            headerTitle: 'Review Extracted Text',
+            summary: '{{count}} songs recognized',
+            tapToEdit: 'Tap to edit',
+            songPlaceholder: 'Song title',
+          },
         },
         ticketDetail: {
           defaultLiveName: 'this live',
@@ -1044,5 +1098,32 @@ i18n.use(initReactI18next).init({
     useSuspense: false,
   },
 });
+
+export async function loadAndApplyLanguagePreference(): Promise<void> {
+  try {
+    const stored = await AsyncStorage.getItem(LANGUAGE_STORAGE_KEY);
+    if (stored === 'ja' || stored === 'en') {
+      await i18n.changeLanguage(stored);
+      setAppleMusicLocale(getAppleMusicLocale(stored));
+    } else if (stored === 'system' || stored === null) {
+      const resolved = resolveInitialLanguage();
+      await i18n.changeLanguage(resolved);
+      setAppleMusicLocale(getAppleMusicLocale(resolved));
+    }
+  } catch {
+    // Ignore preference load errors.
+  }
+}
+
+export async function setLanguage(lang: AppLanguage): Promise<void> {
+  try {
+    await AsyncStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
+  } catch {
+    // Ignore preference save errors.
+  }
+  const resolved = lang === 'system' ? resolveInitialLanguage() : lang;
+  await i18n.changeLanguage(resolved);
+  setAppleMusicLocale(getAppleMusicLocale(resolved));
+}
 
 export default i18n;

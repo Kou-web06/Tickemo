@@ -4,7 +4,16 @@
  */
 
 const APPLE_MUSIC_STOREFRONT = 'jp';
-const APPLE_MUSIC_LOCALE = 'ja-JP';
+let APPLE_MUSIC_LOCALE = 'ja-JP';
+
+export const setAppleMusicLocale = (locale: string): void => {
+  if (locale === APPLE_MUSIC_LOCALE) return;
+  APPLE_MUSIC_LOCALE = locale;
+  songSearchCache.clear();
+  artistSearchCache.clear();
+  songSearchInFlight.clear();
+  artistSearchInFlight.clear();
+};
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 
 type SearchCacheEntry<T> = {

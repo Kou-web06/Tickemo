@@ -43,6 +43,7 @@ import {
   saveThemePreference,
   setThemePreferenceCache,
 } from '../lib/themePreference';
+import { setLanguage as applyLanguageSetting } from '../i18n';
 import { useFonts, LINESeedJP_400Regular, LINESeedJP_700Bold, LINESeedJP_800ExtraBold } from '@expo-google-fonts/line-seed-jp';
 import { useTheme, lightTheme, darkTheme } from '../src/theme';
 import { getNotificationSettings, saveNotificationSettings } from '../utils/liveNotifications';
@@ -66,6 +67,9 @@ interface SettingSection {
 const APP_STORE_URL = 'https://apps.apple.com/ja/app/tickemo-%E3%83%A9%E3%82%A4%E3%83%96%E3%81%AE%E6%80%9D%E3%81%84%E5%87%BA%E3%82%92%E8%A8%98%E9%8C%B2/id6758604980';
 const HAPTICS_ENABLED_KEY = '@haptics_enabled';
 const MUSIC_PROVIDER_KEY = '@music_provider';
+const LANGUAGE_KEY = '@language_preference';
+
+type AppLanguage = 'system' | 'ja' | 'en';
 
 type MusicProvider = 'spotify' | 'apple';
 
@@ -233,6 +237,7 @@ export default function SettingsScreen({ navigation }: any) {
   const [manualDarkMode, setManualDarkMode] = useState<boolean | null | undefined>(() => getCachedThemePreference());
   const [isHapticsEnabled, setIsHapticsEnabled] = useState(true);
   const [musicProvider, setMusicProvider] = useState<MusicProvider>('spotify');
+  const [language, setLanguagePref] = useState<AppLanguage>('system');
   const scrollViewRef = useRef<ScrollView>(null);
 
   const loadThemePreference = useCallback(async () => {
@@ -280,6 +285,20 @@ export default function SettingsScreen({ navigation }: any) {
   }, []);
 
   useEffect(() => {
+    const loadLanguagePreference = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(LANGUAGE_KEY);
+        if (stored === 'ja' || stored === 'en' || stored === 'system') {
+          setLanguagePref(stored);
+        }
+      } catch {
+        // Ignore errors.
+      }
+    };
+    void loadLanguagePreference();
+  }, []);
+
+  useEffect(() => {
     const subscription = DeviceEventEmitter.addListener('theme:changed', (nextValue?: boolean) => {
       if (typeof nextValue !== 'boolean') return;
       setManualDarkMode(nextValue);
@@ -307,6 +326,12 @@ export default function SettingsScreen({ navigation }: any) {
     if (musicProvider === 'apple') return 'Apple Music';
     return 'Spotify';
   }, [musicProvider]);
+
+  const languageValueLabel = useMemo(() => {
+    if (language === 'ja') return t('settings.language.japanese');
+    if (language === 'en') return t('settings.language.english');
+    return t('settings.language.system');
+  }, [language, t]);
 
   const handleToggleDarkMode = useCallback(async (nextValue: boolean) => {
     setManualDarkMode(nextValue);
@@ -341,6 +366,7 @@ export default function SettingsScreen({ navigation }: any) {
         { id: 'dark-mode', label: t('settings.items.darkMode') },
         { id: 'haptics', label: hapticsLabel },
         { id: 'music-provider', label: t('settings.items.musicProvider'), value: musicProviderValueLabel },
+        { id: 'language', label: t('settings.items.language'), value: languageValueLabel },
         { id: 'icloud-sync', label: t('settings.items.icloudSync') },
       ],
     },
@@ -444,6 +470,17 @@ export default function SettingsScreen({ navigation }: any) {
       setMusicProvider('spotify');
     });
 
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener('language:changed', (nextValue?: AppLanguage) => {
+      if (nextValue === 'ja' || nextValue === 'en' || nextValue === 'system') {
+        setLanguagePref(nextValue);
+      }
+    });
     return () => {
       subscription.remove();
     };
@@ -647,6 +684,8 @@ export default function SettingsScreen({ navigation }: any) {
                         navigation.navigate('ICloudSync');
                       } else if (item.id === 'music-provider') {
                         navigation.navigate('MusicProvider');
+                      } else if (item.id === 'language') {
+                        navigation.navigate('Language');
                       } else if (item.id === 'notifications') {
                         navigation.navigate('NotificationSettings');
                       } else if (item.id === 'delete') {
@@ -724,10 +763,10 @@ export default function SettingsScreen({ navigation }: any) {
                         />
                       ) : null}
                       {item.value && <Text style={styles.rowValue}>{item.value}</Text>}
-                      {!item.destructive && item.id !== 'about' && item.id !== 'faq' && item.id !== 'icloud-sync' && item.id !== 'music-provider' && item.id !== 'dark-mode' && item.id !== 'haptics' && item.id !== 'notifications' && (
+                      {!item.destructive && item.id !== 'about' && item.id !== 'faq' && item.id !== 'icloud-sync' && item.id !== 'music-provider' && item.id !== 'language' && item.id !== 'dark-mode' && item.id !== 'haptics' && item.id !== 'notifications' && (
                         <MaterialIcons name="arrow-outward" size={20} color={palette.iconColor} />
                       )}
-                      {(item.id === 'faq' || item.id === 'icloud-sync' || item.id === 'music-provider' || item.id === 'notifications') && (
+                      {(item.id === 'faq' || item.id === 'icloud-sync' || item.id === 'music-provider' || item.id === 'language' || item.id === 'notifications') && (
                         <MaterialIcons name="arrow-forward-ios" size={15} color={palette.iconColor} />
                       )}
                     </View>
@@ -1440,6 +1479,114 @@ export function MusicProviderScreen({ navigation }: any) {
         </View>
 
         <Text style={providerStyles.caption}>{t('settings.musicProvider.caption')}</Text>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+export function LanguageScreen({ navigation }: any) {
+  const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+  const { isDark: isSystemDark } = useTheme();
+  const [manualDarkMode, setManualDarkMode] = useState<boolean | null | undefined>(() => getCachedThemePreference());
+  const [selectedLanguage, setSelectedLanguage] = useState<AppLanguage>('system');
+
+  const loadThemePreference = useCallback(async () => {
+    const value = await hydrateThemePreference();
+    setManualDarkMode(value);
+  }, []);
+
+  useEffect(() => {
+    void loadThemePreference();
+  }, [loadThemePreference]);
+
+  useEffect(() => {
+    const loadLanguage = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(LANGUAGE_KEY);
+        if (stored === 'ja' || stored === 'en' || stored === 'system') {
+          setSelectedLanguage(stored);
+        }
+      } catch {
+        // Ignore errors.
+      }
+    };
+    void loadLanguage();
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadThemePreference();
+    }, [loadThemePreference])
+  );
+
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener('theme:changed', (nextValue?: boolean) => {
+      if (typeof nextValue !== 'boolean') return;
+      setManualDarkMode(nextValue);
+    });
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  const isDarkMode = manualDarkMode ?? false;
+  const themeForLang = isDarkMode ? darkTheme : lightTheme;
+  const palette = useMemo(() => buildPalette(isDarkMode, themeForLang.primary), [isDarkMode, themeForLang.primary]);
+  const langStyles = useMemo(() => createMusicProviderStyles(palette), [palette]);
+
+  const saveAndClose = useCallback(
+    async (nextValue: AppLanguage) => {
+      setSelectedLanguage(nextValue);
+      DeviceEventEmitter.emit('language:changed', nextValue);
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      await applyLanguageSetting(nextValue);
+      navigation.goBack();
+    },
+    [navigation]
+  );
+
+  const options: Array<{ value: AppLanguage; label: string }> = [
+    { value: 'system', label: t('settings.language.system') },
+    { value: 'ja', label: t('settings.language.japanese') },
+    { value: 'en', label: t('settings.language.english') },
+  ];
+
+  return (
+    <SafeAreaView style={[langStyles.container, { backgroundColor: palette.screenBackground }]} edges={['left', 'right', 'bottom']}>
+      <BlurView tint={isDarkMode ? 'dark' : 'light'} intensity={80} style={[langStyles.glassHeader, { paddingTop: insets.top + 8 }]}>
+        <View style={langStyles.header}>
+          <TouchableOpacity style={langStyles.backButton} onPress={() => navigation.goBack()}>
+            <MaterialIcons name="arrow-back-ios" size={22} color={palette.primaryText} />
+          </TouchableOpacity>
+          <Text style={langStyles.headerTitle}>{t('settings.language.header')}</Text>
+          <View style={{ width: 44 }} />
+        </View>
+      </BlurView>
+
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={langStyles.content}>
+        <Text style={langStyles.sectionLabel}>{t('settings.language.sectionLabel')}</Text>
+        <View style={langStyles.card}>
+          {options.map((opt, index) => (
+            <TouchableOpacity
+              key={opt.value}
+              style={[langStyles.optionRow, index === options.length - 1 && langStyles.optionRowLast]}
+              activeOpacity={0.78}
+              onPress={() => { void saveAndClose(opt.value); }}
+            >
+              <View style={langStyles.optionLeft}>
+                <View style={[langStyles.radioOuter, selectedLanguage === opt.value && langStyles.radioOuterActive]}>
+                  {selectedLanguage === opt.value ? <View style={langStyles.radioInner} /> : null}
+                </View>
+                <Text style={langStyles.optionLabel}>{opt.label}</Text>
+              </View>
+              {selectedLanguage === opt.value ? (
+                <MaterialIcons name="check" size={20} color={palette.primaryText} />
+              ) : null}
+            </TouchableOpacity>
+          ))}
+        </View>
+        <Text style={langStyles.caption}>{t('settings.language.caption')}</Text>
       </ScrollView>
     </SafeAreaView>
   );

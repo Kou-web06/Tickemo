@@ -1004,13 +1004,13 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
           <TouchableOpacity style={styles.ocrReviewCloseButton} onPress={handleCancelOcrReview}>
             <Ionicons name="close" size={24} color="#7A7A7A" />
           </TouchableOpacity>
-          <Text style={styles.ocrReviewHeaderTitle}>読み取った結果の確認</Text>
+          <Text style={styles.ocrReviewHeaderTitle}>{t('liveEdit.ocrReview.headerTitle')}</Text>
           <View style={styles.ocrReviewHeaderSpacer} />
         </View>
 
         <View style={styles.ocrReviewSummaryWrap}>
-          <Text style={styles.ocrReviewSummaryTitle}>{`${ocrReviewItems.length}曲を読み取りました`}</Text>
-          <Text style={styles.ocrReviewSummarySub}>タップで編集</Text>
+          <Text style={styles.ocrReviewSummaryTitle}>{t('liveEdit.ocrReview.summary', { count: ocrReviewItems.length })}</Text>
+          <Text style={styles.ocrReviewSummarySub}>{t('liveEdit.ocrReview.tapToEdit')}</Text>
         </View>
 
         <DraggableFlatList
@@ -1041,7 +1041,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
                   style={[styles.ocrReviewInput, item.isSuspicious && styles.ocrReviewInputSuspicious]}
                   value={item.text}
                   onChangeText={(value) => handleReviewItemChange(item.id, value)}
-                  placeholder="曲名を入力"
+                  placeholder={t('liveEdit.ocrReview.songPlaceholder')}
                   placeholderTextColor="#BDBDBD"
                 />
                 {item.isSuspicious ? (
@@ -1064,7 +1064,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
 
         <View style={[styles.ocrReviewBottomCtaWrap, { paddingBottom: Math.max(14, insets.bottom + 6) }]}>
           <TouchableOpacity style={styles.ocrReviewBottomCta} onPress={handleConfirmOcrDraft}>
-            <Text style={styles.ocrReviewBottomCtaText}>この内容で追加</Text>
+            <Text style={styles.ocrReviewBottomCtaText}>{t('liveEdit.setlistEditor.review.confirm')}</Text>
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -1172,7 +1172,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
         <View style={styles.sectionBlock}>
           {!isMultiArtistLive && (
             <>
-              {renderLabel('アーティスト名', true)}
+              {renderLabel(t('liveEdit.labels.artistName'), true)}
               {artists.map((artistName, index) => (
                 <View key={`artist-${index}`} style={[styles.artistFieldContainer, { zIndex: 1000 - index }]}>
                   <ArtistInput
@@ -1187,7 +1187,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
             </>
           )}
 
-          {renderLabel('イベント名', true)}
+          {renderLabel(t('liveEdit.labels.liveName'), true)}
           <TextInput
             style={styles.baseInput}
             value={name}
@@ -1196,7 +1196,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
             placeholderTextColor="#CCCCCC"
           />
 
-          {renderLabel('イベントの種類')}
+          {renderLabel(t('liveEdit.labels.liveType'))}
           <TouchableOpacity style={styles.liveTypeSelector} activeOpacity={0.8} onPress={() => setShowLiveTypeModal(true)}>
             <MaterialCommunityIcons
               name={LIVE_TYPE_ICON_MAP[liveType] as keyof typeof MaterialCommunityIcons.glyphMap}
@@ -1212,19 +1212,19 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
         </View>
 
         <View style={styles.sectionBlock}>
-          {renderLabel('日付', true)}
+          {renderLabel(t('liveEdit.labels.date'), true)}
           <DateInputField value={date} onChange={setDate} />
 
           <View style={styles.timeRowWrap}>
             <View style={styles.timeColumn}>
-              <Text style={styles.inputLabel}>開場</Text>
+              <Text style={styles.inputLabel}>{t('liveEdit.labels.doorsOpen')}</Text>
               <TouchableOpacity style={styles.baseInput} onPress={() => setShowStartTimeModal(true)}>
                 <Text style={styles.timeText}>{startTime || '16:00'}</Text>
               </TouchableOpacity>
             </View>
             <Text style={styles.timeArrow}>{'------------->'}</Text>
             <View style={styles.timeColumn}>
-              <Text style={styles.inputLabel}>開演</Text>
+              <Text style={styles.inputLabel}>{t('liveEdit.labels.showStart')}</Text>
               <TouchableOpacity style={styles.baseInput} onPress={() => setShowEndTimeModal(true)}>
                 <Text style={styles.timeText}>{endTime || '18:00'}</Text>
               </TouchableOpacity>
@@ -1233,7 +1233,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
         </View>
 
         <View style={styles.sectionBlock}>
-          {renderLabel('会場', true)}
+          {renderLabel(t('liveEdit.labels.venue'), true)}
           <TextInput
             style={styles.baseInput}
             value={venue}
@@ -1242,7 +1242,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
             placeholderTextColor="#CCCCCC"
           />
 
-          <Text style={styles.inputLabel}>座席</Text>
+          <Text style={styles.inputLabel}>{t('liveEdit.labels.seat')}</Text>
           <TextInput
             style={styles.baseInput}
             value={seat}
@@ -1251,7 +1251,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
             placeholderTextColor="#CCCCCC"
           />
 
-          <Text style={styles.inputLabel}>料金</Text>
+          <Text style={styles.inputLabel}>{t('liveEdit.labels.price')}</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
             <TextInput
               style={[styles.baseInput, { flex: 1, textAlign: 'right', marginBottom: 0 }]}
@@ -1263,7 +1263,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
               placeholder="0"
               placeholderTextColor="#CCCCCC"
             />
-            <Text style={{ fontSize: 16, color: '#555555', marginLeft: 8, marginBottom: 12 }}>円</Text>
+            <Text style={{ fontSize: 16, color: '#555555', marginLeft: 8, marginBottom: 12 }}>{t('liveEdit.priceUnit')}</Text>
           </View>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
             {[3000, 5000, 8000, 10000, 15000].map((preset) => (
@@ -1279,7 +1279,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
                   { fontSize: 14, color: '#444444' },
                   ticketPriceText === String(preset) && { color: '#FFFFFF', fontWeight: '600' },
                 ]}>
-                  {preset.toLocaleString()}円
+                  {t('liveEdit.priceFormat', { value: preset.toLocaleString() })}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -1302,7 +1302,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
                   )}
                 </View>
 
-                {renderLabel('アーティスト名', true)}
+                {renderLabel(t('liveEdit.labels.artistName'), true)}
                 <ArtistInput
                   value={performance.artistName}
                   imageUrl={performance.artistImageUrl}
@@ -1313,7 +1313,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
 
                 <View style={styles.performanceSetlistWrap}>
                   <SetlistInputWithTags
-                    title="セットリスト"
+                    title={t('liveEdit.labels.setlistTitle')}
                     value={performance.setlist}
                     onChangeText={(value) => handleChangePerformance(performance.id, 'setlist', value)}
                     placeholder={t('liveEdit.setlistEditor.placeholders.lineByLineInput')}
@@ -1324,13 +1324,13 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
             ))}
 
             <TouchableOpacity style={styles.addPerformanceButton} onPress={handleAddPerformance} activeOpacity={0.85}>
-              <Text style={styles.addPerformanceButtonText}>+ 別のアーティストを追加</Text>
+              <Text style={styles.addPerformanceButtonText}>{t('liveEdit.addArtist')}</Text>
             </TouchableOpacity>
           </>
         ) : (
           <View style={styles.sectionBlock}>
             <SetlistInputWithTags
-              title="セットリスト"
+              title={t('liveEdit.labels.setlistTitle')}
               value={setlistText}
               onChangeText={setSetlistText}
               placeholder={t('liveEdit.setlistEditor.placeholders.lineByLineInput')}
@@ -1351,7 +1351,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
         )}
 
         <View style={styles.sectionBlock}>
-          <Text style={styles.inputLabel}>感想</Text>
+          <Text style={styles.inputLabel}>{t('liveEdit.labels.memo')}</Text>
           <TextInput
             ref={memoInputRef}
             style={[styles.baseInput, styles.multilineMemo]}
@@ -1375,7 +1375,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
             keyboardType="url"
           />
 
-          <Text style={styles.inputLabel}>カバーアート</Text>
+          <Text style={styles.inputLabel}>{t('liveEdit.labels.coverArt')}</Text>
           {imageUrls.length > 0 ? (
             <View style={styles.jacketContainer}>
               <Image source={{ uri: imageUrls[0] }} style={styles.jacketImage} contentFit="cover" />
@@ -1423,7 +1423,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
       <Modal visible={showLiveTypeModal} transparent animationType="none" onRequestClose={() => setShowLiveTypeModal(false)}>
         <TouchableOpacity style={styles.liveTypePickerOverlay} activeOpacity={1} onPress={() => setShowLiveTypeModal(false)}>
           <View style={styles.liveTypePickerContent}>
-            <Text style={styles.liveTypePickerTitle}>イベントの種類</Text>
+            <Text style={styles.liveTypePickerTitle}>{t('liveEdit.labels.liveType')}</Text>
             <ScrollView style={styles.liveTypePickerScroll}>
               {LIVE_TYPES.map((type, index) => {
                 const selected = liveType === type;
@@ -1484,7 +1484,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
               },
             ]}
           >
-            <Text style={styles.setlistOcrSourceTitle}>まとめて登録（β版）</Text>
+            <Text style={styles.setlistOcrSourceTitle}>{t('liveEdit.setlistEditor.popover.bulkRegister')}</Text>
 
             <TouchableOpacity
               style={styles.setlistOcrSourceButton}

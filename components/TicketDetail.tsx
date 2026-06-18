@@ -55,7 +55,7 @@ interface LiveInfo {
   setlistSongs?: SetlistItem[];
 }
 
-const FALLBACK_PRICE = '¥15,000';
+const FALLBACK_PRICE = '';
 const COLLAPSED_TRACK_COUNT = 5;
 const MUSIC_PROVIDER_KEY = '@music_provider';
 const SEEN_NEW_SETLIST_TRACKS_KEY = '@seen_new_setlist_tracks';
@@ -158,6 +158,7 @@ const LIVE_TYPE_EN_LABEL_MAP: Record<string, string> = {
   festival: 'Festival',
   'fc-only': 'FC Only',
   streaming: 'Streaming',
+  sports: 'Sports',
 };
 
 export const TicketDetail: React.FC<TicketDetailProps> = ({ record, onBack }) => {

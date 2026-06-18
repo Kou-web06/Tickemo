@@ -674,6 +674,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
   );
 
   const isStreamingLive = liveType === 'streaming';
+  const isSportsLive = liveType === 'sports';
   const isEditMode = Boolean(initialData);
   const hasArtistValue = isMultiArtistLive
     ? performances.some((entry) => entry.artistName.trim().length > 0)
@@ -692,7 +693,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
   const isFormValid =
     name.trim().length > 0 &&
     hasArtistValue &&
-    hasDictionaryRegistered &&
+    (isSportsLive || hasDictionaryRegistered) &&
     venue.trim().length > 0 &&
     Boolean(date);
 
@@ -770,6 +771,72 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
   const handleRemoveImage = () => {
     hasUserEditedImages.current = true;
     setImageUrls([]);
+  };
+
+  const handleAddSportsPhoto = async () => {
+    if (imageUrls.length >= 6) return;
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(t('liveEdit.alerts.permissionRequiredTitle'), t('liveEdit.alerts.photoPermissionRequired'));
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        allowsMultipleSelection: false,
+        base64: false,
+        quality: 1,
+      });
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const resolvedUri = await resolvePickedImageUri(result.assets[0]);
+        if (!resolvedUri) {
+          Alert.alert(t('liveEdit.alerts.error'), t('liveEdit.alerts.imageLoadFailed'));
+          return;
+        }
+        hasUserEditedImages.current = true;
+        setImageUrls((prev) => [...prev, resolvedUri]);
+      }
+    } catch {
+      Alert.alert(t('liveEdit.alerts.error'), t('liveEdit.alerts.imagePickFailed'));
+    }
+  };
+
+  const handleRemoveSportsPhoto = (index: number) => {
+    hasUserEditedImages.current = true;
+    setImageUrls((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handlePickPlayerPhoto = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(t('liveEdit.alerts.permissionRequiredTitle'), t('liveEdit.alerts.photoPermissionRequired'));
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        allowsMultipleSelection: false,
+        aspect: [1, 1],
+        base64: false,
+        quality: 1,
+      });
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const resolvedUri = await resolvePickedImageUri(result.assets[0]);
+        if (!resolvedUri) {
+          Alert.alert(t('liveEdit.alerts.error'), t('liveEdit.alerts.imageLoadFailed'));
+          return;
+        }
+        handleArtistChange(0, artists[0] || '', resolvedUri);
+      }
+    } catch {
+      Alert.alert(t('liveEdit.alerts.error'), t('liveEdit.alerts.imagePickFailed'));
+    }
+  };
+
+  const handleRemovePlayerPhoto = () => {
+    handleArtistChange(0, artists[0] || '', '');
   };
 
   const spinOcrIcon = () => {
@@ -1170,7 +1237,33 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
         scrollEnabled={!Object.values(artistDropdownVisibility).some(Boolean)}
       >
         <View style={styles.sectionBlock}>
-          {!isMultiArtistLive && (
+          {isSportsLive ? (
+            <>
+              {renderLabel(t('liveEdit.labels.playerOrTeam'), true)}
+              <TextInput
+                style={styles.baseInput}
+                value={artists[0] || ''}
+                onChangeText={(value) => handleArtistChange(0, value, artistImageUrls[0] || '')}
+                placeholder={t('liveEdit.placeholders.playerOrTeam')}
+                placeholderTextColor="#CCCCCC"
+              />
+              <Text style={styles.inputLabel}>{t('liveEdit.labels.playerPhoto')}</Text>
+              {artistImageUrls[0] ? (
+                <View style={styles.jacketContainer}>
+                  <Image source={{ uri: artistImageUrls[0] }} style={styles.jacketImage} contentFit="cover" />
+                  <TouchableOpacity style={styles.jacketRemoveButton} onPress={handleRemovePlayerPhoto}>
+                    <Ionicons name="close-circle" size={28} color="#ff4444" />
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <TouchableOpacity style={styles.emptyJacketContainer} onPress={handlePickPlayerPhoto} activeOpacity={0.7}>
+                  <View style={styles.emptyJacketContent}>
+                    <Ionicons name="person-outline" size={30} color="#A3A3A3" />
+                  </View>
+                </TouchableOpacity>
+              )}
+            </>
+          ) : !isMultiArtistLive ? (
             <>
               {renderLabel(t('liveEdit.labels.artistName'), true)}
               {artists.map((artistName, index) => (
@@ -1185,7 +1278,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
                 </View>
               ))}
             </>
-          )}
+          ) : null}
 
           {renderLabel(t('liveEdit.labels.liveName'), true)}
           <TextInput
@@ -1247,7 +1340,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
             style={styles.baseInput}
             value={seat}
             onChangeText={setSeat}
-            placeholder={isStreamingLive ? t('liveEdit.placeholders.watchEnvironment') : t('liveEdit.placeholders.seat')}
+            placeholder={isStreamingLive ? t('liveEdit.placeholders.watchEnvironment') : isSportsLive ? t('liveEdit.placeholders.sportsSeat') : t('liveEdit.placeholders.seat')}
             placeholderTextColor="#CCCCCC"
           />
 
@@ -1287,7 +1380,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
 
         </View>
 
-        {isMultiArtistLive ? (
+        {!isSportsLive && isMultiArtistLive ? (
           <>
             {performances.map((performance, index) => (
               <View key={performance.id} style={styles.performanceBlock}>
@@ -1327,7 +1420,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
               <Text style={styles.addPerformanceButtonText}>{t('liveEdit.addArtist')}</Text>
             </TouchableOpacity>
           </>
-        ) : (
+        ) : !isSportsLive ? (
           <View style={styles.sectionBlock}>
             <SetlistInputWithTags
               title={t('liveEdit.labels.setlistTitle')}
@@ -1348,7 +1441,7 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
               }
             />
           </View>
-        )}
+        ) : null}
 
         <View style={styles.sectionBlock}>
           <Text style={styles.inputLabel}>{t('liveEdit.labels.memo')}</Text>
@@ -1375,20 +1468,43 @@ export default function LiveEditScreen({ initialData, onSave, onCancel, focusMem
             keyboardType="url"
           />
 
-          <Text style={styles.inputLabel}>{t('liveEdit.labels.coverArt')}</Text>
-          {imageUrls.length > 0 ? (
-            <View style={styles.jacketContainer}>
-              <Image source={{ uri: imageUrls[0] }} style={styles.jacketImage} contentFit="cover" />
-              <TouchableOpacity style={styles.jacketRemoveButton} onPress={handleRemoveImage}>
-                <Ionicons name="close-circle" size={28} color="#ff4444" />
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <TouchableOpacity style={styles.emptyJacketContainer} onPress={handlePickImage} activeOpacity={0.7}>
-              <View style={styles.emptyJacketContent}>
-                <HugeiconsIcon icon={Add01Icon} size={30} color="#A3A3A3" strokeWidth={3.0} />
+          {isSportsLive ? (
+            <>
+              <Text style={styles.inputLabel}>{t('liveEdit.labels.gamePhotos')}</Text>
+              <View style={styles.sportsPhotoGrid}>
+                {imageUrls.map((uri, index) => (
+                  <View key={index} style={styles.sportsPhotoSlot}>
+                    <Image source={{ uri }} style={styles.sportsPhotoImage} contentFit="cover" />
+                    <TouchableOpacity style={styles.sportsPhotoRemove} onPress={() => handleRemoveSportsPhoto(index)}>
+                      <Ionicons name="close-circle" size={22} color="#ff4444" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+                {imageUrls.length < 6 && (
+                  <TouchableOpacity style={styles.sportsPhotoAdd} onPress={handleAddSportsPhoto} activeOpacity={0.7}>
+                    <HugeiconsIcon icon={Add01Icon} size={24} color="#A3A3A3" strokeWidth={3.0} />
+                  </TouchableOpacity>
+                )}
               </View>
-            </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <Text style={styles.inputLabel}>{t('liveEdit.labels.coverArt')}</Text>
+              {imageUrls.length > 0 ? (
+                <View style={styles.jacketContainer}>
+                  <Image source={{ uri: imageUrls[0] }} style={styles.jacketImage} contentFit="cover" />
+                  <TouchableOpacity style={styles.jacketRemoveButton} onPress={handleRemoveImage}>
+                    <Ionicons name="close-circle" size={28} color="#ff4444" />
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <TouchableOpacity style={styles.emptyJacketContainer} onPress={handlePickImage} activeOpacity={0.7}>
+                  <View style={styles.emptyJacketContent}>
+                    <HugeiconsIcon icon={Add01Icon} size={30} color="#A3A3A3" strokeWidth={3.0} />
+                  </View>
+                </TouchableOpacity>
+              )}
+            </>
           )}
         </View>
       </ScrollView>
@@ -2135,5 +2251,37 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '800',
+  },
+  sportsPhotoGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+  },
+  sportsPhotoSlot: {
+    width: 100,
+    height: 100,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  sportsPhotoImage: {
+    width: '100%',
+    height: '100%',
+  },
+  sportsPhotoRemove: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+  },
+  sportsPhotoAdd: {
+    width: 100,
+    height: 100,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#DDDDDD',
+    borderStyle: 'dashed',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FAFAFA',
   },
 });

@@ -1,4 +1,4 @@
-export const LIVE_TYPE_KEYS = ['one-man', 'two-man', 'festival', 'fc-only', 'streaming'] as const;
+export const LIVE_TYPE_KEYS = ['one-man', 'two-man', 'festival', 'fc-only', 'streaming', 'sports'] as const;
 
 export type LiveTypeKey = (typeof LIVE_TYPE_KEYS)[number];
 
@@ -21,6 +21,7 @@ const LIVE_TYPE_INDEX_MAP: Record<LiveTypeKey, number> = {
   festival: 2,
   'fc-only': 3,
   streaming: 4,
+  sports: 5,
 };
 
 export const LIVE_TYPE_ICON_MAP: Record<LiveTypeKey, string> = {
@@ -29,6 +30,7 @@ export const LIVE_TYPE_ICON_MAP: Record<LiveTypeKey, string> = {
   festival: 'account-group',
   'fc-only': 'account-star',
   streaming: 'radio',
+  sports: 'baseball-diamond-outline',
 };
 
 export const normalizeLiveType = (value?: string): LiveTypeKey => {
